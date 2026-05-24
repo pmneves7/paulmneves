@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Convert between neutron energy (meV) and wavelength (Å)." />
-  <title>Neutron energy ↔ wavelength | Paul M. Neves</title>
+  <meta name="description" content="Convert between energy, wavelength, frequency, temperature, and neutron scattering units." />
+  <title>Common conversions | Paul M. Neves</title>
   <link rel="stylesheet" href="../css/site.css" />
 </head>
 <body>
@@ -25,26 +25,81 @@
 
   <main>
     <header class="page-header">
-      <h1>Neutron energy ↔ wavelength</h1>
+      <h1>Common conversions</h1>
       <p class="lead">
-        Convert between neutron energy in meV and wavelength in ångströms using
-        <em>E</em> = 81.81 / λ² (with <em>E</em> in meV and λ in Å).
+        Convert between common energy, wavelength, frequency, temperature, and neutron scattering units.
       </p>
     </header>
 
-    <div class="tool-panel">
-      <div class="tool-field">
-        <label for="energy">Energy (meV)</label>
-        <input type="number" id="energy" step="any" min="0" placeholder="e.g. 25" />
+    <div class="tool-panel tool-panel-wide">
+      <h2>General energy converter</h2>
+      <p class="tool-note">
+        Uses <em>E</em> = <em>k</em><sub>B</sub><em>T</em> = <em>hf</em> = <em>hc</em> / λ.
+      </p>
+      <div class="tool-grid">
+        <div class="tool-field">
+          <label for="temperature">Temperature (K)</label>
+          <input type="text" id="temperature" inputmode="decimal" placeholder="e.g. 300" />
+        </div>
+        <div class="tool-field">
+          <label for="energy">Energy (eV)</label>
+          <input type="text" id="energy" inputmode="decimal" placeholder="e.g. 25 meV" />
+        </div>
+        <div class="tool-field">
+          <label for="wavenumber">Wavenumber (cm⁻¹)</label>
+          <input type="text" id="wavenumber" inputmode="decimal" placeholder="e.g. 8065.54" />
+        </div>
+        <div class="tool-field">
+          <label for="wavelength">Wavelength (m)</label>
+          <input type="text" id="wavelength" inputmode="decimal" placeholder="e.g. 500 nm" />
+        </div>
+        <div class="tool-field">
+          <label for="frequency">Frequency (Hz)</label>
+          <input type="text" id="frequency" inputmode="decimal" placeholder="e.g. 241.799 THz" />
+        </div>
       </div>
-      <div class="tool-field">
-        <label for="wavelength">Wavelength (Å)</label>
-        <input type="number" id="wavelength" step="any" min="0" placeholder="e.g. 1.8" />
+    </div>
+
+    <div class="tool-panel tool-panel-wide">
+      <h2>Neutron energy ↔ wavelength</h2>
+      <p class="tool-note">
+        Uses the non-relativistic neutron de Broglie relation <em>E</em> = 81.81 / λ², with <em>E</em> in meV and λ in Å.
+      </p>
+      <div class="tool-grid">
+        <div class="tool-field">
+          <label for="neutron-energy">Energy (meV)</label>
+          <input type="number" id="neutron-energy" step="any" min="0" placeholder="e.g. 25" />
+        </div>
+        <div class="tool-field">
+          <label for="neutron-wavelength">Wavelength (Å)</label>
+          <input type="number" id="neutron-wavelength" step="any" min="0" placeholder="e.g. 1.8" />
+        </div>
+      </div>
+    </div>
+
+    <div class="tool-panel tool-panel-wide">
+      <h2>Neutron momentum transfer</h2>
+      <p class="tool-note">
+        Converts between real-space distance and momentum transfer using <em>Q</em> = 2π / <em>d</em>. If the neutron wavelength above is set, it also converts to scattering angle using <em>Q</em> = 4π sin(θ) / λ.
+      </p>
+      <div class="tool-grid">
+        <div class="tool-field">
+          <label for="momentum-distance">Distance d (Å)</label>
+          <input type="number" id="momentum-distance" step="any" min="0" placeholder="e.g. 3.14" />
+        </div>
+        <div class="tool-field">
+          <label for="momentum-q">Q (Å⁻¹)</label>
+          <input type="number" id="momentum-q" step="any" min="0" placeholder="e.g. 2" />
+        </div>
+        <div class="tool-field">
+          <label for="momentum-two-theta">2θ (deg)</label>
+          <input type="number" id="momentum-two-theta" step="any" min="0" max="180" placeholder="requires neutron λ" />
+        </div>
       </div>
     </div>
 
     <p class="tool-note tool-note-panel">
-      Edit either field; the other updates automatically. Uses the de Broglie relation for cold/thermal neutrons.
+      Edit any field within a converter; matching fields update automatically. The general converter accepts SI prefixes such as meV, km, nm, kHz, MHz, and GHz. Frequency outputs use prefixes up to THz through 10¹⁵ Hz, then switch to scientific notation.
     </p>
 
     <p class="back-link-panel"><a href="../tools.html">← Back to tools</a></p>
@@ -56,47 +111,342 @@
 
   <script src="../js/site.js"></script>
   <script>
-    const energyInput = document.getElementById("energy");
-    const wavelengthInput = document.getElementById("wavelength");
+    const inputs = {
+      temperature: document.getElementById("temperature"),
+      energy: document.getElementById("energy"),
+      wavenumber: document.getElementById("wavenumber"),
+      wavelength: document.getElementById("wavelength"),
+      frequency: document.getElementById("frequency")
+    };
+
+    const constants = {
+      boltzmannEvPerK: 8.617333262145e-5,
+      planckEvS: 4.135667696e-15,
+      speedOfLight: 299792458
+    };
+
+    const prefixes = {
+      q: 1e-30,
+      r: 1e-27,
+      y: 1e-24,
+      z: 1e-21,
+      a: 1e-18,
+      f: 1e-15,
+      p: 1e-12,
+      n: 1e-9,
+      u: 1e-6,
+      "µ": 1e-6,
+      m: 1e-3,
+      c: 1e-2,
+      d: 1e-1,
+      da: 1e1,
+      h: 1e2,
+      k: 1e3,
+      K: 1e3,
+      M: 1e6,
+      G: 1e9,
+      T: 1e12,
+      P: 1e15,
+      E: 1e18
+    };
+
+    const orderedPrefixes = [
+      ["P", 1e15],
+      ["T", 1e12],
+      ["G", 1e9],
+      ["M", 1e6],
+      ["k", 1e3],
+      ["", 1],
+      ["m", 1e-3],
+      ["µ", 1e-6],
+      ["n", 1e-9],
+      ["p", 1e-12],
+      ["f", 1e-15]
+    ];
+
     let updating = false;
 
-    function format(value) {
+    function formatNumber(value, digits = 6) {
       if (!Number.isFinite(value) || value <= 0) return "";
       return value < 0.01 || value >= 10000
         ? value.toExponential(4)
-        : String(Number(value.toPrecision(6)));
+        : String(Number(value.toPrecision(digits)));
     }
 
-    function energyFromWavelength(lambda) {
+    function formatWithPrefix(value, unit, options = {}) {
+      if (!Number.isFinite(value) || value <= 0) return "";
+
+      if (options.scientificAbove && value > options.scientificAbove) {
+        return `${value.toExponential(6)} ${unit}`;
+      }
+
+      const prefixList = options.prefixes || orderedPrefixes;
+      const selected = prefixList.find(([, factor]) => {
+        const scaled = value / factor;
+        return scaled >= 1 && scaled < 1000;
+      }) || prefixList[prefixList.length - 1];
+
+      const [prefix, factor] = selected;
+      return `${formatNumber(value / factor)} ${prefix}${unit}`;
+    }
+
+    function parsePrefixedValue(rawValue, baseUnit) {
+      const trimmed = rawValue.trim();
+      if (!trimmed) return null;
+
+      const match = trimmed.match(/^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)\s*([A-Za-zµμ]*)$/i);
+      if (!match) return NaN;
+
+      const value = Number(match[1]);
+      if (!Number.isFinite(value) || value <= 0) return NaN;
+
+      const normalizedUnit = match[2].replace("μ", "µ");
+      if (!normalizedUnit) return value;
+      if (normalizedUnit === baseUnit) return value;
+
+      const prefix = normalizedUnit.slice(0, -baseUnit.length);
+      const unit = normalizedUnit.slice(-baseUnit.length);
+      if (unit.toLowerCase() !== baseUnit.toLowerCase() || !(prefix in prefixes)) return NaN;
+
+      return value * prefixes[prefix];
+    }
+
+    function energyFromInput(id) {
+      const value = inputs[id].value;
+      if (!value.trim()) return null;
+
+      if (id === "temperature") {
+        const temperature = Number(value);
+        return Number.isFinite(temperature) && temperature > 0
+          ? temperature * constants.boltzmannEvPerK
+          : NaN;
+      }
+
+      if (id === "energy") {
+        return parsePrefixedValue(value, "eV");
+      }
+
+      if (id === "wavenumber") {
+        const wavenumber = Number(value);
+        return Number.isFinite(wavenumber) && wavenumber > 0
+          ? constants.planckEvS * constants.speedOfLight * wavenumber * 100
+          : NaN;
+      }
+
+      if (id === "wavelength") {
+        const wavelength = parsePrefixedValue(value, "m");
+        return Number.isFinite(wavelength) && wavelength > 0
+          ? constants.planckEvS * constants.speedOfLight / wavelength
+          : NaN;
+      }
+
+      if (id === "frequency") {
+        const frequency = parsePrefixedValue(value, "Hz");
+        return Number.isFinite(frequency) && frequency > 0
+          ? constants.planckEvS * frequency
+          : NaN;
+      }
+
+      return NaN;
+    }
+
+    function valuesFromEnergy(energyEv) {
+      return {
+        temperature: energyEv / constants.boltzmannEvPerK,
+        energy: energyEv,
+        wavenumber: energyEv / (constants.planckEvS * constants.speedOfLight * 100),
+        wavelength: constants.planckEvS * constants.speedOfLight / energyEv,
+        frequency: energyEv / constants.planckEvS
+      };
+    }
+
+    function renderValue(id, value) {
+      if (id === "temperature") return formatNumber(value);
+      if (id === "energy") return formatWithPrefix(value, "eV");
+      if (id === "wavenumber") return formatNumber(value);
+      if (id === "wavelength") return formatWithPrefix(value, "m");
+      if (id === "frequency") {
+        return formatWithPrefix(value, "Hz", {
+          prefixes: orderedPrefixes.filter(([, factor]) => factor <= 1e12),
+          scientificAbove: 1e15
+        });
+      }
+      return "";
+    }
+
+    function updateFrom(id) {
+      if (updating) return;
+
+      const energyEv = energyFromInput(id);
+      if (energyEv === null) {
+        updating = true;
+        Object.entries(inputs).forEach(([otherId, input]) => {
+          if (otherId !== id) input.value = "";
+        });
+        updating = false;
+        return;
+      }
+
+      if (!Number.isFinite(energyEv) || energyEv <= 0) return;
+
+      const values = valuesFromEnergy(energyEv);
+      updating = true;
+      Object.entries(inputs).forEach(([otherId, input]) => {
+        if (otherId !== id) input.value = renderValue(otherId, values[otherId]);
+      });
+      updating = false;
+    }
+
+    function normalizeFrom(id) {
+      if (updating) return;
+
+      const energyEv = energyFromInput(id);
+      if (!Number.isFinite(energyEv) || energyEv <= 0) return;
+
+      const values = valuesFromEnergy(energyEv);
+      updating = true;
+      Object.entries(inputs).forEach(([otherId, input]) => {
+        input.value = renderValue(otherId, values[otherId]);
+      });
+      updating = false;
+    }
+
+    Object.keys(inputs).forEach((id) => {
+      inputs[id].addEventListener("input", () => updateFrom(id));
+      inputs[id].addEventListener("blur", () => normalizeFrom(id));
+    });
+
+    const neutronEnergyInput = document.getElementById("neutron-energy");
+    const neutronWavelengthInput = document.getElementById("neutron-wavelength");
+    const momentumDistanceInput = document.getElementById("momentum-distance");
+    const momentumQInput = document.getElementById("momentum-q");
+    const momentumTwoThetaInput = document.getElementById("momentum-two-theta");
+    let updatingNeutron = false;
+    let updatingMomentum = false;
+
+    function neutronEnergyFromWavelength(lambda) {
       return 81.81 / (lambda * lambda);
     }
 
-    function wavelengthFromEnergy(energy) {
+    function neutronWavelengthFromEnergy(energy) {
       return Math.sqrt(81.81 / energy);
     }
 
-    energyInput.addEventListener("input", () => {
-      if (updating) return;
-      const energy = parseFloat(energyInput.value);
-      if (!energyInput.value.trim() || !Number.isFinite(energy) || energy <= 0) {
-        if (!wavelengthInput.value.trim()) wavelengthInput.value = "";
+    function neutronWavelengthValue() {
+      const lambda = parseFloat(neutronWavelengthInput.value);
+      return Number.isFinite(lambda) && lambda > 0 ? lambda : null;
+    }
+
+    function qFromDistance(distance) {
+      return 2 * Math.PI / distance;
+    }
+
+    function distanceFromQ(qValue) {
+      return 2 * Math.PI / qValue;
+    }
+
+    function twoThetaFromQ(qValue, wavelength) {
+      const sinTheta = qValue * wavelength / (4 * Math.PI);
+      if (sinTheta < 0 || sinTheta > 1) return null;
+      return 2 * Math.asin(sinTheta) * 180 / Math.PI;
+    }
+
+    function qFromTwoTheta(twoTheta, wavelength) {
+      return 4 * Math.PI * Math.sin(twoTheta * Math.PI / 360) / wavelength;
+    }
+
+    function updateMomentumTwoTheta(qValue = parseFloat(momentumQInput.value)) {
+      if (updatingMomentum) return;
+
+      const wavelength = neutronWavelengthValue();
+      if (!wavelength || !Number.isFinite(qValue) || qValue <= 0) {
+        momentumTwoThetaInput.value = "";
         return;
       }
-      updating = true;
-      wavelengthInput.value = format(wavelengthFromEnergy(energy));
-      updating = false;
+
+      const twoTheta = twoThetaFromQ(qValue, wavelength);
+      momentumTwoThetaInput.value = twoTheta === null ? "" : formatNumber(twoTheta);
+    }
+
+    function updateMomentumFrom(source) {
+      if (updatingMomentum) return;
+
+      const sourceInput = {
+        distance: momentumDistanceInput,
+        q: momentumQInput,
+        twoTheta: momentumTwoThetaInput
+      }[source];
+
+      const value = parseFloat(sourceInput.value);
+      if (!sourceInput.value.trim() || !Number.isFinite(value) || value <= 0) {
+        updatingMomentum = true;
+        if (source !== "distance") momentumDistanceInput.value = "";
+        if (source !== "q") momentumQInput.value = "";
+        if (source !== "twoTheta") momentumTwoThetaInput.value = "";
+        updatingMomentum = false;
+        return;
+      }
+
+      const wavelength = neutronWavelengthValue();
+      let qValue = null;
+
+      if (source === "distance") qValue = qFromDistance(value);
+      if (source === "q") qValue = value;
+      if (source === "twoTheta") {
+        if (!wavelength || value >= 180) return;
+        qValue = qFromTwoTheta(value, wavelength);
+      }
+
+      if (!Number.isFinite(qValue) || qValue <= 0) return;
+
+      updatingMomentum = true;
+      if (source !== "distance") momentumDistanceInput.value = formatNumber(distanceFromQ(qValue));
+      if (source !== "q") momentumQInput.value = formatNumber(qValue);
+      if (source !== "twoTheta") {
+        const twoTheta = wavelength ? twoThetaFromQ(qValue, wavelength) : null;
+        momentumTwoThetaInput.value = twoTheta === null ? "" : formatNumber(twoTheta);
+      }
+      updatingMomentum = false;
+    }
+
+    neutronEnergyInput.addEventListener("input", () => {
+      if (updatingNeutron) return;
+      const energy = parseFloat(neutronEnergyInput.value);
+      if (!neutronEnergyInput.value.trim() || !Number.isFinite(energy) || energy <= 0) {
+        if (!neutronWavelengthInput.value.trim()) neutronWavelengthInput.value = "";
+        updateMomentumTwoTheta();
+        return;
+      }
+      updatingNeutron = true;
+      neutronWavelengthInput.value = formatNumber(neutronWavelengthFromEnergy(energy));
+      updatingNeutron = false;
+      updateMomentumTwoTheta();
     });
 
-    wavelengthInput.addEventListener("input", () => {
-      if (updating) return;
-      const lambda = parseFloat(wavelengthInput.value);
-      if (!wavelengthInput.value.trim() || !Number.isFinite(lambda) || lambda <= 0) {
-        if (!energyInput.value.trim()) energyInput.value = "";
+    neutronWavelengthInput.addEventListener("input", () => {
+      if (updatingNeutron) return;
+      const lambda = parseFloat(neutronWavelengthInput.value);
+      if (!neutronWavelengthInput.value.trim() || !Number.isFinite(lambda) || lambda <= 0) {
+        if (!neutronEnergyInput.value.trim()) neutronEnergyInput.value = "";
+        updateMomentumTwoTheta();
         return;
       }
-      updating = true;
-      energyInput.value = format(energyFromWavelength(lambda));
-      updating = false;
+      updatingNeutron = true;
+      neutronEnergyInput.value = formatNumber(neutronEnergyFromWavelength(lambda));
+      updatingNeutron = false;
+      updateMomentumTwoTheta();
+    });
+
+    momentumDistanceInput.addEventListener("input", () => updateMomentumFrom("distance"));
+    momentumQInput.addEventListener("input", () => updateMomentumFrom("q"));
+    momentumTwoThetaInput.addEventListener("input", () => updateMomentumFrom("twoTheta"));
+
+    [momentumDistanceInput, momentumQInput, momentumTwoThetaInput].forEach((input) => {
+      input.addEventListener("blur", () => {
+        if (!input.value.trim()) return;
+        const value = parseFloat(input.value);
+        if (Number.isFinite(value) && value > 0) input.value = formatNumber(value);
+      });
     });
   </script>
 </body>

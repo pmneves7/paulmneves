@@ -384,6 +384,19 @@ section {
   max-width: none;
 }
 
+.tool-panel + .tool-panel {
+  margin-top: 1.5rem;
+}
+
+.tool-panel h2 {
+  font-size: 1.2rem;
+  margin-bottom: 0.5rem;
+}
+
+.tool-panel > .tool-note {
+  margin: 0 0 1rem;
+}
+
 .tool-section {
   background: transparent;
   border: 0;
