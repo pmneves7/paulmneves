@@ -131,6 +131,10 @@ main {
   margin-bottom: 0.75rem;
 }
 
+.hero .eyebrow {
+  font-size: 1.2rem;
+}
+
 h1 {
   font-size: clamp(2.2rem, 5vw, 4rem);
   line-height: 1.08;
@@ -246,6 +250,25 @@ h3 {
   color: var(--accent);
 }
 
+.back-link-panel {
+  display: inline-flex;
+  background: var(--panel-strong);
+  border: 1px solid rgba(217, 222, 229, 0.8);
+  border-radius: 999px;
+  box-shadow: 0 12px 30px rgba(31, 41, 51, 0.08);
+  margin: 0;
+  padding: 0.65rem 1rem;
+}
+
+.back-link-panel.spaced {
+  margin-top: 1.5rem;
+}
+
+.back-link-panel a {
+  color: var(--accent);
+  font-weight: 650;
+}
+
 .media-card {
   background: var(--panel-strong);
   border: 1px solid var(--border);
@@ -357,6 +380,30 @@ section {
   max-width: 520px;
 }
 
+.tool-panel-wide {
+  max-width: none;
+}
+
+.tool-section {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  margin: 0 0 1.5rem;
+  padding: 0;
+}
+
+.tool-section h2 {
+  font-size: 1.2rem;
+  margin-bottom: 1rem;
+}
+
+.tool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
 .tool-field {
   margin-bottom: 1.25rem;
 }
@@ -369,7 +416,6 @@ section {
 
 .tool-field input {
   width: 100%;
-  max-width: 280px;
   padding: 0.55rem 0.75rem;
   font-size: 1rem;
   border: 1px solid var(--border);
@@ -386,6 +432,69 @@ section {
   color: var(--muted);
   font-size: 0.9rem;
   margin-top: 1.5rem;
+}
+
+.tool-note-panel {
+  background: var(--panel-strong);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  box-shadow: 0 12px 30px rgba(31, 41, 51, 0.08);
+  padding: 1rem 1.25rem;
+}
+
+.tool-section .tool-note {
+  margin: -0.35rem 0 1rem;
+}
+
+.tool-results {
+  background: var(--panel-strong);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  margin: 2rem 0;
+  padding: 1.5rem;
+}
+
+.tool-results-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.tool-results-header h2,
+.tool-results-header .tool-note {
+  margin: 0;
+}
+
+.tool-table-wrap {
+  overflow-x: auto;
+}
+
+.tool-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 840px;
+  font-size: 0.95rem;
+}
+
+.tool-table th,
+.tool-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.6rem 0.75rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.tool-table th:first-child,
+.tool-table td:first-child {
+  text-align: left;
+}
+
+.tool-table th {
+  color: var(--muted);
+  font-weight: 700;
 }
 
 .gallery-empty {

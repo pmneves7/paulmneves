@@ -126,41 +126,10 @@
 
     <section id="news" aria-labelledby="news-heading">
       <h2 id="news-heading">News</h2>
-      <ul class="news-list">
-        <li>
-          <strong>May 2026:</strong>
-          <em>Single-q Cycloid and Double-q Vortex Lattices in Layered Magnetic Semimetal EuAg<sub>4</sub>Sb<sub>2</sub></em>
-          accepted in <em>Phys. Rev. X</em>.
-        </li>
-        <li>
-          <strong>April 2026:</strong>
-          <em>Cascade of Spin Moiré Superlattices with In-Plane Field in Triangular Lattice Semimetal EuAg<sub>4</sub>Sb<sub>2</sub></em>
-          published in <a href="https://doi.org/10.1021/acsnano.5c18732"><em>ACS Nano</em></a>
-          and featured on the
-          <a href="https://pubs.acs.org/toc/ancac3/20/19">journal cover</a>.
-        </li>
-        <li>
-          <strong>April 2026:</strong>
-          Created animated visualizations for Kevin Nuckolls’s recent
-          <a href="https://doi.org/10.1038/s41586-026-10173-8"><em>Nature</em> paper</a>
-          on higher-dimensional fermiology in bulk moiré metals — see the
-          <a href="https://physics.mit.edu/news/electrons-in-moire-crystals-explore-higher-dimensional-quantum-worlds/">MIT Physics news article</a>
-          and
-          <a href="https://www.youtube.com/watch?v=lXXhfxj54t4">animation on YouTube</a>.
-        </li>
-        <li>
-          <strong>September 2025:</strong>
-          Joined the Department of Physics &amp; Astronomy at Johns Hopkins University as a
-          Gordon and Betty Moore Postdoctoral Fellow, working with
-          <a href="https://physics-astronomy.jhu.edu/directory/collin-l-broholm/">Collin Broholm</a>.
-        </li>
-        <li>
-          <strong>April 2025:</strong>
-          Defended Ph.D. thesis,
-          <em>Flat Bands and Magnetism in Frustrated Lattice Materials</em>
-          (committee: Joseph G. Checkelsky, Riccardo Comin, Wolfgang Ketterle).
-        </li>
-      </ul>
+      <ul class="news-list" id="home-news-list"></ul>
+      <p class="profile-links">
+        <a href="news.html">See more →</a>
+      </p>
     </section>
 
     <section id="contact" aria-labelledby="contact-heading">
@@ -191,5 +160,9 @@
   </footer>
 
   <script src="js/site.js"></script>
+  <script src="js/news.js"></script>
+  <script>
+    renderNewsList("home-news-list", HOME_NEWS_COUNT);
+  </script>
 </body>
 </html>

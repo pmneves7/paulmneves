@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Calculate allowed Bragg peaks from lattice parameters, space group, and wavelength." />
+  <title>Scattering calculator | Paul M. Neves</title>
+  <link rel="stylesheet" href="../css/site.css" />
+</head>
+<body>
+  <header>
+    <nav aria-label="Main navigation">
+      <a class="site-title" href="../index.html">Paul M. Neves</a>
+      <div class="nav-links">
+        <a href="../index.html#biography">Biography</a>
+        <a href="../research.html">Research</a>
+        <a href="../publications.html">Publications</a>
+        <a href="../news.html">News</a>
+        <a href="../gallery.html">Gallery</a>
+        <a href="../tools.html">Tools</a>
+        <a href="../index.html#contact">Contact</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <header class="page-header">
+      <h1>Scattering calculator</h1>
+      <p class="lead">
+        Generate allowed Bragg peaks from a unit cell, space group, and wavelength.
+        Optional scattering-plane HKLs add in-plane and out-of-plane angles.
+      </p>
+    </header>
+
+    <div class="tool-panel tool-panel-wide">
+      <form id="scattering-form">
+        <section class="tool-section">
+          <h2>Crystal and beam</h2>
+          <div class="tool-grid">
+            <div class="tool-field">
+              <label for="a">a (Å)</label>
+              <input type="number" id="a" step="any" min="0" value="3.9" required />
+            </div>
+            <div class="tool-field">
+              <label for="b">b (Å)</label>
+              <input type="number" id="b" step="any" min="0" value="3.9" required />
+            </div>
+            <div class="tool-field">
+              <label for="c">c (Å)</label>
+              <input type="number" id="c" step="any" min="0" value="3.9" required />
+            </div>
+            <div class="tool-field">
+              <label for="alpha">α (deg)</label>
+              <input type="number" id="alpha" step="any" min="0" max="180" value="90" required />
+            </div>
+            <div class="tool-field">
+              <label for="beta">β (deg)</label>
+              <input type="number" id="beta" step="any" min="0" max="180" value="90" required />
+            </div>
+            <div class="tool-field">
+              <label for="gamma">γ (deg)</label>
+              <input type="number" id="gamma" step="any" min="0" max="180" value="90" required />
+            </div>
+            <div class="tool-field">
+              <label for="spacegroup">Space group</label>
+              <input
+                type="text"
+                id="spacegroup"
+                value="Pm-3m"
+                placeholder="symbol or number, e.g. 221"
+                title="Enter a Hermann-Mauguin symbol such as Pm-3m or Fd-3m, or an International Tables space-group number from 1 to 230."
+              />
+            </div>
+            <div class="tool-field">
+              <label for="wavelength">Wavelength (Å)</label>
+              <input type="number" id="wavelength" step="any" min="0" value="1.54" required />
+            </div>
+            <div class="tool-field">
+              <label for="max-index">Max |H|, |K|, |L|</label>
+              <input type="number" id="max-index" step="1" min="1" max="30" value="8" required />
+            </div>
+          </div>
+        </section>
+
+        <section class="tool-section">
+          <h2>Scattering plane</h2>
+          <p class="tool-note">
+            Enter two non-collinear HKLs in the scattering plane to calculate a signed out-of-plane angle.
+            The in-plane angle is measured from the first HKL toward the second; HKL 1 is treated as the incident-beam direction for the rotation column.
+          </p>
+          <div class="tool-grid">
+            <div class="tool-field">
+              <label for="plane-hkl-1">Plane HKL 1</label>
+              <input
+                type="text"
+                id="plane-hkl-1"
+                placeholder="e.g. 1 0 0"
+                title="Enter three Miller indices separated by spaces or commas, such as 1 0 0 or 1,0,0. Negative values are allowed."
+              />
+            </div>
+            <div class="tool-field">
+              <label for="plane-hkl-2">Plane HKL 2</label>
+              <input
+                type="text"
+                id="plane-hkl-2"
+                placeholder="e.g. 0 -1 0"
+                title="Enter a second non-collinear HKL in the scattering plane, using spaces or commas. For example: 0 -1 0 or 0,-1,0."
+              />
+            </div>
+            <div class="tool-field">
+              <label for="in-plane-min">In-plane min (deg)</label>
+              <input type="number" id="in-plane-min" step="any" placeholder="optional" />
+            </div>
+            <div class="tool-field">
+              <label for="in-plane-max">In-plane max (deg)</label>
+              <input type="number" id="in-plane-max" step="any" placeholder="optional" />
+            </div>
+          </div>
+        </section>
+
+        <button class="button primary" type="submit">Calculate peaks</button>
+      </form>
+    </div>
+
+    <p class="tool-note tool-note-panel">
+      Space-group filtering includes lattice centering extinctions and common principal-axis screw absences inferred from the Hermann-Mauguin symbol.
+      When a scattering plane is provided, ω is the closest signed rotation about the out-of-plane axis for either symmetric detector side.
+    </p>
+
+    <div class="tool-results" aria-live="polite">
+      <div class="tool-results-header">
+        <h2>Allowed Bragg peaks</h2>
+        <p id="result-summary" class="tool-note">Enter parameters and calculate to generate peaks.</p>
+      </div>
+      <div class="tool-table-wrap">
+        <table class="tool-table">
+          <thead>
+            <tr>
+              <th>HKL</th>
+              <th>d (Å)</th>
+              <th>2θ (deg)</th>
+              <th>|Q| (Å⁻¹)</th>
+              <th class="plane-column">In-plane (deg)</th>
+              <th class="plane-column">Out-of-plane (deg)</th>
+              <th class="plane-column">Rotation ω (deg)</th>
+            </tr>
+          </thead>
+          <tbody id="peak-table">
+            <tr>
+              <td colspan="7">No peaks calculated yet.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <p class="back-link-panel"><a href="../tools.html">← Back to tools</a></p>
+  </main>
+
+  <footer>
+    © <span id="year"></span> Paul M. Neves.
+  </footer>
+
+  <script src="../js/site.js"></script>
+  <script>
+    const form = document.getElementById("scattering-form");
+    const peakTable = document.getElementById("peak-table");
+    const resultSummary = document.getElementById("result-summary");
+
+    const spaceGroupNumberInfo = {
+      5: "C", 8: "C", 9: "C", 12: "C", 15: "C", 20: "C", 21: "C", 22: "F", 23: "I", 24: "I",
+      38: "A", 39: "A", 40: "A", 41: "A", 42: "F", 43: "F", 44: "I", 45: "I", 46: "I",
+      63: "C", 64: "C", 65: "C", 66: "C", 67: "C", 68: "C", 69: "F", 70: "F", 71: "I", 72: "I",
+      73: "I", 74: "I", 79: "I", 80: "I", 82: "I", 87: "I", 88: "I", 97: "I", 98: "I",
+      107: "I", 108: "I", 109: "I", 110: "I", 119: "I", 120: "I", 121: "I", 122: "I",
+      139: "I", 140: "I", 141: "I", 142: "I", 146: "R", 148: "R", 155: "R", 160: "R",
+      161: "R", 166: "R", 167: "R", 196: "F", 197: "I", 199: "I", 202: "F", 203: "F",
+      204: "I", 206: "I", 209: "F", 210: "F", 211: "I", 214: "I", 216: "F", 217: "I",
+      219: "F", 220: "I", 225: "F", 226: "F", 227: "F", 228: "F", 229: "I", 230: "I"
+    };
+
+    function degToRad(degrees) {
+      return degrees * Math.PI / 180;
+    }
+
+    function radToDeg(radians) {
+      return radians * 180 / Math.PI;
+    }
+
+    function clamp(value, min, max) {
+      return Math.min(max, Math.max(min, value));
+    }
+
+    function wrapAngle(degrees) {
+      return ((degrees + 180) % 360 + 360) % 360 - 180;
+    }
+
+    function dot(a, b) {
+      return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    }
+
+    function cross(a, b) {
+      return [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0]
+      ];
+    }
+
+    function scale(v, factor) {
+      return [v[0] * factor, v[1] * factor, v[2] * factor];
+    }
+
+    function add(a, b) {
+      return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+    }
+
+    function subtract(a, b) {
+      return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    }
+
+    function norm(v) {
+      return Math.sqrt(dot(v, v));
+    }
+
+    function normalize(v) {
+      const length = norm(v);
+      return length > 0 ? scale(v, 1 / length) : null;
+    }
+
+    function format(value, digits = 4) {
+      if (!Number.isFinite(value)) return "";
+      return Number(value.toPrecision(digits)).toString();
+    }
+
+    function parseNumber(id) {
+      const value = parseFloat(document.getElementById(id).value);
+      return Number.isFinite(value) ? value : null;
+    }
+
+    function parseHKL(value) {
+      const parts = value.trim().split(/[\s,]+/).map(Number);
+      if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) return null;
+      return parts;
+    }
+
+    function makeReciprocalBasis({ a, b, c, alpha, beta, gamma }) {
+      const alphaRad = degToRad(alpha);
+      const betaRad = degToRad(beta);
+      const gammaRad = degToRad(gamma);
+      const sinGamma = Math.sin(gammaRad);
+
+      if (Math.abs(sinGamma) < 1e-10) {
+        throw new Error("Gamma must not be 0 or 180 degrees.");
+      }
+
+      const directA = [a, 0, 0];
+      const directB = [b * Math.cos(gammaRad), b * sinGamma, 0];
+      const cx = c * Math.cos(betaRad);
+      const cy = c * (Math.cos(alphaRad) - Math.cos(betaRad) * Math.cos(gammaRad)) / sinGamma;
+      const czSquared = c * c - cx * cx - cy * cy;
+
+      if (czSquared <= 0) {
+        throw new Error("The lattice parameters do not define a valid unit cell.");
+      }
+
+      const directC = [cx, cy, Math.sqrt(czSquared)];
+      const volume = dot(directA, cross(directB, directC));
+
+      if (Math.abs(volume) < 1e-10) {
+        throw new Error("The lattice parameters do not define a finite unit cell.");
+      }
+
+      return {
+        aStar: scale(cross(directB, directC), 1 / volume),
+        bStar: scale(cross(directC, directA), 1 / volume),
+        cStar: scale(cross(directA, directB), 1 / volume)
+      };
+    }
+
+    function reciprocalVector(hkl, basis) {
+      return add(add(scale(basis.aStar, hkl[0]), scale(basis.bStar, hkl[1])), scale(basis.cStar, hkl[2]));
+    }
+
+    function centeringFromSpaceGroup(spaceGroup) {
+      const trimmed = spaceGroup.trim();
+      const number = parseInt(trimmed, 10);
+
+      if (Number.isInteger(number) && String(number) === trimmed) {
+        return spaceGroupNumberInfo[number] || "P";
+      }
+
+      const compact = trimmed.toUpperCase().replace(/\s+/g, "");
+      const first = compact.charAt(0);
+      return ["P", "A", "B", "C", "I", "F", "R"].includes(first) ? first : "P";
+    }
+
+    function isCenteringAllowed(h, k, l, centering) {
+      switch (centering) {
+        case "A":
+          return (k + l) % 2 === 0;
+        case "B":
+          return (h + l) % 2 === 0;
+        case "C":
+          return (h + k) % 2 === 0;
+        case "I":
+          return (h + k + l) % 2 === 0;
+        case "F":
+          return h % 2 === k % 2 && k % 2 === l % 2;
+        case "R":
+          return ((-h + k + l) % 3 + 3) % 3 === 0;
+        default:
+          return true;
+      }
+    }
+
+    function screwAxisAbsence(h, k, l, normalizedSymbol) {
+      if (/4[123]/.test(normalizedSymbol) && h === 0 && k === 0 && Math.abs(l) % 4 !== 0) return true;
+      if (/6[12345]/.test(normalizedSymbol) && h === 0 && k === 0 && Math.abs(l) % 6 !== 0) return true;
+      if (/3[12]/.test(normalizedSymbol) && h === 0 && k === 0 && Math.abs(l) % 3 !== 0) return true;
+
+      return false;
+    }
+
+    function isAllowedBySpaceGroup(h, k, l, spaceGroup) {
+      if (h === 0 && k === 0 && l === 0) return false;
+
+      const centering = centeringFromSpaceGroup(spaceGroup);
+      if (!isCenteringAllowed(h, k, l, centering)) return false;
+
+      const normalizedSymbol = spaceGroup.toLowerCase().replace(/\s+/g, "");
+      return !screwAxisAbsence(h, k, l, normalizedSymbol);
+    }
+
+    function makePlane(basis) {
+      const planeOne = parseHKL(document.getElementById("plane-hkl-1").value);
+      const planeTwo = parseHKL(document.getElementById("plane-hkl-2").value);
+
+      if (!planeOne || !planeTwo) return null;
+
+      const u = reciprocalVector(planeOne, basis);
+      const v = reciprocalVector(planeTwo, basis);
+      const xAxis = normalize(u);
+      const normal = normalize(cross(u, v));
+
+      if (!xAxis || !normal || norm(cross(u, v)) < 1e-10) {
+        throw new Error("Scattering-plane HKLs must be non-zero and non-collinear.");
+      }
+
+      const yAxis = normalize(cross(normal, xAxis));
+      return { normal, xAxis, yAxis };
+    }
+
+    function angleData(gVector, plane) {
+      if (!plane) return {};
+
+      const qHat = normalize(gVector);
+      const outOfPlane = radToDeg(Math.asin(clamp(dot(qHat, plane.normal), -1, 1)));
+      const projection = subtract(gVector, scale(plane.normal, dot(gVector, plane.normal)));
+      const projectionLength = norm(projection);
+      const inPlane = projectionLength < 1e-10
+        ? 0
+        : radToDeg(Math.atan2(dot(projection, plane.yAxis), dot(projection, plane.xAxis)));
+
+      return { inPlane, outOfPlane };
+    }
+
+    function rotationData(inPlane, outOfPlane, twoTheta) {
+      if (![inPlane, outOfPlane, twoTheta].every(Number.isFinite)) return null;
+
+      const theta = degToRad(twoTheta / 2);
+      const cosOutOfPlane = Math.cos(degToRad(outOfPlane));
+      if (Math.abs(cosOutOfPlane) < 1e-10) return null;
+
+      const requiredCosAzimuth = -Math.sin(theta) / cosOutOfPlane;
+      if (Math.abs(requiredCosAzimuth) > 1) return null;
+
+      const targetAzimuth = radToDeg(Math.acos(clamp(requiredCosAzimuth, -1, 1)));
+      const candidates = [
+        wrapAngle(targetAzimuth - inPlane),
+        wrapAngle(-targetAzimuth - inPlane)
+      ];
+
+      return candidates.reduce((best, candidate) => (
+        Math.abs(candidate) < Math.abs(best) ? candidate : best
+      ));
+    }
+
+
+    function inPlanePasses(value) {
+      const min = parseNumber("in-plane-min");
+      const max = parseNumber("in-plane-max");
+
+      if (min === null && max === null) return true;
+      if (!Number.isFinite(value)) return false;
+      if (min !== null && value < min) return false;
+      if (max !== null && value > max) return false;
+      return true;
+    }
+
+    function collectInputs() {
+      const values = {
+        a: parseNumber("a"),
+        b: parseNumber("b"),
+        c: parseNumber("c"),
+        alpha: parseNumber("alpha"),
+        beta: parseNumber("beta"),
+        gamma: parseNumber("gamma"),
+        wavelength: parseNumber("wavelength"),
+        maxIndex: parseInt(document.getElementById("max-index").value, 10),
+        spaceGroup: document.getElementById("spacegroup").value || "P"
+      };
+
+      if ([values.a, values.b, values.c, values.wavelength].some((value) => value === null || value <= 0)) {
+        throw new Error("Lattice constants and wavelength must be positive.");
+      }
+
+      if ([values.alpha, values.beta, values.gamma].some((value) => value === null || value <= 0 || value >= 180)) {
+        throw new Error("Lattice angles must be between 0 and 180 degrees.");
+      }
+
+      if (!Number.isInteger(values.maxIndex) || values.maxIndex < 1) {
+        throw new Error("Max index must be a positive integer.");
+      }
+
+      return values;
+    }
+
+    function calculatePeaks() {
+      const inputs = collectInputs();
+      const basis = makeReciprocalBasis(inputs);
+      const plane = makePlane(basis);
+      const peaks = [];
+
+      for (let h = -inputs.maxIndex; h <= inputs.maxIndex; h += 1) {
+        for (let k = -inputs.maxIndex; k <= inputs.maxIndex; k += 1) {
+          for (let l = -inputs.maxIndex; l <= inputs.maxIndex; l += 1) {
+            if (!isAllowedBySpaceGroup(h, k, l, inputs.spaceGroup)) continue;
+
+            const gVector = reciprocalVector([h, k, l], basis);
+            const gLength = norm(gVector);
+            if (gLength <= 0) continue;
+
+            const dSpacing = 1 / gLength;
+            const sinTheta = inputs.wavelength / (2 * dSpacing);
+            if (sinTheta > 1) continue;
+
+            const twoTheta = 2 * radToDeg(Math.asin(clamp(sinTheta, -1, 1)));
+            const qLength = 2 * Math.PI * gLength;
+            const angles = angleData(gVector, plane);
+            const rotation = plane ? rotationData(angles.inPlane, angles.outOfPlane, twoTheta) : null;
+
+            if (plane && !inPlanePasses(angles.inPlane)) continue;
+
+            peaks.push({
+              h,
+              k,
+              l,
+              dSpacing,
+              twoTheta,
+              qLength,
+              inPlane: angles.inPlane,
+              outOfPlane: angles.outOfPlane,
+              rotation
+            });
+          }
+        }
+      }
+
+      return peaks.sort((a, b) => a.twoTheta - b.twoTheta || a.h - b.h || a.k - b.k || a.l - b.l);
+    }
+
+    function renderPeaks(peaks) {
+      if (!peaks.length) {
+        peakTable.innerHTML = "<tr><td colspan=\"7\">No allowed peaks found in this range.</td></tr>";
+        resultSummary.textContent = "No peaks matched the current inputs and filters.";
+        return;
+      }
+
+      peakTable.innerHTML = peaks.map((peak) => `
+        <tr>
+          <td>(${peak.h} ${peak.k} ${peak.l})</td>
+          <td>${format(peak.dSpacing)}</td>
+          <td>${format(peak.twoTheta)}</td>
+          <td>${format(peak.qLength)}</td>
+          <td class="plane-column">${Number.isFinite(peak.inPlane) ? format(peak.inPlane) : "—"}</td>
+          <td class="plane-column">${Number.isFinite(peak.outOfPlane) ? format(peak.outOfPlane) : "—"}</td>
+          <td class="plane-column">${Number.isFinite(peak.rotation) ? format(peak.rotation) : "—"}</td>
+        </tr>
+      `).join("");
+
+      resultSummary.textContent = `Showing ${peaks.length} allowed peaks sorted by 2θ.`;
+    }
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+
+      try {
+        renderPeaks(calculatePeaks());
+      } catch (error) {
+        peakTable.innerHTML = `<tr><td colspan="7">${error.message}</td></tr>`;
+        resultSummary.textContent = "Please fix the highlighted inputs and try again.";
+      }
+    });
+
+    renderPeaks(calculatePeaks());
+  </script>
+</body>
+</html>
