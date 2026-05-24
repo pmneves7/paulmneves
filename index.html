@@ -40,33 +40,46 @@
         </div>
       </div>
 
-      <aside class="media-card" aria-label="Research animation">
-        <video autoplay loop muted playsinline>
-          <source src="media/animation.mp4" type="video/mp4" />
-        </video>
+      <aside class="media-card" aria-label="Portrait of Paul M. Neves">
+        <img
+          src="media/headshot.jpg"
+          alt="Paul M. Neves"
+          class="headshot"
+          width="600"
+          height="480"
+        />
       </aside>
     </section>
 
     <section id="biography" class="biography" aria-labelledby="biography-heading">
       <h2 id="biography-heading">Biography</h2>
-      <p>
-        Paul M. Neves is a Gordon and Betty Moore Fellow in the Department of Physics and Astronomy
-        at Johns Hopkins University, where he works with
-        <a href="https://physics-astronomy.jhu.edu/directory/collin-l-broholm/">Collin Broholm</a>.
-        He earned his B.S. in Physics from the University of Maryland, working with
-        <a href="https://sites.google.com/site/npbutch/">Nicholas Butch</a> at the National Institute
-        of Standards and Technology and UMD, and his Ph.D. from the Massachusetts Institute of
-        Technology with <a href="https://checkelsky.mit.edu">Joe Checkelsky</a>.
-      </p>
-      <p>
-        An experimental condensed matter physicist, Dr. Neves studies quantum materials using neutron
-        scattering, spectroscopy, and complementary experimental probes. He is interested in the
-        microscopic physics of correlated electrons, magnetism, superconductivity, and emergent
-        phases of matter.
-      </p>
-      <p>
-        Dr. Neves was a Goldwater Scholar in 2018.
-      </p>
+      <div class="biography-body">
+        <div class="biography-text">
+          <p>
+            Paul M. Neves is a Gordon and Betty Moore Fellow in the Department of Physics and Astronomy
+            at Johns Hopkins University, where he works with
+            <a href="https://physics-astronomy.jhu.edu/directory/collin-l-broholm/">Collin Broholm</a>.
+            He earned his B.S. in Physics from the University of Maryland, working with
+            <a href="https://sites.google.com/site/npbutch/">Nicholas Butch</a> at the National Institute
+            of Standards and Technology and UMD, and his Ph.D. from the Massachusetts Institute of
+            Technology with <a href="https://checkelsky.mit.edu">Joe Checkelsky</a>.
+          </p>
+          <p>
+            An experimental condensed matter physicist, Dr. Neves studies quantum materials using neutron
+            scattering, spectroscopy, and complementary experimental probes. He is interested in the
+            microscopic physics of correlated electrons, magnetism, superconductivity, and emergent
+            phases of matter.
+          </p>
+          <p>
+            Dr. Neves was a Goldwater Scholar in 2018.
+          </p>
+        </div>
+        <aside class="media-card biography-media" aria-label="Research animation">
+          <video autoplay loop muted playsinline>
+            <source src="media/animation.mp4" type="video/mp4" />
+          </video>
+        </aside>
+      </div>
     </section>
 
     <section id="publications" aria-labelledby="publications-heading">
@@ -115,12 +128,12 @@
       <h2 id="news-heading">News</h2>
       <ul class="news-list">
         <li>
-          <strong>2026:</strong>
+          <strong>May 2026:</strong>
           <em>Single-q Cycloid and Double-q Vortex Lattices in Layered Magnetic Semimetal EuAg<sub>4</sub>Sb<sub>2</sub></em>
           accepted in <em>Phys. Rev. X</em>.
         </li>
         <li>
-          <strong>2026:</strong>
+          <strong>April 2026:</strong>
           <em>Cascade of Spin Moiré Superlattices with In-Plane Field in Triangular Lattice Semimetal EuAg<sub>4</sub>Sb<sub>2</sub></em>
           published in <a href="https://doi.org/10.1021/acsnano.5c18732"><em>ACS Nano</em></a>
           and featured on the
@@ -174,7 +187,7 @@
   </main>
 
   <footer>
-    © <span id="year"></span> Paul M. Neves. Built as a static site for GitHub Pages.
+    © <span id="year"></span> Paul M. Neves.
   </footer>
 
   <script src="js/site.js"></script>

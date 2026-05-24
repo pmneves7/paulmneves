@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Gallery of research images and figures by Paul M. Neves." />
+  <title>Gallery | Paul M. Neves</title>
+  <link rel="stylesheet" href="css/site.css" />
+</head>
+<body>
+  <header>
+    <nav aria-label="Main navigation">
+      <a class="site-title" href="index.html">Paul M. Neves</a>
+      <div class="nav-links">
+        <a href="index.html#biography">Biography</a>
+        <a href="research.html">Research</a>
+        <a href="publications.html">Publications</a>
+        <a href="index.html#news">News</a>
+        <a href="gallery.html">Gallery</a>
+        <a href="tools.html">Tools</a>
+        <a href="index.html#contact">Contact</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <header class="page-header">
+      <h1>Gallery</h1>
+      <p class="lead">
+        Research images, figures, and visualizations.
+      </p>
+    </header>
+
+    <p id="gallery-empty" class="gallery-empty">
+      No images yet. Add photos to <code>media/gallery/</code>, then list them in
+      <code>js/gallery.js</code>.
+    </p>
+
+    <div id="gallery-grid" class="gallery-grid" hidden></div>
+
+    <dialog id="gallery-lightbox" class="gallery-lightbox" aria-label="Image preview">
+      <button type="button" class="gallery-lightbox-close" aria-label="Close">×</button>
+      <img id="gallery-lightbox-img" alt="" />
+      <figcaption id="gallery-lightbox-caption"></figcaption>
+    </dialog>
+
+    <p><a href="index.html">← Back to home</a></p>
+  </main>
+
+  <footer>
+    © <span id="year"></span> Paul M. Neves.
+  </footer>
+
+  <script src="js/site.js"></script>
+  <script src="js/gallery.js"></script>
+  <script>
+    document.querySelector(".gallery-lightbox-close")?.addEventListener("click", () => {
+      document.getElementById("gallery-lightbox")?.close();
+    });
+  </script>
+</body>
+</html>
