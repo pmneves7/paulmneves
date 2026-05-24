@@ -132,6 +132,42 @@ h3 {
   margin-bottom: 0;
 }
 
+.research-topics {
+  display: flex;
+  flex-direction: column;
+  gap: 3.5rem;
+}
+
+.research-topic h2 {
+  font-size: 1.75rem;
+  margin: 0 0 1rem;
+}
+
+.research-topic-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 42%);
+  gap: 2rem;
+  align-items: start;
+}
+
+.research-topic-body p {
+  margin: 0;
+  max-width: none;
+}
+
+.research-figure {
+  margin: 0;
+}
+
+.research-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: var(--card);
+}
+
 .button-row {
   display: flex;
   flex-wrap: wrap;
@@ -220,6 +256,10 @@ section {
   margin-bottom: 0.8rem;
 }
 
+.news-list a {
+  color: var(--accent);
+}
+
 .publication-list a.pub-citation {
   color: inherit;
   text-decoration: underline;
@@ -297,6 +337,10 @@ footer {
   }
 
   .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .research-topic-body {
     grid-template-columns: 1fr;
   }
 }

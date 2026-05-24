@@ -17,7 +17,8 @@ Personal academic homepage for [paulmneves.com](https://paulmneves.com), deploye
 ├── files/
 │   └── Paul_Neves_CV.pdf   # CV (add your PDF here)
 ├── media/
-│   └── animation.mp4       # Hero loop video (optional)
+│   ├── animation.mp4       # Hero loop video (optional)
+│   └── research/           # Research page figures (replace SVG placeholders)
 └── tools/
     └── neutron-energy-wavelength.html
 ```
