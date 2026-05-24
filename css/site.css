@@ -288,7 +288,7 @@ h3 {
 }
 
 .biography-media video {
-  filter: saturate(1.35);
+  filter: saturate(1.175);
 }
 
 .media-card .headshot {
