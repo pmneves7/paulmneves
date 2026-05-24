@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Academic homepage for Paul Neves, condensed matter physicist." />
+  <title>Paul Neves | Condensed Matter Physics</title>
+
+  <style>
+    :root {
+      --bg: #f7f7f4;
+      --text: #1f2933;
+      --muted: #5f6b7a;
+      --accent: #305c8a;
+      --accent-dark: #1f4163;
+      --card: #ffffff;
+      --border: #d9dee5;
+      --max-width: 1100px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    header {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    nav {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      padding: 0.9rem 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    .site-title {
+      font-weight: 700;
+      letter-spacing: 0.01em;
+    }
+
+    .nav-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      font-size: 0.95rem;
+    }
+
+    main {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      padding: 2.5rem 1.25rem 4rem;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+      gap: 2rem;
+      align-items: center;
+      margin-bottom: 3rem;
+    }
+
+    .eyebrow {
+      color: var(--accent);
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 0.82rem;
+      margin-bottom: 0.75rem;
+    }
+
+    h1 {
+      font-size: clamp(2.2rem, 5vw, 4rem);
+      line-height: 1.08;
+      margin: 0 0 1rem;
+    }
+
+    h2 {
+      font-size: 1.6rem;
+      margin: 0 0 1rem;
+    }
+
+    h3 {
+      margin: 0 0 0.35rem;
+      font-size: 1.05rem;
+    }
+
+    .lead {
+      font-size: 1.15rem;
+      color: var(--muted);
+      max-width: 720px;
+      margin-bottom: 1.5rem;
+    }
+
+    .button-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-top: 1.5rem;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      padding: 0.7rem 1.1rem;
+      font-weight: 650;
+      border: 1px solid var(--accent);
+    }
+
+    .button.primary {
+      background: var(--accent);
+      color: white;
+    }
+
+    .button.primary:hover {
+      background: var(--accent-dark);
+      text-decoration: none;
+    }
+
+    .button.secondary {
+      background: transparent;
+      color: var(--accent);
+    }
+
+    .media-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 1.25rem;
+      padding: 0.75rem;
+      box-shadow: 0 12px 30px rgba(31, 41, 51, 0.08);
+    }
+
+    .media-card video,
+    .media-placeholder {
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      border-radius: 0.85rem;
+      display: block;
+      background: linear-gradient(135deg, #dfe7ef, #f5f7fa);
+      object-fit: cover;
+    }
+
+    .media-caption {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin: 0.75rem 0.25rem 0.1rem;
+    }
+
+    section {
+      margin: 3rem 0;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1rem;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      padding: 1.2rem;
+    }
+
+    .card p {
+      color: var(--muted);
+      margin: 0;
+    }
+
+    .publication-list,
+    .news-list {
+      padding-left: 1.2rem;
+    }
+
+    .publication-list li,
+    .news-list li {
+      margin-bottom: 0.8rem;
+    }
+
+    footer {
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      padding: 2rem 1.25rem;
+      text-align: center;
+      font-size: 0.9rem;
+    }
+
+    @media (max-width: 800px) {
+      nav {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .hero {
+        grid-template-columns: 1fr;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <nav aria-label="Main navigation">
+      <a class="site-title" href="#">Paul Neves</a>
+      <div class="nav-links">
+        <a href="#research">Research</a>
+        <a href="#publications">Publications</a>
+        <a href="#tools">Tools</a>
+        <a href="#contact">Contact</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="intro-heading">
+      <div>
+        <div class="eyebrow">Condensed Matter Physics</div>
+        <h1 id="intro-heading">Paul Neves</h1>
+        <p class="lead">
+          I am a condensed matter physicist studying quantum materials using neutron scattering,
+          spectroscopy, and complementary experimental probes. My work focuses on the microscopic
+          physics of correlated electrons, magnetism, and emergent phases of matter.
+        </p>
+        <p>
+          I am currently preparing for the faculty job market. This site collects my research,
+          publications, CV, teaching materials, and experimental tools.
+        </p>
+        <div class="button-row">
+          <a class="button primary" href="files/Paul_Neves_CV.pdf">Download CV</a>
+          <a class="button secondary" href="#research">View research</a>
+          <a class="button secondary" href="#tools">Experimental tools</a>
+        </div>
+      </div>
+
+      <aside class="media-card" aria-label="Research animation">
+        <!-- Replace the placeholder below with your own video file when ready.
+             Example:
+             <video autoplay loop muted playsinline>
+               <source src="media/animation.mp4" type="video/mp4">
+             </video>
+        -->
+        <div class="media-placeholder"></div>
+        <p class="media-caption">
+          Placeholder for a looping research animation, figure, or microscope/neutron-scattering visual.
+        </p>
+      </aside>
+    </section>
+
+    <section id="research" aria-labelledby="research-heading">
+      <h2 id="research-heading">Research</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>Quantum materials</h3>
+          <p>
+            Short description of your work on correlated materials, magnetism, superconductivity,
+            or other central research themes.
+          </p>
+        </article>
+        <article class="card">
+          <h3>Neutron scattering</h3>
+          <p>
+            Short description of how you use neutron scattering to probe excitations, structure,
+            and microscopic interactions.
+          </p>
+        </article>
+        <article class="card">
+          <h3>Emergent phenomena</h3>
+          <p>
+            Short description of the broader physical questions motivating your program and future lab.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section id="publications" aria-labelledby="publications-heading">
+      <h2 id="publications-heading">Selected Publications</h2>
+      <ol class="publication-list">
+        <li>
+          <strong>Replace with publication title.</strong><br />
+          P. Neves et al., <em>Journal Name</em> <strong>Volume</strong>, page/year.
+        </li>
+        <li>
+          <strong>Replace with publication title.</strong><br />
+          P. Neves et al., <em>Journal Name</em> <strong>Volume</strong>, page/year.
+        </li>
+        <li>
+          <strong>Replace with publication title.</strong><br />
+          P. Neves et al., <em>Journal Name</em> <strong>Volume</strong>, page/year.
+        </li>
+      </ol>
+      <p><a href="publications.html">Full publication list →</a></p>
+    </section>
+
+    <section id="tools" aria-labelledby="tools-heading">
+      <h2 id="tools-heading">Experimental Tools</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>Neutron energy ↔ wavelength</h3>
+          <p>
+            Convert between neutron energy in meV and wavelength in Å.
+          </p>
+          <p><a href="tools/neutron-energy-wavelength.html">Open calculator →</a></p>
+        </article>
+        <article class="card">
+          <h3>Scattering vector</h3>
+          <p>
+            Placeholder for a future calculator involving Q, angle, wavelength, or reciprocal space.
+          </p>
+          <p><a href="#">Coming soon</a></p>
+        </article>
+        <article class="card">
+          <h3>Resolution notes</h3>
+          <p>
+            Placeholder for quick references, beamline notes, or frequently used experimental formulas.
+          </p>
+          <p><a href="#">Coming soon</a></p>
+        </article>
+      </div>
+    </section>
+
+    <section aria-labelledby="news-heading">
+      <h2 id="news-heading">News</h2>
+      <ul class="news-list">
+        <li><strong>May 2026:</strong> Initial website launched.</li>
+        <li><strong>Coming soon:</strong> Add recent publications, research statement, and teaching materials.</li>
+      </ul>
+    </section>
+
+    <section id="contact" aria-labelledby="contact-heading">
+      <h2 id="contact-heading">Contact</h2>
+      <p>
+        Email: <a href="mailto:paulneves77@gmail.com">paulneves77@gmail.com</a><br />
+        GitHub: <a href="https://github.com/paulneves77">@paulneves77</a>
+      </p>
+    </section>
+  </main>
+
+  <footer>
+    © <span id="year"></span> Paul Neves. Built as a static site for GitHub Pages.
+  </footer>
+
+  <script>
+    document.getElementById("year").textContent = new Date().getFullYear();
+  </script>
+</body>
+</html>
