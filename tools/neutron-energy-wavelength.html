@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Convert between neutron energy (meV) and wavelength (Å)." />
+  <title>Neutron energy ↔ wavelength | Paul Neves</title>
+  <link rel="stylesheet" href="../css/site.css" />
+</head>
+<body>
+  <header>
+    <nav aria-label="Main navigation">
+      <a class="site-title" href="../index.html">Paul Neves</a>
+      <div class="nav-links">
+        <a href="../index.html#biography">Biography</a>
+        <a href="../research.html">Research</a>
+        <a href="../publications.html">Publications</a>
+        <a href="../index.html#tools">Tools</a>
+        <a href="../index.html#contact">Contact</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <header class="page-header">
+      <h1>Neutron energy ↔ wavelength</h1>
+      <p class="lead">
+        Convert between neutron energy in meV and wavelength in ångströms using
+        <em>E</em> = 81.81 / λ² (with <em>E</em> in meV and λ in Å).
+      </p>
+    </header>
+
+    <div class="tool-panel">
+      <div class="tool-field">
+        <label for="energy">Energy (meV)</label>
+        <input type="number" id="energy" step="any" min="0" placeholder="e.g. 25" />
+      </div>
+      <div class="tool-field">
+        <label for="wavelength">Wavelength (Å)</label>
+        <input type="number" id="wavelength" step="any" min="0" placeholder="e.g. 1.8" />
+      </div>
+    </div>
+
+    <p class="tool-note">
+      Edit either field; the other updates automatically. Uses the de Broglie relation for cold/thermal neutrons.
+    </p>
+
+    <p><a href="../index.html#tools">← Back to tools</a></p>
+  </main>
+
+  <footer>
+    © <span id="year"></span> Paul Neves. Built as a static site for GitHub Pages.
+  </footer>
+
+  <script src="../js/site.js"></script>
+  <script>
+    const energyInput = document.getElementById("energy");
+    const wavelengthInput = document.getElementById("wavelength");
+    let updating = false;
+
+    function format(value) {
+      if (!Number.isFinite(value) || value <= 0) return "";
+      return value < 0.01 || value >= 10000
+        ? value.toExponential(4)
+        : String(Number(value.toPrecision(6)));
+    }
+
+    function energyFromWavelength(lambda) {
+      return 81.81 / (lambda * lambda);
+    }
+
+    function wavelengthFromEnergy(energy) {
+      return Math.sqrt(81.81 / energy);
+    }
+
+    energyInput.addEventListener("input", () => {
+      if (updating) return;
+      const energy = parseFloat(energyInput.value);
+      if (!energyInput.value.trim() || !Number.isFinite(energy) || energy <= 0) {
+        if (!wavelengthInput.value.trim()) wavelengthInput.value = "";
+        return;
+      }
+      updating = true;
+      wavelengthInput.value = format(wavelengthFromEnergy(energy));
+      updating = false;
+    });
+
+    wavelengthInput.addEventListener("input", () => {
+      if (updating) return;
+      const lambda = parseFloat(wavelengthInput.value);
+      if (!wavelengthInput.value.trim() || !Number.isFinite(lambda) || lambda <= 0) {
+        if (!energyInput.value.trim()) energyInput.value = "";
+        return;
+      }
+      updating = true;
+      energyInput.value = format(energyFromWavelength(lambda));
+      updating = false;
+    });
+  </script>
+</body>
+</html>
