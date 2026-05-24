@@ -55,13 +55,12 @@ a:hover {
 
 body > header {
   background: var(--panel-strong);
-  border: 1px solid rgba(217, 222, 229, 0.8);
-  border-radius: 1.25rem;
+  border-bottom: 1px solid rgba(217, 222, 229, 0.8);
   box-shadow: 0 14px 36px rgba(31, 41, 51, 0.08);
-  width: min(calc(100% - 2.5rem), var(--max-width));
-  margin: 1rem auto 0;
+  width: 100%;
+  margin: 0;
   position: sticky;
-  top: 1rem;
+  top: 0;
   z-index: 10;
 }
 
