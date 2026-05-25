@@ -69,7 +69,9 @@
       transparencyEnabled: false,
       transparencyKeys: [],
       transparencyTolerance: 24,
-      transparencySoftness: 32
+      transparencySoftness: 32,
+      transparencyPreviewBgEnabled: false,
+      transparencyPreviewBgColor: { r: 255, g: 255, b: 255 }
     };
   }
 
@@ -1502,6 +1504,32 @@
     if (els.transparencyEnabled) {
       els.transparencyEnabled.checked = !!state.edit.transparencyEnabled;
     }
+    if (els.transparencyPreviewBgEnabled) {
+      els.transparencyPreviewBgEnabled.checked = !!state.edit.transparencyPreviewBgEnabled;
+    }
+    const previewBg = state.edit.transparencyPreviewBgColor || { r: 255, g: 255, b: 255 };
+    const previewBgHex = rgbToHex(previewBg.r, previewBg.g, previewBg.b);
+    if (els.transparencyPreviewBgColor) els.transparencyPreviewBgColor.value = previewBgHex;
+    if (els.transparencyPreviewBgHex) els.transparencyPreviewBgHex.value = previewBgHex;
+  }
+
+  function getAlphaPreviewBackgroundFill(state) {
+    if (!state || !state.edit || !state.edit.transparencyPreviewBgEnabled) return null;
+    const c = state.edit.transparencyPreviewBgColor || { r: 255, g: 255, b: 255 };
+    return rgbToHex(c.r, c.g, c.b);
+  }
+
+  function syncPreviewBgFromInputs(state) {
+    if (els.transparencyPreviewBgEnabled) {
+      state.edit.transparencyPreviewBgEnabled = els.transparencyPreviewBgEnabled.checked;
+    }
+    const rgb = parseColorInput(els.transparencyPreviewBgHex && els.transparencyPreviewBgHex.value)
+      || (els.transparencyPreviewBgColor ? parseColorInput(els.transparencyPreviewBgColor.value) : null);
+    if (rgb) {
+      state.edit.transparencyPreviewBgColor = { r: rgb.r, g: rgb.g, b: rgb.b };
+      if (els.transparencyPreviewBgColor) els.transparencyPreviewBgColor.value = rgbToHex(rgb.r, rgb.g, rgb.b);
+      if (els.transparencyPreviewBgHex) els.transparencyPreviewBgHex.value = rgbToHex(rgb.r, rgb.g, rgb.b);
+    }
   }
 
   function setColorPickerInputs(rgb) {
@@ -2438,6 +2466,32 @@
     els.bgHex = document.getElementById("dig-edit-bg-hex");
     els.bgKeyList = document.getElementById("dig-edit-bg-key-list");
     els.transparencyEnabled = document.getElementById("dig-edit-bg-enabled");
+    els.transparencyPreviewBgEnabled = document.getElementById("dig-edit-bg-preview-enabled");
+    els.transparencyPreviewBgColor = document.getElementById("dig-edit-bg-preview-color");
+    els.transparencyPreviewBgHex = document.getElementById("dig-edit-bg-preview-hex");
+
+    if (els.transparencyPreviewBgEnabled) {
+      els.transparencyPreviewBgEnabled.addEventListener("change", () => {
+        syncPreviewBgFromInputs(hooks.getState());
+        hooks.refreshAll();
+      });
+    }
+
+    if (els.transparencyPreviewBgColor && els.transparencyPreviewBgHex) {
+      const onPreviewBgColorChange = () => {
+        syncPreviewBgFromInputs(hooks.getState());
+        hooks.refreshAll();
+      };
+      els.transparencyPreviewBgColor.addEventListener("input", () => {
+        els.transparencyPreviewBgHex.value = els.transparencyPreviewBgColor.value;
+        onPreviewBgColorChange();
+      });
+      els.transparencyPreviewBgHex.addEventListener("change", () => {
+        const rgb = parseColorInput(els.transparencyPreviewBgHex.value);
+        if (rgb) els.transparencyPreviewBgColor.value = rgbToHex(rgb.r, rgb.g, rgb.b);
+        onPreviewBgColorChange();
+      });
+    }
 
     if (els.transparencyEnabled) {
       els.transparencyEnabled.addEventListener("change", () => {
@@ -2590,6 +2644,9 @@
       return isTransparencyActive(edit);
     },
     canvasHasAlpha,
+    getAlphaPreviewBackgroundFill(state) {
+      return getAlphaPreviewBackgroundFill(state);
+    },
     needsAlphaCheckerboard(state, displayImage) {
       if (!state || !state.image || !displayImage) return false;
       if (isTransparencyActive(state.edit)) return true;

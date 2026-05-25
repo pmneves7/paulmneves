@@ -77,6 +77,7 @@
   const ZOOM_DISPLAY_SIZE = 260;
   const POINT_HIT_RADIUS_PX = 12;
   const SELECT_HIT_RADIUS_PX = 10;
+  const DEFAULT_PLOT_PROBE = document.getElementById("dig-default-plot");
 
   zoomCanvas.width = ZOOM_DISPLAY_SIZE;
   zoomCanvas.height = ZOOM_DISPLAY_SIZE;
@@ -629,6 +630,53 @@
     reader.readAsDataURL(blob);
   }
 
+  function loadDefaultSamplePlot() {
+    if (state.image) return;
+
+    function tryFallbackUrls() {
+      const candidates = [
+        new URL("../media/plot-digitizer/sample-plot.png", window.location.href).href
+      ];
+      if (window.location.protocol !== "file:") {
+        candidates.push(new URL("/media/plot-digitizer/sample-plot.png", window.location.origin).href);
+      }
+      if (DEFAULT_PLOT_PROBE && DEFAULT_PLOT_PROBE.src) {
+        candidates.unshift(DEFAULT_PLOT_PROBE.src);
+      }
+      const sources = [...new Set(candidates)].filter((src) => {
+        return !(DEFAULT_PLOT_PROBE && DEFAULT_PLOT_PROBE.src === src && DEFAULT_PLOT_PROBE.complete && !DEFAULT_PLOT_PROBE.naturalWidth);
+      });
+
+      let index = 0;
+      function tryNext() {
+        if (index >= sources.length) return;
+        const src = sources[index];
+        index += 1;
+        const img = new Image();
+        img.onload = () => setImage(img);
+        img.onerror = tryNext;
+        img.src = src;
+      }
+      tryNext();
+    }
+
+    if (!DEFAULT_PLOT_PROBE) {
+      tryFallbackUrls();
+      return;
+    }
+
+    const useProbe = () => {
+      if (DEFAULT_PLOT_PROBE.naturalWidth > 0) setImage(DEFAULT_PLOT_PROBE);
+      else tryFallbackUrls();
+    };
+
+    if (DEFAULT_PLOT_PROBE.complete) useProbe();
+    else {
+      DEFAULT_PLOT_PROBE.addEventListener("load", useProbe, { once: true });
+      DEFAULT_PLOT_PROBE.addEventListener("error", tryFallbackUrls, { once: true });
+    }
+  }
+
   // --- Image transforms ---------------------------------------------------
 
   function transformImage(kind) {
@@ -849,6 +897,16 @@
     }
   }
 
+  function drawAlphaPreviewBackground(context, w, h, cellSize) {
+    const fill = window.DigitizerImageEdit?.getAlphaPreviewBackgroundFill?.(state);
+    if (fill) {
+      context.fillStyle = fill;
+      context.fillRect(0, 0, w, h);
+      return;
+    }
+    drawAlphaCheckerboard(context, w, h, cellSize);
+  }
+
   function needsAlphaCheckerboard(displayImage) {
     if (!window.DigitizerImageEdit || !window.DigitizerImageEdit.needsAlphaCheckerboard) return false;
     return window.DigitizerImageEdit.needsAlphaCheckerboard(state, displayImage);
@@ -875,7 +933,7 @@
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (needsAlphaCheckerboard(displayImage)) {
-      drawAlphaCheckerboard(ctx, canvas.width, canvas.height);
+      drawAlphaPreviewBackground(ctx, canvas.width, canvas.height);
     }
     ctx.drawImage(displayImage, 0, 0);
     const s = displayScale();
@@ -1210,7 +1268,7 @@
     const sx = state.cursor.x - half;
     const sy = state.cursor.y - half;
     if (needsAlphaCheckerboard(zoomSource)) {
-      drawAlphaCheckerboard(zoomCtx, ZOOM_DISPLAY_SIZE, ZOOM_DISPLAY_SIZE, 8);
+      drawAlphaPreviewBackground(zoomCtx, ZOOM_DISPLAY_SIZE, ZOOM_DISPLAY_SIZE, 8);
     } else {
       zoomCtx.fillStyle = "#1a1a1a";
       zoomCtx.fillRect(0, 0, ZOOM_DISPLAY_SIZE, ZOOM_DISPLAY_SIZE);
@@ -2115,6 +2173,7 @@
   }
 
   setActiveTab("edit", true);
+  loadDefaultSamplePlot();
 
   window.addEventListener("resize", () => {
     if (state.image) draw();

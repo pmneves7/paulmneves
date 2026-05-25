@@ -46,8 +46,9 @@
       <section class="tool-section">
         <h2>1. Load image</h2>
         <p class="tool-note">
-          Upload an image file, paste an image from the clipboard (<kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>V</kbd>
-          anywhere on this page), or load one from a URL.
+          A sample plot loads automatically when the page opens. You can replace it by uploading an image,
+          pasting from the clipboard (<kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>V</kbd> anywhere on this page),
+          or loading one from a URL.
         </p>
         <div class="digitizer-loader">
           <button type="button" class="button secondary" id="dig-upload-btn">Choose file…</button>
@@ -64,6 +65,13 @@
           <button type="button" class="button secondary" id="dig-clear-btn" hidden>Clear image</button>
         </div>
         <p class="tool-note digitizer-load-error" id="dig-load-error" hidden></p>
+        <img
+          id="dig-default-plot"
+          src="../media/plot-digitizer/sample-plot.png"
+          alt=""
+          hidden
+          decoding="async"
+        />
       </section>
 
       <section class="tool-section digitizer-workspace" id="dig-workspace" hidden>
@@ -334,6 +342,16 @@
                   <input type="checkbox" id="dig-edit-bg-enabled" />
                   Enable background transparency
                 </label>
+              </div>
+              <div class="digitizer-axis-options">
+                <label>
+                  <input type="checkbox" id="dig-edit-bg-preview-enabled" />
+                  Show preview background
+                </label>
+              </div>
+              <div class="digitizer-edit-color-row">
+                <input type="color" id="dig-edit-bg-preview-color" value="#ffffff" title="Preview background color" />
+                <input type="text" id="dig-edit-bg-preview-hex" class="digitizer-edit-hex-input" placeholder="#ffffff" value="#ffffff" spellcheck="false" autocomplete="off" maxlength="9" />
               </div>
               <div class="digitizer-edit-param">
                 <label for="dig-edit-bg-tolerance">Match tolerance</label>
