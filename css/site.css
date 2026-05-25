@@ -115,6 +115,27 @@ main {
   margin: 0;
 }
 
+.tool-disclaimer {
+  margin: 1.25rem 0 0;
+  padding: 0.6rem 0.9rem;
+  background: rgba(255, 244, 225, 0.85);
+  border: 1px solid rgba(217, 167, 86, 0.45);
+  border-left: 4px solid #d99a3f;
+  border-radius: 0.6rem;
+  color: #6d4a16;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.tool-disclaimer strong {
+  color: #5a3a0e;
+}
+
+.tool-disclaimer a {
+  color: var(--accent-dark);
+  font-weight: 600;
+}
+
 .hero {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
