@@ -741,7 +741,7 @@ section {
   border: 1px solid var(--border);
   border-radius: 0.85rem;
   overflow: hidden;
-  background: var(--panel-strong);
+  background: #1a1a1a;
   cursor: pointer;
   transition: box-shadow 0.15s ease, transform 0.15s ease;
 }
@@ -761,6 +761,9 @@ section {
   width: 100%;
   aspect-ratio: 4 / 3;
   object-fit: cover;
+  filter: none;
+  mix-blend-mode: normal;
+  dynamic-range-limit: standard;
 }
 
 .gallery-item figcaption {
@@ -776,7 +779,7 @@ section {
   padding: 0;
   border: none;
   border-radius: 1rem;
-  background: var(--card);
+  background: #1a1a1a;
   box-shadow: 0 24px 48px rgba(31, 41, 51, 0.2);
 }
 
@@ -790,6 +793,9 @@ section {
   max-height: 80vh;
   object-fit: contain;
   border-radius: 1rem 1rem 0 0;
+  filter: none;
+  mix-blend-mode: normal;
+  dynamic-range-limit: standard;
 }
 
 .gallery-lightbox figcaption {
