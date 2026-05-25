@@ -36,6 +36,7 @@ const lookupInput = document.getElementById("lookup-hkl");
 const cifFileInput = document.getElementById("cif-file");
 const cifLoadButton = document.getElementById("cif-load-button");
 const cifStatusEl = document.getElementById("cif-status");
+const crystalPresetSelect = document.getElementById("crystal-preset");
 
 const summaryEl = document.getElementById("lattice-summary");
 const resultsEl = document.getElementById("lattice-results");
@@ -43,6 +44,7 @@ const resultsEl = document.getElementById("lattice-results");
 const allInputs = [
   inputModeSelect,
   conventionSelect,
+  crystalPresetSelect,
   directAInput,
   directBInput,
   directCInput,
@@ -426,6 +428,45 @@ latticeForm.addEventListener("submit", (event) => {
   render();
 });
 
+function resetCrystalPresetSelect() {
+  if (crystalPresetSelect) crystalPresetSelect.value = "";
+}
+
+function applyCrystalPreset(presetId) {
+  const preset = typeof getCrystalPreset === "function" ? getCrystalPreset(presetId) : null;
+  if (!preset) return;
+
+  inputModeSelect.value = "direct-params";
+  applyCrystalPresetToFields(preset, {
+    a: directAInput,
+    b: directBInput,
+    c: directCInput,
+    alpha: directAlphaInput,
+    beta: directBetaInput,
+    gamma: directGammaInput
+  });
+  render();
+}
+
+if (crystalPresetSelect && typeof populateCrystalPresetSelect === "function") {
+  populateCrystalPresetSelect(crystalPresetSelect);
+  crystalPresetSelect.addEventListener("change", () => {
+    applyCrystalPreset(crystalPresetSelect.value);
+  });
+}
+
+[
+  directAInput,
+  directBInput,
+  directCInput,
+  directAlphaInput,
+  directBetaInput,
+  directGammaInput
+].forEach((input) => {
+  if (!input) return;
+  input.addEventListener("input", resetCrystalPresetSelect);
+});
+
 function setCifStatus(message, isError = false) {
   if (!cifStatusEl) return;
   cifStatusEl.textContent = message;
@@ -454,6 +495,7 @@ function applyCifData(data) {
   fields.forEach(([, input, value]) => {
     input.value = String(value);
   });
+  resetCrystalPresetSelect();
   render();
 }
 

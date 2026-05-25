@@ -52,6 +52,12 @@
           </p>
           <div class="tool-cif-controls">
             <input type="file" id="cif-file" accept=".cif,chemical/x-cif,text/plain" hidden />
+            <div class="tool-field tool-cif-preset">
+              <label for="crystal-preset">Standard crystal</label>
+              <select id="crystal-preset">
+                <option value="">Custom / manual entry</option>
+              </select>
+            </div>
             <button type="button" id="cif-load-button" class="button secondary">Load CIF file…</button>
             <p id="cif-status" class="tool-cif-status" role="status" aria-live="polite"></p>
           </div>
@@ -254,6 +260,7 @@
 
   <script src="../js/site.js"></script>
   <script src="../js/cif-parser.js"></script>
+  <script src="../js/crystal-presets.js"></script>
   <script src="../js/lattice-converter.js"></script>
 </body>
 </html>

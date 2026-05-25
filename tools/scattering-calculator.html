@@ -48,6 +48,12 @@
           </p>
           <div class="tool-cif-controls">
             <input type="file" id="cif-file" accept=".cif,chemical/x-cif,text/plain" hidden />
+            <div class="tool-field tool-cif-preset">
+              <label for="crystal-preset">Standard crystal</label>
+              <select id="crystal-preset">
+                <option value="">Custom / manual entry</option>
+              </select>
+            </div>
             <button type="button" id="cif-load-button" class="button secondary">Load CIF file…</button>
             <p id="cif-status" class="tool-cif-status" role="status" aria-live="polite"></p>
           </div>
@@ -91,6 +97,14 @@
               />
             </div>
             <div class="tool-field">
+              <label for="rhombohedral-setting">Rhombohedral setting</label>
+              <select id="rhombohedral-setting" title="Used only for R-centered cells in hexagonal setting. Auto reads :H or :R from the space-group symbol if present.">
+                <option value="auto">Auto (from symbol)</option>
+                <option value="obverse">Obverse (−h + k + l = 3n)</option>
+                <option value="reverse">Reverse (h − k + l = 3n)</option>
+              </select>
+            </div>
+            <div class="tool-field">
               <label for="wavelength">Wavelength (Å)</label>
               <input type="number" id="wavelength" step="any" min="0" value="1.54" required />
             </div>
@@ -105,7 +119,7 @@
           <h2>Scattering plane</h2>
           <p class="tool-note">
             Enter two non-collinear HKLs in the scattering plane to calculate a signed out-of-plane angle.
-            The in-plane angle is measured from the first HKL toward the second; HKL 1 is treated as the incident-beam direction for the rotation column.
+            The in-plane angle is measured from the first HKL toward the second. HKL 1 defines the in-plane reference axis used for φ and ω (not the incident beam direction).
           </p>
           <div class="tool-grid">
             <div class="tool-field">
@@ -141,9 +155,16 @@
       </form>
     </div>
 
+    <div class="tool-panel tool-panel-wide">
+      <h2>Extinction rules</h2>
+      <p class="tool-note">Systematic absences applied to the peak list for the current space group:</p>
+      <ol id="extinction-rules" class="tool-extinction-rules">
+        <li>Enter a space group and calculate to see the active rules.</li>
+      </ol>
+    </div>
+
     <p class="tool-note tool-note-panel">
-      Space-group filtering includes lattice centering extinctions and common principal-axis screw absences inferred from the Hermann-Mauguin symbol.
-      When a scattering plane is provided, ω is the closest signed rotation about the out-of-plane axis for either symmetric detector side.
+      When a scattering plane is provided, ω is the smallest signed crystal rotation about the out-of-plane axis that satisfies cos(φ + ω) = −sin(θ)/cos(χ), including both symmetric detector branches (φ = in-plane angle, χ = out-of-plane angle, θ = Bragg angle).
     </p>
 
     <div class="tool-results" aria-live="polite">
@@ -182,6 +203,8 @@
 
   <script src="../js/site.js"></script>
   <script src="../js/cif-parser.js"></script>
+  <script src="../js/crystal-presets.js"></script>
+  <script src="../js/scattering-extinctions.js"></script>
   <script>
     const form = document.getElementById("scattering-form");
     const peakTable = document.getElementById("peak-table");
@@ -189,18 +212,78 @@
     const cifFileInput = document.getElementById("cif-file");
     const cifLoadButton = document.getElementById("cif-load-button");
     const cifStatusEl = document.getElementById("cif-status");
+    const crystalPresetSelect = document.getElementById("crystal-preset");
+    const extinctionRulesEl = document.getElementById("extinction-rules");
+    const rhombohedralSettingEl = document.getElementById("rhombohedral-setting");
 
-    const spaceGroupNumberInfo = {
-      5: "C", 8: "C", 9: "C", 12: "C", 15: "C", 20: "C", 21: "C", 22: "F", 23: "I", 24: "I",
-      38: "A", 39: "A", 40: "A", 41: "A", 42: "F", 43: "F", 44: "I", 45: "I", 46: "I",
-      63: "C", 64: "C", 65: "C", 66: "C", 67: "C", 68: "C", 69: "F", 70: "F", 71: "I", 72: "I",
-      73: "I", 74: "I", 79: "I", 80: "I", 82: "I", 87: "I", 88: "I", 97: "I", 98: "I",
-      107: "I", 108: "I", 109: "I", 110: "I", 119: "I", 120: "I", 121: "I", 122: "I",
-      139: "I", 140: "I", 141: "I", 142: "I", 146: "R", 148: "R", 155: "R", 160: "R",
-      161: "R", 166: "R", 167: "R", 196: "F", 197: "I", 199: "I", 202: "F", 203: "F",
-      204: "I", 206: "I", 209: "F", 210: "F", 211: "I", 214: "I", 216: "F", 217: "I",
-      219: "F", 220: "I", 225: "F", 226: "F", 227: "F", 228: "F", 229: "I", 230: "I"
+    if (crystalPresetSelect && typeof populateCrystalPresetSelect === "function") {
+      populateCrystalPresetSelect(crystalPresetSelect);
+    }
+
+    const latticeFieldMap = {
+      a: document.getElementById("a"),
+      b: document.getElementById("b"),
+      c: document.getElementById("c"),
+      alpha: document.getElementById("alpha"),
+      beta: document.getElementById("beta"),
+      gamma: document.getElementById("gamma"),
+      spaceGroup: document.getElementById("spacegroup")
     };
+
+    function resetCrystalPresetSelect() {
+      if (crystalPresetSelect) crystalPresetSelect.value = "";
+    }
+
+    if (crystalPresetSelect) {
+      crystalPresetSelect.addEventListener("change", () => {
+        const preset = typeof getCrystalPreset === "function"
+          ? getCrystalPreset(crystalPresetSelect.value)
+          : null;
+        if (!preset) return;
+
+        applyCrystalPresetToFields(preset, latticeFieldMap);
+
+        try {
+          renderPeaks(calculatePeaks());
+        } catch (error) {
+          peakTable.innerHTML = `<tr><td colspan="7">${error.message}</td></tr>`;
+          resultSummary.textContent = "Please fix the highlighted inputs and try again.";
+        }
+      });
+    }
+
+    Object.values(latticeFieldMap).forEach((input) => {
+      if (!input) return;
+      input.addEventListener("input", resetCrystalPresetSelect);
+    });
+
+    function getExtinctionContext(spaceGroup) {
+      const setting = rhombohedralSettingEl ? rhombohedralSettingEl.value : "auto";
+      const override = setting === "auto" ? undefined : setting;
+      if (typeof resolveExtinctionContext === "function") {
+        return resolveExtinctionContext(spaceGroup, override);
+      }
+      return { rules: [], rhombohedralSetting: "obverse", centering: "P", isDiamond: false };
+    }
+
+    function renderExtinctionRules(context) {
+      if (!extinctionRulesEl) return;
+      const lines = typeof describeExtinctionRules === "function"
+        ? describeExtinctionRules(context)
+        : ["Extinction module failed to load."];
+      const items = lines.slice(1);
+      extinctionRulesEl.innerHTML = items.length
+        ? items.map((line) => `<li>${line}</li>`).join("")
+        : "<li>No extinction rules inferred.</li>";
+    }
+
+    function isAllowedBySpaceGroup(h, k, l, context) {
+      if (typeof isReflectionAllowed === "function") {
+        return isReflectionAllowed(h, k, l, context);
+      }
+      if (h === 0 && k === 0 && l === 0) return false;
+      return true;
+    }
 
     function degToRad(degrees) {
       return degrees * Math.PI / 180;
@@ -305,56 +388,6 @@
       return add(add(scale(basis.aStar, hkl[0]), scale(basis.bStar, hkl[1])), scale(basis.cStar, hkl[2]));
     }
 
-    function centeringFromSpaceGroup(spaceGroup) {
-      const trimmed = spaceGroup.trim();
-      const number = parseInt(trimmed, 10);
-
-      if (Number.isInteger(number) && String(number) === trimmed) {
-        return spaceGroupNumberInfo[number] || "P";
-      }
-
-      const compact = trimmed.toUpperCase().replace(/\s+/g, "");
-      const first = compact.charAt(0);
-      return ["P", "A", "B", "C", "I", "F", "R"].includes(first) ? first : "P";
-    }
-
-    function isCenteringAllowed(h, k, l, centering) {
-      switch (centering) {
-        case "A":
-          return (k + l) % 2 === 0;
-        case "B":
-          return (h + l) % 2 === 0;
-        case "C":
-          return (h + k) % 2 === 0;
-        case "I":
-          return (h + k + l) % 2 === 0;
-        case "F":
-          return h % 2 === k % 2 && k % 2 === l % 2;
-        case "R":
-          return ((-h + k + l) % 3 + 3) % 3 === 0;
-        default:
-          return true;
-      }
-    }
-
-    function screwAxisAbsence(h, k, l, normalizedSymbol) {
-      if (/4[123]/.test(normalizedSymbol) && h === 0 && k === 0 && Math.abs(l) % 4 !== 0) return true;
-      if (/6[12345]/.test(normalizedSymbol) && h === 0 && k === 0 && Math.abs(l) % 6 !== 0) return true;
-      if (/3[12]/.test(normalizedSymbol) && h === 0 && k === 0 && Math.abs(l) % 3 !== 0) return true;
-
-      return false;
-    }
-
-    function isAllowedBySpaceGroup(h, k, l, spaceGroup) {
-      if (h === 0 && k === 0 && l === 0) return false;
-
-      const centering = centeringFromSpaceGroup(spaceGroup);
-      if (!isCenteringAllowed(h, k, l, centering)) return false;
-
-      const normalizedSymbol = spaceGroup.toLowerCase().replace(/\s+/g, "");
-      return !screwAxisAbsence(h, k, l, normalizedSymbol);
-    }
-
     function makePlane(basis) {
       const planeOne = parseHKL(document.getElementById("plane-hkl-1").value);
       const planeTwo = parseHKL(document.getElementById("plane-hkl-2").value);
@@ -451,6 +484,8 @@
 
     function calculatePeaks() {
       const inputs = collectInputs();
+      const extinctionContext = getExtinctionContext(inputs.spaceGroup);
+      renderExtinctionRules(extinctionContext);
       const basis = makeReciprocalBasis(inputs);
       const plane = makePlane(basis);
       const peaks = [];
@@ -458,7 +493,7 @@
       for (let h = -inputs.maxIndex; h <= inputs.maxIndex; h += 1) {
         for (let k = -inputs.maxIndex; k <= inputs.maxIndex; k += 1) {
           for (let l = -inputs.maxIndex; l <= inputs.maxIndex; l += 1) {
-            if (!isAllowedBySpaceGroup(h, k, l, inputs.spaceGroup)) continue;
+            if (!isAllowedBySpaceGroup(h, k, l, extinctionContext)) continue;
 
             const gVector = reciprocalVector([h, k, l], basis);
             const gLength = norm(gVector);
@@ -659,6 +694,8 @@
         peakTable.innerHTML = `<tr><td colspan="7">${error.message}</td></tr>`;
         resultSummary.textContent = "Please fix the highlighted inputs and try again.";
       }
+
+      resetCrystalPresetSelect();
     }
 
     if (cifLoadButton && cifFileInput) {
@@ -682,6 +719,17 @@
           setCifStatus(description ? `Loaded ${file.name} (${description}).` : `Loaded ${file.name}.`);
         } catch (error) {
           setCifStatus(`Could not load ${file.name}: ${error.message}`, true);
+        }
+      });
+    }
+
+    if (rhombohedralSettingEl) {
+      rhombohedralSettingEl.addEventListener("change", () => {
+        try {
+          renderPeaks(calculatePeaks());
+        } catch (error) {
+          peakTable.innerHTML = `<tr><td colspan="7">${error.message}</td></tr>`;
+          resultSummary.textContent = "Please fix the highlighted inputs and try again.";
         }
       });
     }

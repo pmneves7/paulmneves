@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    name="description"
+    content="Digitize numerical data from an image of a plot by calibrating the axes and clicking on data points."
+  />
+  <title>Plot digitizer | Paul M. Neves</title>
+  <link rel="canonical" href="https://paulmneves.com/tools/plot-digitizer.html" />
+  <link rel="icon" type="image/png" href="../media/favicon.png" />
+  <link rel="stylesheet" href="../css/site.css" />
+</head>
+<body>
+  <header>
+    <nav aria-label="Main navigation">
+      <a class="site-title" href="../index.html">Paul M. Neves</a>
+      <div class="nav-links">
+        <a href="../index.html#biography">Biography</a>
+        <a href="../research.html">Research</a>
+        <a href="../publications.html">Publications</a>
+        <a href="../news.html">News</a>
+        <a href="../gallery.html">Gallery</a>
+        <a href="../tools.html">Tools</a>
+        <a href="../index.html#contact">Contact</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <header class="page-header">
+      <h1>Plot digitizer</h1>
+      <p class="lead">
+        Extract numerical data from an image of a plot, or measure distances and angles on a map-like
+        image. Load an image, optionally clean it up in <em>Figure cleanup</em>, then calibrate axes or a
+        scale bar and click to digitize or measure. A zoomed cursor preview helps you align precisely.
+      </p>
+      <p class="tool-disclaimer">
+        <strong>Heads up:</strong> These tools are experimental and may still have bugs/errors.
+        If you spot one, please <a href="../index.html#contact">tell me</a>!
+      </p>
+    </header>
+
+    <div class="tool-panel tool-panel-wide">
+      <section class="tool-section">
+        <h2>1. Load image</h2>
+        <p class="tool-note">
+          Upload an image file, paste an image from the clipboard (<kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>V</kbd>
+          anywhere on this page), or load one from a URL.
+        </p>
+        <div class="digitizer-loader">
+          <button type="button" class="button secondary" id="dig-upload-btn">Choose file…</button>
+          <input type="file" accept="image/*" id="dig-file-input" hidden />
+          <input
+            type="text"
+            id="dig-url-input"
+            class="digitizer-url-input"
+            placeholder="https://example.com/plot.png"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button type="button" class="button secondary" id="dig-url-btn">Load URL</button>
+          <button type="button" class="button secondary" id="dig-clear-btn" hidden>Clear image</button>
+        </div>
+        <p class="tool-note digitizer-load-error" id="dig-load-error" hidden></p>
+      </section>
+
+      <section class="tool-section digitizer-workspace" id="dig-workspace" hidden>
+        <h2>2. Calibrate, edit, and digitize</h2>
+
+        <div class="digitizer-tabs" role="tablist" aria-label="Tool mode">
+          <button type="button" class="digitizer-tab is-active" data-tab="edit" role="tab" aria-selected="true" id="dig-tab-edit">Figure cleanup</button>
+          <button type="button" class="digitizer-tab" data-tab="plot" role="tab" aria-selected="false" id="dig-tab-plot">Plot digitizer</button>
+          <button type="button" class="digitizer-tab" data-tab="map" role="tab" aria-selected="false" id="dig-tab-map">Map / measurement</button>
+        </div>
+
+        <div class="digitizer-workspace-toolbar">
+          <button type="button" class="tool-inline-button" id="dig-clear-calibrations" title="Remove axis and scale calibration, digitized points, and measurements">Clear all calibrations and points</button>
+        </div>
+
+        <div data-tab-pane="edit">
+          <p class="tool-note">
+            Adjust orientation, perspective, lens distortion, moiré reduction, and crop before calibrating. Changes
+            preview live on the canvas — use the controls at right (scroll if needed), then
+            <em>Apply edits</em> below the image to bake them in. Calibration points move with
+            the image when you apply.
+          </p>
+          <div class="digitizer-mode-bar" role="toolbar" aria-label="Figure cleanup mode">
+            <button type="button" class="digitizer-mode-btn" data-mode="edit-crop">Crop region</button>
+            <button type="button" class="digitizer-mode-btn" data-mode="edit-persp">Correct perspective</button>
+            <button type="button" class="digitizer-mode-btn" data-mode="edit-lens-center">Distortion center</button>
+            <button type="button" class="digitizer-mode-btn" data-mode="edit-bg-pick">Background eyedropper</button>
+          </div>
+        </div>
+
+        <div data-tab-pane="plot" hidden>
+          <p class="tool-note">
+            Click two reference points on the <strong>Y</strong> axis and two on the <strong>X</strong> axis
+            (in any order), then enter their values to the right. When all four are set, switch to
+            <em>Add points</em> and click inside the plot to digitize data. Right-click an added point
+            (or use the table) to remove it.
+          </p>
+          <div class="digitizer-mode-bar" role="toolbar" aria-label="Plot mode">
+            <button type="button" class="digitizer-mode-btn" data-mode="y1">Set Y₁</button>
+            <button type="button" class="digitizer-mode-btn" data-mode="y2">Set Y₂</button>
+            <button type="button" class="digitizer-mode-btn" data-mode="x1">Set X₁</button>
+            <button type="button" class="digitizer-mode-btn" data-mode="x2">Set X₂</button>
+            <button type="button" class="digitizer-mode-btn" data-mode="add" disabled>Add points</button>
+          </div>
+        </div>
+
+        <div data-tab-pane="map" hidden>
+          <p class="tool-note">
+            Click the two endpoints of a known-length scale bar (or any two points whose real
+            separation you know), then enter their real-world distance to the right. Switch to
+            <em>Distance</em> or <em>Angle</em> mode to measure with two or three clicks. Right-click
+            any measurement endpoint (or use the table) to remove it.
+          </p>
+          <div class="digitizer-mode-bar" role="toolbar" aria-label="Map mode">
+            <button type="button" class="digitizer-mode-btn" data-mode="scale-a">Set scale P₁</button>
+            <button type="button" class="digitizer-mode-btn" data-mode="scale-b">Set scale P₂</button>
+            <button type="button" class="digitizer-mode-btn" data-mode="measure-distance">Measure distance</button>
+            <button type="button" class="digitizer-mode-btn" data-mode="measure-angle">Measure angle</button>
+          </div>
+        </div>
+
+        <div class="digitizer-canvas-area">
+          <div class="digitizer-canvas-column">
+            <div class="digitizer-canvas-wrap is-editing" id="dig-canvas-wrap">
+              <canvas id="dig-canvas"></canvas>
+              <p class="digitizer-status" id="dig-status" aria-live="polite"></p>
+            </div>
+
+            <div class="digitizer-edit-apply-panel" data-tab-pane="edit">
+              <h3 class="tool-subheading">Apply &amp; export</h3>
+              <p class="tool-note digitizer-edit-note">
+                <em>Apply edits</em> bakes the current preview into the working image.
+                <em>Reset preview</em> clears pending slider and crop changes only.
+                <em>Revert to original</em> restores the image exactly as it was when loaded
+                and clears all calibration points and measurements.
+              </p>
+              <div class="digitizer-edit-actions digitizer-edit-actions-primary">
+                <button type="button" class="button secondary" id="dig-edit-apply">Apply edits</button>
+                <button type="button" class="button secondary" id="dig-edit-reset">Reset preview</button>
+              </div>
+              <div class="digitizer-edit-actions">
+                <button type="button" class="button secondary" id="dig-edit-revert">Revert to original</button>
+                <button type="button" class="button secondary" id="dig-edit-save">Save image…</button>
+              </div>
+              <p class="tool-note digitizer-edit-readout" id="dig-edit-readout">No pending edits.</p>
+            </div>
+          </div>
+
+          <aside class="digitizer-sidebar">
+            <div class="digitizer-sidebar-preview">
+              <h3 class="tool-subheading">Cursor preview</h3>
+              <div class="digitizer-zoom-wrap">
+                <canvas id="dig-zoom"></canvas>
+              </div>
+              <div class="digitizer-coord" id="dig-coord" aria-live="polite">
+                <div class="digitizer-coord-line" id="dig-coord-pixel">Move the cursor over the plot.</div>
+                <div class="digitizer-coord-line" id="dig-coord-data"></div>
+                <div class="digitizer-coord-line digitizer-coord-selection" id="dig-coord-selected"></div>
+              </div>
+            </div>
+
+            <div data-tab-pane="plot" hidden>
+              <h3 class="tool-subheading">Axis values</h3>
+              <div class="digitizer-axis-fields">
+                <div class="tool-field">
+                  <label for="dig-y1-val">Y₁ value</label>
+                  <input type="number" step="any" id="dig-y1-val" placeholder="e.g. 0" />
+                </div>
+                <div class="tool-field">
+                  <label for="dig-y2-val">Y₂ value</label>
+                  <input type="number" step="any" id="dig-y2-val" placeholder="e.g. 1" />
+                </div>
+                <div class="tool-field">
+                  <label for="dig-x1-val">X₁ value</label>
+                  <input type="number" step="any" id="dig-x1-val" placeholder="e.g. 0" />
+                </div>
+                <div class="tool-field">
+                  <label for="dig-x2-val">X₂ value</label>
+                  <input type="number" step="any" id="dig-x2-val" placeholder="e.g. 10" />
+                </div>
+              </div>
+              <div class="digitizer-axis-actions">
+                <button type="button" class="tool-inline-button" id="dig-swap-y">Swap Y₁ ↔ Y₂</button>
+                <button type="button" class="tool-inline-button" id="dig-swap-x">Swap X₁ ↔ X₂</button>
+                <button type="button" class="tool-inline-button" id="dig-link-origin" title="Set X₁ to the same pixel position as Y₁ (or vice versa) for a shared origin">Link X₁ = Y₁</button>
+              </div>
+              <p class="tool-note digitizer-axis-actions-note">
+                Tip: left-click any marker or point to select it, then use the
+                <kbd>←</kbd> <kbd>↑</kbd> <kbd>→</kbd> <kbd>↓</kbd> keys to nudge it one
+                pixel at a time (hold <kbd>Shift</kbd> for ten). Press <kbd>Esc</kbd> to deselect
+                or cancel a measurement in progress.
+              </p>
+            </div>
+
+            <div data-tab-pane="plot" hidden>
+              <h3 class="tool-subheading">Axis options</h3>
+              <div class="digitizer-axis-options">
+                <label><input type="checkbox" id="dig-logx" /> Logarithmic X axis</label>
+                <label><input type="checkbox" id="dig-logy" /> Logarithmic Y axis</label>
+                <label>
+                  <input type="checkbox" id="dig-transformed" />
+                  Transformed (non-orthogonal) axes
+                </label>
+              </div>
+              <p class="tool-note digitizer-options-note">
+                Enable <em>transformed axes</em> if the plot was photographed off-axis so the X and Y
+                axes are not perpendicular in the image.
+              </p>
+            </div>
+
+            <div class="digitizer-edit-sidebar-scroll" data-tab-pane="edit">
+              <h3 class="tool-subheading">Orientation</h3>
+              <div class="digitizer-edit-actions">
+                <button type="button" class="tool-inline-button" id="dig-rotate-ccw" title="Rotate 90° counter-clockwise">↺ Rotate 90° CCW</button>
+                <button type="button" class="tool-inline-button" id="dig-flip-h" title="Mirror horizontally">⇋ Flip H</button>
+                <button type="button" class="tool-inline-button" id="dig-flip-v" title="Mirror vertically">⇅ Flip V</button>
+              </div>
+
+              <div class="digitizer-edit-param">
+                <label for="dig-edit-rotation">Fine rotation (°)</label>
+                <div class="digitizer-edit-param-controls">
+                  <input type="range" id="dig-edit-rotation-range" min="-45" max="45" step="0.1" value="0" />
+                  <input type="number" id="dig-edit-rotation" step="0.1" min="-45" max="45" value="0" />
+                </div>
+              </div>
+              <div class="digitizer-edit-param">
+                <label for="dig-edit-skew-x">Skew X (°)</label>
+                <div class="digitizer-edit-param-controls">
+                  <input type="range" id="dig-edit-skew-x-range" min="-30" max="30" step="0.1" value="0" />
+                  <input type="number" id="dig-edit-skew-x" step="0.1" min="-30" max="30" value="0" />
+                </div>
+              </div>
+              <div class="digitizer-edit-param">
+                <label for="dig-edit-skew-y">Skew Y (°)</label>
+                <div class="digitizer-edit-param-controls">
+                  <input type="range" id="dig-edit-skew-y-range" min="-30" max="30" step="0.1" value="0" />
+                  <input type="number" id="dig-edit-skew-y" step="0.1" min="-30" max="30" value="0" />
+                </div>
+              </div>
+
+              <h3 class="tool-subheading">Correct perspective</h3>
+              <p class="tool-note digitizer-edit-note">
+                Use <em>Correct perspective</em> on the image to drag the four green corner handles
+                onto the plot edges, and the blue edge handles to bow each side (barrel or pincushion).
+                Apply edits warps the whole image so the region becomes rectangular. Crop and perspective
+                correction cannot be used at the same time — switching modes clears the other.
+              </p>
+              <button type="button" class="tool-inline-button digitizer-edit-reset-corners" id="dig-edit-reset-corners">Reset to image bounds</button>
+
+              <h3 class="tool-subheading">Lens distortion</h3>
+              <div class="digitizer-edit-param">
+                <label for="dig-edit-lens">Barrel / pincushion</label>
+                <div class="digitizer-edit-param-controls">
+                  <input type="range" id="dig-edit-lens-range" min="-100" max="100" step="1" value="0" />
+                  <input type="number" id="dig-edit-lens" step="1" min="-100" max="100" value="0" />
+                </div>
+              </div>
+              <p class="tool-note digitizer-edit-note">Negative values correct barrel distortion; positive values correct pincushion. Set the distortion center on the image if the optical center is off-center.</p>
+
+              <h3 class="tool-subheading">Display moiré reduction</h3>
+              <p class="tool-note digitizer-edit-note">
+                For photos of screens. Start with edge-preserving smoothing; switch to frequency notch
+                if banding or grid patterns remain.
+              </p>
+              <div class="digitizer-edit-moire-methods" role="radiogroup" aria-label="Moiré reduction method">
+                <label>
+                  <input type="radio" name="dig-edit-moire-method" value="bilateral" checked />
+                  Edge-preserving (bilateral)
+                </label>
+                <label>
+                  <input type="radio" name="dig-edit-moire-method" value="fft" />
+                  Frequency notch (FFT)
+                </label>
+              </div>
+              <div class="digitizer-edit-param">
+                <label for="dig-edit-moire">Strength</label>
+                <div class="digitizer-edit-param-controls">
+                  <input type="range" id="dig-edit-moire-range" min="0" max="100" step="1" value="0" />
+                  <input type="number" id="dig-edit-moire" step="1" min="0" max="100" value="0" />
+                </div>
+              </div>
+
+              <h3 class="tool-subheading">Crop</h3>
+              <p class="tool-note digitizer-edit-note">Crop and perspective correction are mutually exclusive — switching modes clears the other. Draw a rectangular crop region on the image, or use the fields below for exact values.</p>
+              <div class="digitizer-edit-crop-fields">
+                <div class="tool-field">
+                  <label for="dig-edit-crop-x">X</label>
+                  <input type="number" id="dig-edit-crop-x" step="1" min="0" value="0" />
+                </div>
+                <div class="tool-field">
+                  <label for="dig-edit-crop-y">Y</label>
+                  <input type="number" id="dig-edit-crop-y" step="1" min="0" value="0" />
+                </div>
+                <div class="tool-field">
+                  <label for="dig-edit-crop-w">Width</label>
+                  <input type="number" id="dig-edit-crop-w" step="1" min="1" value="0" />
+                </div>
+                <div class="tool-field">
+                  <label for="dig-edit-crop-h">Height</label>
+                  <input type="number" id="dig-edit-crop-h" step="1" min="1" value="0" />
+                </div>
+              </div>
+              <button type="button" class="tool-inline-button" id="dig-edit-clear-crop">Clear crop</button>
+
+              <h3 class="tool-subheading">Background transparency</h3>
+              <p class="tool-note digitizer-edit-note">
+                Remove background colors and make them transparent. Use the eyedropper on the image,
+                or enter a color code and click <em>Add color</em>. Repeat for multiple background colors.
+                Edge pixels stay saturated; only alpha fades (no grey halos).
+              </p>
+              <div class="digitizer-edit-param">
+                <label for="dig-edit-bg-tolerance">Match tolerance</label>
+                <div class="digitizer-edit-param-controls">
+                  <input type="range" id="dig-edit-bg-tolerance-range" min="0" max="120" step="1" value="24" />
+                  <input type="number" id="dig-edit-bg-tolerance" step="1" min="0" max="120" value="24" />
+                </div>
+              </div>
+              <div class="digitizer-edit-param">
+                <label for="dig-edit-bg-softness">Edge softness</label>
+                <div class="digitizer-edit-param-controls">
+                  <input type="range" id="dig-edit-bg-softness-range" min="0" max="120" step="1" value="32" />
+                  <input type="number" id="dig-edit-bg-softness" step="1" min="0" max="120" value="32" />
+                </div>
+              </div>
+              <div class="digitizer-edit-color-row">
+                <input type="color" id="dig-edit-bg-color" value="#ffffff" title="Pick a color" />
+                <input type="text" id="dig-edit-bg-hex" class="digitizer-edit-hex-input" placeholder="#ffffff" spellcheck="false" autocomplete="off" maxlength="9" />
+                <button type="button" class="tool-inline-button" id="dig-edit-bg-add">Add color</button>
+              </div>
+              <ul class="digitizer-edit-key-list" id="dig-edit-bg-key-list" aria-label="Background colors to remove"></ul>
+              <button type="button" class="tool-inline-button" id="dig-edit-bg-clear">Clear all background colors</button>
+            </div>
+
+            <div data-tab-pane="map" hidden>
+              <h3 class="tool-subheading">Scale calibration</h3>
+              <div class="digitizer-scale-fields">
+                <div class="tool-field">
+                  <label for="dig-scale-distance">Real distance P₁ → P₂</label>
+                  <input type="number" step="any" min="0" id="dig-scale-distance" placeholder="e.g. 100" />
+                </div>
+                <div class="tool-field">
+                  <label for="dig-scale-unit">Unit (optional)</label>
+                  <input type="text" id="dig-scale-unit" placeholder="e.g. μm" maxlength="16" autocomplete="off" />
+                </div>
+              </div>
+              <div class="digitizer-axis-actions">
+                <button type="button" class="tool-inline-button" id="dig-scale-swap">Swap P₁ ↔ P₂</button>
+              </div>
+              <p class="tool-note digitizer-scale-readout" id="dig-scale-readout">
+                Set both scale endpoints and a real distance to enable measurements.
+              </p>
+              <p class="tool-note digitizer-axis-actions-note">
+                Distances and angles assume a uniform image scale. Use the
+                <em>Figure cleanup</em> tab if the picture needs to be re-oriented or corrected first.
+              </p>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="tool-section digitizer-data" id="dig-data" hidden>
+        <div data-tab-pane="plot" hidden>
+          <div class="digitizer-data-header">
+            <h2>3. Digitized points</h2>
+            <div class="digitizer-data-actions">
+              <button type="button" class="button secondary" id="dig-copy-btn">Copy CSV</button>
+              <button type="button" class="button secondary" id="dig-download-btn">Download CSV</button>
+              <button type="button" class="button secondary" id="dig-clear-points-btn">Clear all points</button>
+            </div>
+          </div>
+          <p class="tool-note" id="dig-data-note"></p>
+          <div class="tool-table-wrap">
+            <table class="tool-table digitizer-points-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>X</th>
+                  <th>Y</th>
+                  <th aria-label="Actions"></th>
+                </tr>
+              </thead>
+              <tbody id="dig-points-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div data-tab-pane="map" hidden>
+          <div class="digitizer-data-header">
+            <h2>3. Measurements</h2>
+            <div class="digitizer-data-actions">
+              <button type="button" class="button secondary" id="dig-copy-measurements">Copy</button>
+              <button type="button" class="button secondary" id="dig-clear-measurements">Clear all</button>
+            </div>
+          </div>
+          <p class="tool-note" id="dig-measurements-note"></p>
+          <div class="tool-table-wrap">
+            <table class="tool-table digitizer-measurements-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Type</th>
+                  <th>Value</th>
+                  <th>Endpoints (px)</th>
+                  <th aria-label="Actions"></th>
+                </tr>
+              </thead>
+              <tbody id="dig-measurements-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <p class="back-link-panel"><a href="../tools.html">← Back to tools</a></p>
+  </main>
+
+  <footer>
+    © <span id="year"></span> Paul M. Neves. All rights reserved.
+  </footer>
+
+  <script src="../js/site.js"></script>
+  <script src="../js/plot-digitizer-edit.js"></script>
+  <script src="../js/plot-digitizer.js"></script>
+</body>
+</html>
