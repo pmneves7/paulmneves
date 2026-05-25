@@ -502,6 +502,33 @@ section {
   outline-offset: 1px;
 }
 
+.tool-field input.tool-input-readonly,
+.tool-field input[readonly].tool-input-readonly {
+  background: rgba(48, 92, 138, 0.08);
+  border-style: dashed;
+  color: var(--accent-dark);
+  cursor: not-allowed;
+  font-weight: 600;
+}
+
+.tool-inline-button {
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.tool-inline-button:hover {
+  background: var(--accent);
+  color: white;
+}
+
 .tool-note {
   color: var(--muted);
   font-size: 0.9rem;

@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    name="description"
+    content="Plan scan timings for a fixed total run time, or estimate the finish time of a scan sequence already in progress."
+  />
+  <title>Scan timing calculator | Paul M. Neves</title>
+  <link rel="canonical" href="https://paulmneves.com/tools/scan-timing.html" />
+  <link rel="icon" type="image/png" href="../media/favicon.png" />
+  <link rel="stylesheet" href="../css/site.css" />
+</head>
+<body>
+  <header>
+    <nav aria-label="Main navigation">
+      <a class="site-title" href="../index.html">Paul M. Neves</a>
+      <div class="nav-links">
+        <a href="../index.html#biography">Biography</a>
+        <a href="../research.html">Research</a>
+        <a href="../publications.html">Publications</a>
+        <a href="../news.html">News</a>
+        <a href="../gallery.html">Gallery</a>
+        <a href="../tools.html">Tools</a>
+        <a href="../index.html#contact">Contact</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <header class="page-header">
+      <h1>Scan timing calculator</h1>
+      <p class="lead">
+        Plan a series of equal-length scans for a fixed total run time, or estimate when a sequence
+        already in progress will finish from a calibration window of a few completed scans.
+      </p>
+      <p class="tool-disclaimer">
+        <strong>Heads up:</strong> These tools are experimental and may still have bugs/errors.
+        If you spot one, please <a href="../index.html#contact">tell me</a>!
+      </p>
+    </header>
+
+    <div class="tool-panel tool-panel-wide">
+      <h2>1. Plan a scan series</h2>
+      <p class="tool-note">
+        For a series of <em>N</em> equal-length scans separated by a fixed dead time, the total run time
+        is <code>T = N · t<sub>scan</sub> + (N − 1) · t<sub>dead</sub></code>. Pick which quantity to solve
+        for; the remaining three boxes are your inputs. Durations accept seconds (<code>600</code>),
+        colon notation (<code>10:00</code>, <code>1:30:00</code>), or unit tokens
+        (<code>1h 30m</code>, <code>10 min</code>).
+      </p>
+      <form id="plan-form">
+        <div class="tool-grid tool-grid-aligned">
+          <div class="tool-field">
+            <label for="plan-solve-for">Solve for</label>
+            <select id="plan-solve-for">
+              <option value="count" selected>count time per scan</option>
+              <option value="num">number of scans</option>
+              <option value="dead">dead time between scans</option>
+              <option value="total">total run time</option>
+            </select>
+          </div>
+          <div class="tool-field">
+            <label for="plan-num">Number of scans</label>
+            <input type="number" id="plan-num" min="1" step="1" value="10" />
+          </div>
+          <div class="tool-field">
+            <label for="plan-count">Count time per scan</label>
+            <input type="text" id="plan-count" inputmode="decimal" placeholder="e.g. 600 or 10:00 or 10m" />
+          </div>
+          <div class="tool-field">
+            <label for="plan-dead">Dead time between scans</label>
+            <input type="text" id="plan-dead" inputmode="decimal" placeholder="e.g. 30 or 0:30" value="30" />
+          </div>
+          <div class="tool-field">
+            <label for="plan-total">Total run time</label>
+            <input type="text" id="plan-total" inputmode="decimal" placeholder="e.g. 7200 or 2:00:00 or 2h" value="2:00:00" />
+          </div>
+          <div class="tool-field">
+            <label for="plan-start-time">
+              Start time (optional)
+              <button type="button" class="tool-inline-button" id="plan-start-now">use now</button>
+            </label>
+            <input type="time" id="plan-start-time" step="1" />
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <div class="tool-results" aria-live="polite">
+      <div class="tool-results-header">
+        <h2>Plan results</h2>
+        <p id="plan-summary" class="tool-note"></p>
+      </div>
+      <div id="plan-results"></div>
+    </div>
+
+    <div class="tool-panel tool-panel-wide">
+      <h2>2. Estimate finish time from a sequence in progress</h2>
+      <p class="tool-note">
+        Provide a calibration window from the run so far — the start time of scan <em>A</em> and the
+        end time of scan <em>B</em> — to estimate the average elapsed time per scan (count plus dead),
+        and from that the time the full sequence will finish. Times wrap automatically across one
+        midnight; for runs longer than ~24 h enter the calibration window inside a single day.
+      </p>
+      <form id="progress-form">
+        <div class="tool-grid tool-grid-aligned">
+          <div class="tool-field">
+            <label for="progress-total">Total scans in the sequence</label>
+            <input type="number" id="progress-total" min="1" step="1" value="100" />
+          </div>
+          <div class="tool-field">
+            <label for="progress-done">Scans completed so far (optional)</label>
+            <input type="number" id="progress-done" min="0" step="1" placeholder="defaults to scan B" />
+          </div>
+          <div class="tool-field">
+            <label for="progress-cal-a">Calibration: scan number A</label>
+            <input type="number" id="progress-cal-a" min="1" step="1" value="12" />
+          </div>
+          <div class="tool-field">
+            <label for="progress-cal-a-time">A start time</label>
+            <input type="time" id="progress-cal-a-time" step="1" />
+          </div>
+          <div class="tool-field">
+            <label for="progress-cal-b">Calibration: scan number B</label>
+            <input type="number" id="progress-cal-b" min="1" step="1" value="18" />
+          </div>
+          <div class="tool-field">
+            <label for="progress-cal-b-time">B end time</label>
+            <input type="time" id="progress-cal-b-time" step="1" />
+          </div>
+          <div class="tool-field">
+            <label for="progress-current-time">
+              Current time (optional)
+              <button type="button" class="tool-inline-button" id="progress-current-now">use now</button>
+            </label>
+            <input type="time" id="progress-current-time" step="1" placeholder="defaults to B end time" />
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <div class="tool-results" aria-live="polite">
+      <div class="tool-results-header">
+        <h2>Progress estimate</h2>
+        <p id="progress-summary" class="tool-note"></p>
+      </div>
+      <div id="progress-results"></div>
+    </div>
+
+    <p class="back-link-panel"><a href="../tools.html">← Back to tools</a></p>
+  </main>
+
+  <footer>
+    © <span id="year"></span> Paul M. Neves. All rights reserved.
+  </footer>
+
+  <script src="../js/site.js"></script>
+  <script src="../js/scan-timing.js"></script>
+</body>
+</html>
