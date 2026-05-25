@@ -1173,13 +1173,14 @@ footer {
   gap: 1.25rem;
   max-height: 78vh;
   min-height: 0;
+  overflow: hidden;
 }
 
 .digitizer-sidebar-preview {
   flex-shrink: 0;
 }
 
-.digitizer-edit-sidebar-scroll {
+.digitizer-sidebar-scroll {
   flex: 1;
   min-height: 0;
   overflow-x: hidden;
@@ -1189,7 +1190,8 @@ footer {
   scrollbar-gutter: stable;
 }
 
-.digitizer-edit-sidebar-scroll .tool-subheading:first-child {
+.digitizer-sidebar-scroll .tool-subheading:first-child,
+.digitizer-sidebar-scroll [data-tab-pane]:not([hidden]) > .tool-subheading:first-child {
   margin-top: 0;
 }
 
@@ -1312,6 +1314,15 @@ footer {
 .digitizer-options-note {
   margin: 0.65rem 0 0;
   font-size: 0.85rem;
+}
+
+.digitizer-axis-options-heading {
+  margin-top: 1.25rem;
+}
+
+.digitizer-data {
+  clear: both;
+  margin-top: 0.25rem;
 }
 
 .digitizer-data-header {
@@ -1581,12 +1592,12 @@ footer {
 }
 
 .digitizer-canvas-wrap.has-alpha {
-  background-color: #fff;
+  background-color: #868c96;
   background-image:
-    linear-gradient(45deg, #d8dde3 25%, transparent 25%),
-    linear-gradient(-45deg, #d8dde3 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #d8dde3 75%),
-    linear-gradient(-45deg, transparent 75%, #d8dde3 75%);
+    linear-gradient(45deg, #b8bcc4 25%, transparent 25%),
+    linear-gradient(-45deg, #b8bcc4 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #b8bcc4 75%),
+    linear-gradient(-45deg, transparent 75%, #b8bcc4 75%);
   background-size: 16px 16px;
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
 }
@@ -1625,7 +1636,7 @@ footer {
     max-height: none;
   }
 
-  .digitizer-edit-sidebar-scroll {
+  .digitizer-sidebar-scroll {
     max-height: 50vh;
   }
 

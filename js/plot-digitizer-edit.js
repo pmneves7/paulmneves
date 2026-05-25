@@ -37,6 +37,8 @@
     { key: "rotationDeg", range: "dig-edit-rotation-range", num: "dig-edit-rotation", min: -45, max: 45, default: 0 },
     { key: "skewXDeg", range: "dig-edit-skew-x-range", num: "dig-edit-skew-x", min: -30, max: 30, default: 0 },
     { key: "skewYDeg", range: "dig-edit-skew-y-range", num: "dig-edit-skew-y", min: -30, max: 30, default: 0 },
+    { key: "stretchXPercent", range: "dig-edit-stretch-x-range", num: "dig-edit-stretch-x", min: 50, max: 150, default: 100 },
+    { key: "stretchYPercent", range: "dig-edit-stretch-y-range", num: "dig-edit-stretch-y", min: 50, max: 150, default: 100 },
     { key: "lensK", range: "dig-edit-lens-range", num: "dig-edit-lens", min: -100, max: 100, default: 0 },
     { key: "moireStrength", range: "dig-edit-moire-range", num: "dig-edit-moire", min: 0, max: 100, default: 0 }
   ];
@@ -53,6 +55,8 @@
       rotationDeg: 0,
       skewXDeg: 0,
       skewYDeg: 0,
+      stretchXPercent: 100,
+      stretchYPercent: 100,
       lensK: 0,
       moireStrength: 0,
       moireMethod: "bilateral",
@@ -61,6 +65,8 @@
       crop: null,
       customCorners: false,
       perspAwaitingDraw: false,
+      cropAwaitingDraw: false,
+      transparencyEnabled: false,
       transparencyKeys: [],
       transparencyTolerance: 24,
       transparencySoftness: 32
@@ -145,11 +151,12 @@
 
   function clearCrop(state) {
     state.edit.crop = null;
+    state.edit.cropAwaitingDraw = true;
   }
 
   function clearPerspective(state) {
     if (!state.image) return;
-    state.edit.corners = defaultCorners(state.image.width, state.image.height);
+    state.edit.corners = null;
     state.edit.customCorners = false;
     state.edit.perspAwaitingDraw = false;
     if (state.selected && state.selected.type === "persp") {
@@ -273,25 +280,41 @@
     return [A / det, B / det, C / det, D / det, E / det, F / det, G / det, Hh / det, I / det];
   }
 
-  function buildAffineMatrix(edit, w, h) {
+  function buildAffineMatrix(edit, w, h, opts = {}) {
     const cx = (w - 1) / 2;
     const cy = (h - 1) / 2;
     const rot = degToRad(edit.rotationDeg);
     const skx = degToRad(edit.skewXDeg);
     const sky = degToRad(edit.skewYDeg);
+    const sx = opts.skipStretch ? 1 : (edit.stretchXPercent ?? 100) / 100;
+    const sy = opts.skipStretch ? 1 : (edit.stretchYPercent ?? 100) / 100;
     const cos = Math.cos(rot);
     const sin = Math.sin(rot);
     const tx = Math.tan(skx);
     const ty = Math.tan(sky);
-    const m = [
-      cos + ty * sin, -sin + ty * cos, 0,
-      sin + tx * cos, cos + tx * sin, 0
-    ];
-    const e = m[0]; const f = m[1];
-    const g = m[3]; const h2 = m[4];
+    const e = (cos + ty * sin) * sx;
+    const f = (-sin + ty * cos) * sx;
+    const g = (sin + tx * cos) * sy;
+    const h2 = (cos + tx * sin) * sy;
     const txOut = cx - e * cx - f * cy;
     const tyOut = cy - g * cx - h2 * cy;
     return [e, f, txOut, g, h2, tyOut];
+  }
+
+  function hasNonDefaultStretch(edit) {
+    return (edit.stretchXPercent ?? 100) !== 100 || (edit.stretchYPercent ?? 100) !== 100;
+  }
+
+  function computeRectifiedAxes(corners, edit) {
+    const sx = (edit.stretchXPercent ?? 100) / 100;
+    const sy = (edit.stretchYPercent ?? 100) / 100;
+    const topW = dist(corners.tl, corners.tr);
+    const botW = dist(corners.bl, corners.br);
+    const leftH = dist(corners.tl, corners.bl);
+    const rightH = dist(corners.tr, corners.br);
+    const maxU = Math.max(Math.max(topW, botW), 1) * sx;
+    const maxV = Math.max(Math.max(leftH, rightH), 1) * sy;
+    return { maxU, maxV };
   }
 
   function applyAffine(M, p) {
@@ -412,6 +435,30 @@
     return 1 - (d - inner) / Math.max(outer - inner, 1);
   }
 
+  function isTransparencyActive(edit) {
+    return !!(edit.transparencyEnabled && edit.transparencyKeys && edit.transparencyKeys.length);
+  }
+
+  function hasGeometricPendingEdits(edit, src) {
+    if (!edit || !src) return false;
+    if (edit.rotationDeg !== 0 || edit.skewXDeg !== 0 || edit.skewYDeg !== 0) return true;
+    if (hasNonDefaultStretch(edit)) return true;
+    if (edit.lensK !== 0) return true;
+    if ((edit.moireStrength || 0) > 0) return true;
+    if (hasActiveCrop(edit, src)) return true;
+    if (hasActivePerspective(edit, src.width, src.height)) return true;
+    if (edit.lensCenter) {
+      const c = defaultLensCenter(src.width, src.height);
+      if (dist(edit.lensCenter, c) > 0.5) return true;
+    }
+    return false;
+  }
+
+  function shouldShowTransparencyPreview(state) {
+    if (!state || !state.image) return false;
+    return isTransparencyActive(state.edit) && !hasGeometricPendingEdits(state.edit, state.image);
+  }
+
   function applyTransparencyKeys(srcCanvas, keys, tolerance, softness) {
     const w = srcCanvas.width;
     const h = srcCanvas.height;
@@ -497,6 +544,126 @@
 
   function moireBlendAmount(strength) {
     return clamp(strength, 0, 100) / 100;
+  }
+
+  function blendMoireLayers(src, filtered, strength) {
+    const t = moireBlendAmount(strength);
+    if (t <= 0) return cloneCanvas(src);
+
+    const w = src.width;
+    const h = src.height;
+    const srcData = src.getContext("2d").getImageData(0, 0, w, h);
+    const filtData = filtered.getContext("2d").getImageData(0, 0, w, h);
+    const out = src.getContext("2d").createImageData(w, h);
+    const s = srcData.data;
+    const f = filtData.data;
+    const d = out.data;
+    const keep = 1 - t;
+
+    for (let i = 0; i < s.length; i += 4) {
+      d[i] = Math.round(s[i] * keep + f[i] * t);
+      d[i + 1] = Math.round(s[i + 1] * keep + f[i + 1] * t);
+      d[i + 2] = Math.round(s[i + 2] * keep + f[i + 2] * t);
+      d[i + 3] = s[i + 3];
+    }
+
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    c.getContext("2d").putImageData(out, 0, 0);
+    return c;
+  }
+
+  function bilateralFilterCanvas(src) {
+    const w = src.width;
+    const h = src.height;
+    const srcData = src.getContext("2d").getImageData(0, 0, w, h);
+    const s = srcData.data;
+    const out = src.getContext("2d").createImageData(w, h);
+    const d = out.data;
+
+    const sigmaSpace = 2.5;
+    const sigmaRange = 28;
+    const radius = Math.min(6, Math.ceil(sigmaSpace * 2));
+    const spaceDenom = 2 * sigmaSpace * sigmaSpace;
+    const rangeDenom = 2 * sigmaRange * sigmaRange;
+
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const ci = (y * w + x) * 4;
+        const cR = s[ci];
+        const cG = s[ci + 1];
+        const cB = s[ci + 2];
+        let wR = 0;
+        let wG = 0;
+        let wB = 0;
+        let wSum = 0;
+
+        for (let dy = -radius; dy <= radius; dy++) {
+          const yy = clamp(y + dy, 0, h - 1);
+          for (let dx = -radius; dx <= radius; dx++) {
+            const xx = clamp(x + dx, 0, w - 1);
+            const ni = (yy * w + xx) * 4;
+            const spatial = Math.exp(-(dx * dx + dy * dy) / spaceDenom);
+            const dr = s[ni] - cR;
+            const dg = s[ni + 1] - cG;
+            const db = s[ni + 2] - cB;
+            const range = Math.exp(-(dr * dr + dg * dg + db * db) / rangeDenom);
+            const ww = spatial * range;
+            wR += s[ni] * ww;
+            wG += s[ni + 1] * ww;
+            wB += s[ni + 2] * ww;
+            wSum += ww;
+          }
+        }
+
+        if (wSum <= 1e-8) {
+          d[ci] = cR;
+          d[ci + 1] = cG;
+          d[ci + 2] = cB;
+        } else {
+          d[ci] = Math.round(wR / wSum);
+          d[ci + 1] = Math.round(wG / wSum);
+          d[ci + 2] = Math.round(wB / wSum);
+        }
+        d[ci + 3] = s[ci + 3];
+      }
+    }
+
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    c.getContext("2d").putImageData(out, 0, 0);
+    return c;
+  }
+
+  function downscaleCanvas(src, dstW, dstH) {
+    const c = document.createElement("canvas");
+    c.width = dstW;
+    c.height = dstH;
+    const cx = c.getContext("2d");
+    cx.imageSmoothingEnabled = true;
+    cx.drawImage(src, 0, 0, src.width, src.height, 0, 0, dstW, dstH);
+    return c;
+  }
+
+  function upscaleCanvas(src, dstW, dstH) {
+    const c = document.createElement("canvas");
+    c.width = dstW;
+    c.height = dstH;
+    const cx = c.getContext("2d");
+    cx.imageSmoothingEnabled = true;
+    cx.drawImage(src, 0, 0, src.width, src.height, 0, 0, dstW, dstH);
+    return c;
+  }
+
+  function moireWorkingSize(srcW, srcH, maxDim) {
+    const scale = Math.min(1, maxDim / Math.max(srcW, srcH));
+    return {
+      scale,
+      w: Math.max(8, Math.round(srcW * scale)),
+      h: Math.max(8, Math.round(srcH * scale))
+    };
   }
 
   function nextPow2(n) {
@@ -654,10 +821,7 @@
 
     const srcW = src.width;
     const srcH = src.height;
-    const maxDim = 512;
-    const scale = Math.min(1, maxDim / Math.max(srcW, srcH));
-    const sw = Math.max(8, Math.round(srcW * scale));
-    const sh = Math.max(8, Math.round(srcH * scale));
+    const { w: sw, h: sh } = moireWorkingSize(srcW, srcH, 512);
     const pw = nextPow2(sw);
     const ph = nextPow2(sh);
 
@@ -666,7 +830,7 @@
     small.height = ph;
     const sctx = small.getContext("2d");
     sctx.imageSmoothingEnabled = true;
-    sctx.drawImage(src, 0, 0, sw, sh, 0, 0, pw, ph);
+    sctx.drawImage(src, 0, 0, srcW, srcH, 0, 0, pw, ph);
     const gray = sctx.getImageData(0, 0, pw, ph).data;
 
     const n = pw * ph;
@@ -697,18 +861,16 @@
     }
     filteredSmall.getContext("2d").putImageData(fData, 0, 0);
 
-    const filteredFull = document.createElement("canvas");
-    filteredFull.width = srcW;
-    filteredFull.height = srcH;
-    filteredFull.getContext("2d").drawImage(filteredSmall, 0, 0, pw, ph, 0, 0, srcW, srcH);
-
+    const filteredFull = upscaleCanvas(filteredSmall, srcW, srcH);
     const srcData = src.getContext("2d").getImageData(0, 0, srcW, srcH);
     const filtData = filteredFull.getContext("2d").getImageData(0, 0, srcW, srcH);
-    const out = src.getContext("2d").createImageData(srcW, srcH);
+    const ratioFiltered = document.createElement("canvas");
+    ratioFiltered.width = srcW;
+    ratioFiltered.height = srcH;
+    const out = ratioFiltered.getContext("2d").createImageData(srcW, srcH);
     const s = srcData.data;
     const f = filtData.data;
     const d = out.data;
-    const keep = 1 - t;
 
     for (let i = 0; i < s.length; i += 4) {
       const fy = f[i] * 0.299 + f[i + 1] * 0.587 + f[i + 2] * 0.114;
@@ -716,86 +878,30 @@
       let ratio = 1;
       if (sy > 4 && fy > 1) ratio = fy / sy;
       ratio = clamp(ratio, 0.35, 2.5);
-      const nr = clamp(s[i] * ratio, 0, 255);
-      const ng = clamp(s[i + 1] * ratio, 0, 255);
-      const nb = clamp(s[i + 2] * ratio, 0, 255);
-      d[i] = Math.round(s[i] * keep + nr * t);
-      d[i + 1] = Math.round(s[i + 1] * keep + ng * t);
-      d[i + 2] = Math.round(s[i + 2] * keep + nb * t);
+      d[i] = clamp(Math.round(s[i] * ratio), 0, 255);
+      d[i + 1] = clamp(Math.round(s[i + 1] * ratio), 0, 255);
+      d[i + 2] = clamp(Math.round(s[i + 2] * ratio), 0, 255);
       d[i + 3] = s[i + 3];
     }
-
-    const c = document.createElement("canvas");
-    c.width = srcW;
-    c.height = srcH;
-    c.getContext("2d").putImageData(out, 0, 0);
-    return c;
+    ratioFiltered.getContext("2d").putImageData(out, 0, 0);
+    return blendMoireLayers(src, ratioFiltered, strength);
   }
 
   function bilateralMoireCanvas(src, strength) {
     const t = moireBlendAmount(strength);
     if (t <= 0) return cloneCanvas(src);
 
-    const w = src.width;
-    const h = src.height;
-    const srcData = src.getContext("2d").getImageData(0, 0, w, h);
-    const s = srcData.data;
-    const out = src.getContext("2d").createImageData(w, h);
-    const d = out.data;
-
-    const sigmaSpace = 1 + t * 4;
-    const sigmaRange = 8 + t * 42;
-    const radius = Math.min(8, Math.ceil(sigmaSpace * 2));
-    const spaceDenom = 2 * sigmaSpace * sigmaSpace;
-    const rangeDenom = 2 * sigmaRange * sigmaRange;
-
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const ci = (y * w + x) * 4;
-        const cR = s[ci];
-        const cG = s[ci + 1];
-        const cB = s[ci + 2];
-        let wR = 0;
-        let wG = 0;
-        let wB = 0;
-        let wSum = 0;
-
-        for (let dy = -radius; dy <= radius; dy++) {
-          const yy = clamp(y + dy, 0, h - 1);
-          for (let dx = -radius; dx <= radius; dx++) {
-            const xx = clamp(x + dx, 0, w - 1);
-            const ni = (yy * w + xx) * 4;
-            const spatial = Math.exp(-(dx * dx + dy * dy) / spaceDenom);
-            const dr = s[ni] - cR;
-            const dg = s[ni + 1] - cG;
-            const db = s[ni + 2] - cB;
-            const range = Math.exp(-(dr * dr + dg * dg + db * db) / rangeDenom);
-            const ww = spatial * range;
-            wR += s[ni] * ww;
-            wG += s[ni + 1] * ww;
-            wB += s[ni + 2] * ww;
-            wSum += ww;
-          }
-        }
-
-        if (wSum <= 1e-8) {
-          d[ci] = cR;
-          d[ci + 1] = cG;
-          d[ci + 2] = cB;
-        } else {
-          d[ci] = Math.round(cR * (1 - t) + (wR / wSum) * t);
-          d[ci + 1] = Math.round(cG * (1 - t) + (wG / wSum) * t);
-          d[ci + 2] = Math.round(cB * (1 - t) + (wB / wSum) * t);
-        }
-        d[ci + 3] = s[ci + 3];
-      }
+    const srcW = src.width;
+    const srcH = src.height;
+    const { w: sw, h: sh, scale } = moireWorkingSize(srcW, srcH, 640);
+    let filtered;
+    if (scale < 1) {
+      const small = downscaleCanvas(src, sw, sh);
+      filtered = upscaleCanvas(bilateralFilterCanvas(small), srcW, srcH);
+    } else {
+      filtered = bilateralFilterCanvas(src);
     }
-
-    const c = document.createElement("canvas");
-    c.width = w;
-    c.height = h;
-    c.getContext("2d").putImageData(out, 0, 0);
-    return c;
+    return blendMoireLayers(src, filtered, strength);
   }
 
   function applyMoireReduction(src, edit) {
@@ -890,9 +996,8 @@
     return { x: uv.u * maxU, y: uv.v * maxV };
   }
 
-  function computePerspectiveOutputLayout(corners, srcW, srcH) {
-    const maxU = Math.max(srcW - 1, 1);
-    const maxV = Math.max(srcH - 1, 1);
+  function computePerspectiveOutputLayout(corners, srcW, srcH, edit) {
+    const { maxU, maxV } = computeRectifiedAxes(corners, edit);
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
@@ -928,10 +1033,10 @@
     return { padLeft, padTop, outW, outH, maxU, maxV };
   }
 
-  function warpPerspectiveFullImage(src, corners) {
+  function warpPerspectiveFullImage(src, corners, edit) {
     const srcW = src.width;
     const srcH = src.height;
-    const layout = computePerspectiveOutputLayout(corners, srcW, srcH);
+    const layout = computePerspectiveOutputLayout(corners, srcW, srcH, edit);
     const { padLeft, padTop, outW, outH, maxU, maxV } = layout;
     const srcCtx = src.getContext("2d");
     const srcData = srcCtx.getImageData(0, 0, srcW, srcH);
@@ -1073,8 +1178,7 @@
     const center = edit.lensCenter || defaultLensCenter(srcW, srcH);
     const k = lensKFromSlider(edit.lensK);
 
-    const moireCanvas = applyMoireReduction(src, edit);
-    const lensCanvas = warpLensCanvas(moireCanvas, edit);
+    const lensCanvas = warpLensCanvas(src, edit);
     const corners = getEffectiveCorners(edit, srcW, srcH);
     const lensCorners = lensWarpCorners(corners, center, k, srcW, srcH);
 
@@ -1087,7 +1191,7 @@
     const activeCrop = hasActiveCrop(edit, src);
     const usePersp = opts.applyPerspective === true && activePersp && !activeCrop;
     if (usePersp) {
-      const warped = warpPerspectiveFullImage(lensCanvas, lensCorners);
+      const warped = warpPerspectiveFullImage(lensCanvas, lensCorners, edit);
       perspCanvas = warped.canvas;
       perspW = warped.outW;
       perspH = warped.outH;
@@ -1095,8 +1199,9 @@
       perspMax = { u: warped.maxU, v: warped.maxV };
     }
 
-    const M = buildAffineMatrix(edit, perspW, perspH);
-    const hasAffine = edit.rotationDeg !== 0 || edit.skewXDeg !== 0 || edit.skewYDeg !== 0;
+    const M = buildAffineMatrix(edit, perspW, perspH, { skipStretch: usePersp });
+    const hasAffine = edit.rotationDeg !== 0 || edit.skewXDeg !== 0 || edit.skewYDeg !== 0
+      || (!usePersp && hasNonDefaultStretch(edit));
     let affineCanvas = perspCanvas;
     let affineMeta = null;
     if (hasAffine) {
@@ -1104,13 +1209,19 @@
       affineCanvas = affineMeta.canvas;
     }
 
+    const moireCanvas = applyMoireReduction(affineCanvas, edit);
+
     const cropRect = activeCrop && !activePersp ? edit.crop : null;
-    const keyedCanvas = applyTransparencyKeys(
-      affineCanvas,
-      edit.transparencyKeys,
-      edit.transparencyTolerance,
-      edit.transparencySoftness
-    );
+    const tolerance = Number(edit.transparencyTolerance);
+    const softness = Number(edit.transparencySoftness);
+    const keyedCanvas = isTransparencyActive(edit)
+      ? applyTransparencyKeys(
+        moireCanvas,
+        edit.transparencyKeys,
+        Number.isFinite(tolerance) ? tolerance : 24,
+        Number.isFinite(softness) ? softness : 32
+      )
+      : moireCanvas;
     const cropped = applyCropCanvas(keyedCanvas, cropRect);
 
     function mapSourceToDisplay(p) {
@@ -1155,7 +1266,7 @@
 
     return {
       canvas: keyedCanvas,
-      preChromaCanvas: affineCanvas,
+      preChromaCanvas: moireCanvas,
       finalCanvas: cropped.canvas,
       crop: cropped.crop,
       mapSourceToDisplay,
@@ -1184,6 +1295,7 @@
   function hasPendingEdits(edit, src) {
     if (!edit || !src) return false;
     if (edit.rotationDeg !== 0 || edit.skewXDeg !== 0 || edit.skewYDeg !== 0) return true;
+    if (hasNonDefaultStretch(edit)) return true;
     if (edit.lensK !== 0) return true;
     if ((edit.moireStrength || 0) > 0) return true;
     if (hasActiveCrop(edit, src)) return true;
@@ -1192,7 +1304,7 @@
       const c = defaultLensCenter(src.width, src.height);
       if (dist(edit.lensCenter, c) > 0.5) return true;
     }
-    if (edit.transparencyKeys && edit.transparencyKeys.length) return true;
+    if (edit.transparencyEnabled && edit.transparencyKeys && edit.transparencyKeys.length) return true;
     return false;
   }
 
@@ -1218,9 +1330,20 @@
       return null;
     }
     const edit = state.edit;
-    if (!force && !previewDirty && previewCanvas && !opts.applyPerspective) return previewCanvas;
+    if (
+      !force
+      && !previewDirty
+      && previewCanvas
+      && !opts.applyPerspective
+      && !isTransparencyActive(edit)
+    ) {
+      return previewCanvas;
+    }
 
-    if (!hasPendingEdits(edit, state.image) && !opts.applyPerspective) {
+    const needsPreview = hasPendingEdits(edit, state.image)
+      || isTransparencyActive(edit)
+      || opts.applyPerspective;
+    if (!needsPreview) {
       previewDirty = false;
       previewCanvas = state.image;
       previewMeta = identityPreviewMeta(state.image);
@@ -1275,6 +1398,7 @@
     if (![x, y, w, h].every(Number.isFinite)) return;
     if (w <= 0 || h <= 0) {
       state.edit.crop = null;
+      state.edit.cropAwaitingDraw = true;
       return;
     }
     clearPerspective(state);
@@ -1284,6 +1408,7 @@
       w: clamp(w, 1, pw - x),
       h: clamp(h, 1, ph - y)
     };
+    state.edit.cropAwaitingDraw = false;
   }
 
   function updateReadout(state) {
@@ -1298,7 +1423,7 @@
     }
     const pw = previewMeta && previewMeta.finalCanvas ? previewMeta.finalCanvas.width : (previewCanvas ? previewCanvas.width : 0);
     const ph = previewMeta && previewMeta.finalCanvas ? previewMeta.finalCanvas.height : (previewCanvas ? previewCanvas.height : 0);
-    const keyNote = state.edit.transparencyKeys.length
+    const keyNote = isTransparencyActive(state.edit)
       ? ` · ${state.edit.transparencyKeys.length} background color${state.edit.transparencyKeys.length === 1 ? "" : "s"}`
       : "";
     els.readout.textContent = `Preview: ${pw} × ${ph} px${keyNote} — click Apply to bake into the working image.`;
@@ -1345,7 +1470,6 @@
       if (els[spec.key + "Range"]) els[spec.key + "Range"].value = String(clamped);
       numEl.value = String(clamped);
     });
-    syncCropFromFields(state);
     syncMoireMethodFromInputs(state);
   }
 
@@ -1375,6 +1499,9 @@
       if (els[spec.key + "Range"]) els[spec.key + "Range"].value = String(v);
     });
     syncMoireMethodToInputs(state);
+    if (els.transparencyEnabled) {
+      els.transparencyEnabled.checked = !!state.edit.transparencyEnabled;
+    }
   }
 
   function setColorPickerInputs(rgb) {
@@ -1397,6 +1524,10 @@
       return false;
     }
     state.edit.transparencyKeys.push({ r: rgb.r, g: rgb.g, b: rgb.b });
+    if (!state.edit.transparencyEnabled) {
+      state.edit.transparencyEnabled = true;
+      if (els.transparencyEnabled) els.transparencyEnabled.checked = true;
+    }
     setColorPickerInputs(rgb);
     renderTransparencyKeyList(state);
     markPreviewDirty();
@@ -1442,7 +1573,8 @@
     if (!wrap) return;
     let showAlpha = false;
     if (state.image && canvasHasAlpha(state.image)) showAlpha = true;
-    if (state.activeTab === "edit" && state.edit.transparencyKeys.length) showAlpha = true;
+    if (state.activeTab === "edit" && isTransparencyActive(state.edit)) showAlpha = true;
+    else if (shouldShowTransparencyPreview(state)) showAlpha = true;
     wrap.classList.toggle("has-alpha", showAlpha);
   }
 
@@ -1450,7 +1582,7 @@
     const state = hooks.getState();
     if (!state.image) return null;
     ensurePreview(true);
-    if (state.activeTab === "edit" && (hasPendingEdits(state.edit, state.image) || state.edit.transparencyKeys.length)) {
+    if (state.activeTab === "edit" && (hasPendingEdits(state.edit, state.image) || isTransparencyActive(state.edit))) {
       return (previewMeta && previewMeta.finalCanvas) || previewCanvas || state.image;
     }
     if (canvasHasAlpha(state.image)) return state.image;
@@ -1473,18 +1605,9 @@
 
   function initCorners(state) {
     if (!state.image) return;
-    state.edit.corners = defaultCorners(state.image.width, state.image.height);
+    state.edit.corners = null;
     state.edit.customCorners = false;
     state.edit.lensCenter = defaultLensCenter(state.image.width, state.image.height);
-  }
-
-  function ensureDefaultCrop(state) {
-    ensurePreview(true);
-    if (!previewMeta || !previewMeta.canvas) return;
-    const c = previewMeta.canvas;
-    if (!state.edit.crop) {
-      state.edit.crop = { x: 0, y: 0, w: c.width, h: c.height };
-    }
   }
 
   function mapPerspHandleToDisplay(corners, mapFn) {
@@ -1495,10 +1618,72 @@
     return out;
   }
 
+  function isPerspNewDrag(state) {
+    return !!(state.editDrag && state.editDrag.kind === "persp" && state.editDrag.handle === "new");
+  }
+
+  function getPerspDisplayOverlay(state) {
+    if (!state.image || !previewMeta) return null;
+    const srcW = state.image.width;
+    const srcH = state.image.height;
+
+    if (isPerspNewDrag(state)) {
+      const start = state.editDrag.startPt;
+      const cur = state.cursor;
+      if (!start || !cur) return null;
+      const x1 = Math.min(start.x, cur.x);
+      const y1 = Math.min(start.y, cur.y);
+      const x2 = Math.max(start.x, cur.x);
+      const y2 = Math.max(start.y, cur.y);
+      const tl = { x: x1, y: y1 };
+      const tr = { x: x2, y: y1 };
+      const br = { x: x2, y: y2 };
+      const bl = { x: x1, y: y2 };
+      return {
+        tl,
+        tr,
+        br,
+        bl,
+        tm: midpoint(tl, tr),
+        rm: midpoint(tr, br),
+        bm: midpoint(bl, br),
+        lm: midpoint(tl, bl)
+      };
+    }
+
+    if (!state.edit.customCorners || !state.edit.corners) return null;
+    if (!shouldDrawPerspectiveOverlay(state.edit, state, srcW, srcH)) return null;
+    const corners = getEffectiveCorners(state.edit, srcW, srcH);
+    return mapPerspHandleToDisplay(corners, (p) => previewMeta.mapSourceToDisplay(p));
+  }
+
+  function strokePerspQuad(ctx, dp, scale) {
+    if (!dp.tl || !dp.tr || !dp.br || !dp.bl) return;
+    const s = scale || 1;
+    ctx.save();
+    ctx.strokeStyle = "rgba(46, 140, 95, 0.85)";
+    ctx.lineWidth = 1.5 * s;
+    ctx.setLineDash([6 * s, 4 * s]);
+    ctx.beginPath();
+    ctx.moveTo(dp.tl.x, dp.tl.y);
+    if (dp.tm) ctx.quadraticCurveTo(dp.tm.x, dp.tm.y, dp.tr.x, dp.tr.y);
+    else ctx.lineTo(dp.tr.x, dp.tr.y);
+    if (dp.rm) ctx.quadraticCurveTo(dp.rm.x, dp.rm.y, dp.br.x, dp.br.y);
+    else ctx.lineTo(dp.br.x, dp.br.y);
+    if (dp.bm) ctx.quadraticCurveTo(dp.bm.x, dp.bm.y, dp.bl.x, dp.bl.y);
+    else ctx.lineTo(dp.bl.x, dp.bl.y);
+    if (dp.lm) ctx.quadraticCurveTo(dp.lm.x, dp.lm.y, dp.tl.x, dp.tl.y);
+    else ctx.lineTo(dp.tl.x, dp.tl.y);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  }
+
   function shouldDrawPerspectiveOverlay(edit, state, srcW, srcH) {
     if (hasActiveCrop(edit, { width: srcW, height: srcH })) return false;
-    if (state.mode === "edit-persp") return !!edit.corners;
+    if (isPerspNewDrag(state)) return state.mode === "edit-persp";
     if (!edit.customCorners || !edit.corners) return false;
+    if (state.mode === "edit-persp") return true;
     return hasActivePerspective(edit, srcW, srcH);
   }
 
@@ -1519,23 +1704,9 @@
     const srcW = state.image.width;
     const srcH = state.image.height;
 
-    if (shouldDrawPerspectiveOverlay(edit, state, srcW, srcH)) {
-      const corners = getEffectiveCorners(edit, srcW, srcH);
-      const dp = mapPerspHandleToDisplay(corners, (p) => previewMeta.mapSourceToDisplay(p));
-      if (!dp.tl || !dp.tr || !dp.br || !dp.bl) return;
-      ctx.save();
-      ctx.strokeStyle = "rgba(46, 140, 95, 0.85)";
-      ctx.lineWidth = 1.5 * s;
-      ctx.setLineDash([6 * s, 4 * s]);
-      ctx.beginPath();
-      if (dp.tl) ctx.moveTo(dp.tl.x, dp.tl.y);
-      if (dp.tm) ctx.quadraticCurveTo(dp.tm.x, dp.tm.y, dp.tr.x, dp.tr.y);
-      if (dp.rm) ctx.quadraticCurveTo(dp.rm.x, dp.rm.y, dp.br.x, dp.br.y);
-      if (dp.bm) ctx.quadraticCurveTo(dp.bm.x, dp.bm.y, dp.bl.x, dp.bl.y);
-      if (dp.lm) ctx.quadraticCurveTo(dp.lm.x, dp.lm.y, dp.tl.x, dp.tl.y);
-      ctx.closePath();
-      ctx.stroke();
-      ctx.restore();
+    const dp = getPerspDisplayOverlay(state);
+    if (dp) {
+      strokePerspQuad(ctx, dp, s);
 
       const activeHandle = (state.editDrag && state.editDrag.kind === "persp" && state.editDrag.handle !== "new")
         ? state.editDrag.handle
@@ -1674,6 +1845,7 @@
       h = clamp(h, 8, maxH - y);
       clearPerspective(state);
       state.edit.crop = { x, y, w, h };
+      state.edit.cropAwaitingDraw = false;
       return;
     }
 
@@ -1699,17 +1871,8 @@
     state.edit.crop = { x, y, w, h };
   }
 
-  function ensurePerspectiveQuad(state) {
-    if (!state.image) return;
-    clearCrop(state);
-    if (!state.edit.corners) {
-      state.edit.corners = defaultCorners(state.image.width, state.image.height);
-    }
-    state.edit.customCorners = true;
-  }
-
   function findPerspHandle(p, state) {
-    if (!state.edit.corners || !previewMeta || !state.image) return null;
+    if (!state.edit.customCorners || !state.edit.corners || !previewMeta || !state.image) return null;
     const srcW = state.image.width;
     const srcH = state.image.height;
     const corners = getEffectiveCorners(state.edit, srcW, srcH);
@@ -1757,23 +1920,46 @@
     return true;
   }
 
-  function drawZoomPerspHandles(marker) {
+  function drawZoomPerspOverlay(zoomCtx, sx, sy, k, marker) {
     const state = hooks.getState();
     if (!state.image || !previewMeta) return;
-    const srcW = state.image.width;
-    const srcH = state.image.height;
-    if (!shouldDrawPerspectiveOverlay(state.edit, state, srcW, srcH)) return;
     ensurePreview(false);
-    const corners = getEffectiveCorners(state.edit, srcW, srcH);
+    const dp = getPerspDisplayOverlay(state);
+    if (!dp) return;
+
+    const toZoom = (p) => ({ x: (p.x - sx) * k, y: (p.y - sy) * k });
+    const zdp = {};
     PERSP_HANDLE_KEYS.forEach((key) => {
-      const dp = previewMeta.mapSourceToDisplay(corners[key]);
-      if (!dp) return;
+      if (dp[key]) zdp[key] = toZoom(dp[key]);
+    });
+
+    zoomCtx.save();
+    zoomCtx.strokeStyle = "rgba(46, 140, 95, 0.85)";
+    zoomCtx.lineWidth = 1.5;
+    zoomCtx.setLineDash([6, 4]);
+    zoomCtx.beginPath();
+    if (zdp.tl) zoomCtx.moveTo(zdp.tl.x, zdp.tl.y);
+    if (zdp.tm) zoomCtx.quadraticCurveTo(zdp.tm.x, zdp.tm.y, zdp.tr.x, zdp.tr.y);
+    else if (zdp.tr) zoomCtx.lineTo(zdp.tr.x, zdp.tr.y);
+    if (zdp.rm) zoomCtx.quadraticCurveTo(zdp.rm.x, zdp.rm.y, zdp.br.x, zdp.br.y);
+    else if (zdp.br) zoomCtx.lineTo(zdp.br.x, zdp.br.y);
+    if (zdp.bm) zoomCtx.quadraticCurveTo(zdp.bm.x, zdp.bm.y, zdp.bl.x, zdp.bl.y);
+    else if (zdp.bl) zoomCtx.lineTo(zdp.bl.x, zdp.bl.y);
+    if (zdp.lm) zoomCtx.quadraticCurveTo(zdp.lm.x, zdp.lm.y, zdp.tl.x, zdp.tl.y);
+    else if (zdp.tl) zoomCtx.lineTo(zdp.tl.x, zdp.tl.y);
+    zoomCtx.closePath();
+    zoomCtx.stroke();
+    zoomCtx.restore();
+
+    PERSP_HANDLE_KEYS.forEach((key) => {
+      const p = dp[key];
+      if (!p) return;
       const isCorner = CORNER_KEYS.includes(key);
       const color = isCorner ? "#2a8c5f" : "#3a7ca5";
       const selected = state.selected
         && state.selected.type === "persp"
         && state.selected.key === key;
-      marker(dp, color, color, selected);
+      marker(p, color, color, selected);
     });
   }
 
@@ -1858,8 +2044,9 @@
 
     if (mode === "edit-bg-pick") {
       const sampleSource = previewMeta.preChromaCanvas || previewCanvas;
+      if (!sampleSource) return true;
       const sample = sampleCanvasPixel(sampleSource, p.x, p.y);
-      addTransparencyKey(state, sample);
+      if (!addTransparencyKey(state, sample)) return true;
       hooks.flashStatus(`Added ${rgbToHex(sample.r, sample.g, sample.b)} to background removal.`);
       hooks.refreshAll();
       return true;
@@ -1886,11 +2073,12 @@
     if (state.mode === "edit-crop") {
       clearPerspective(state);
       const handle = state.edit.crop ? findCropHandle(p, state.edit.crop) : null;
-      if (!handle) {
-        state.editDrag = { kind: "crop", handle: "new", startPt: p, startCrop: null, moved: false };
-        state.edit.crop = { x: p.x, y: p.y, w: 8, h: 8 };
-      } else {
+      if (handle) {
         state.editDrag = { kind: "crop", handle, startPt: p, startCrop: { ...state.edit.crop }, moved: false };
+      } else if (state.edit.cropAwaitingDraw || !state.edit.crop) {
+        state.editDrag = { kind: "crop", handle: "new", startPt: p, startCrop: null, moved: false };
+      } else {
+        return true;
       }
       state.cursor = { x: p.x, y: p.y };
       state.pointerInside = true;
@@ -1901,7 +2089,6 @@
     if (state.mode === "edit-persp") {
       const handle = findPerspHandle(p, state);
       if (handle) {
-        ensurePerspectiveQuad(state);
         state.selected = { type: "persp", key: handle };
         state.editDrag = { kind: "persp", handle, startPt: p, moved: false };
         state.cursor = { x: p.x, y: p.y };
@@ -1990,20 +2177,38 @@
     hooks.refreshAll();
   }
 
+  function cancelCropRegion() {
+    const state = hooks.getState();
+    if (!state.image) return;
+    stopEditDragListeners();
+    state.editDrag = null;
+    state.edit.crop = null;
+    state.edit.cropAwaitingDraw = true;
+    markPreviewDirty();
+    hooks.flashStatus("Click and drag on the image to draw a new crop region.");
+    hooks.refreshAll();
+  }
+
   function onEditModeChange(mode) {
     const state = hooks.getState();
     if (!state.image) return;
     if (mode === "edit-persp") {
       clearCrop(state);
-      if (state.edit.perspAwaitingDraw) {
+      if (!state.edit.customCorners || !state.edit.corners) {
+        state.edit.perspAwaitingDraw = true;
         state.edit.corners = null;
         state.edit.customCorners = false;
       } else {
-        ensurePerspectiveQuad(state);
+        state.edit.perspAwaitingDraw = false;
       }
     } else if (mode === "edit-crop") {
       clearPerspective(state);
       state.edit.perspAwaitingDraw = false;
+      if (!state.edit.crop) {
+        state.edit.cropAwaitingDraw = true;
+      } else {
+        state.edit.cropAwaitingDraw = false;
+      }
     }
     hooks.refreshAll();
   }
@@ -2045,6 +2250,7 @@
 
     remapAllPoints(mapFn);
     state.image = cloneCanvas(previewMeta.finalCanvas || previewMeta.preChromaCanvas || previewCanvas);
+    state.image._hasAlpha = canvasHasAlpha(state.image);
     resetEditState(state, true);
     previewDirty = true;
     ensurePreview(true);
@@ -2082,7 +2288,7 @@
     hooks.setCanvasSize(state.image.width, state.image.height);
   }
 
-  function saveImage() {
+  function exportImageBlob(done) {
     const state = hooks.getState();
     if (!state.image) return;
     const out = getExportCanvas();
@@ -2092,6 +2298,12 @@
         hooks.flashStatus("Could not export the image.");
         return;
       }
+      done(blob);
+    }, "image/png");
+  }
+
+  function saveImage() {
+    exportImageBlob((blob) => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -2100,7 +2312,32 @@
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    }, "image/png");
+    });
+  }
+
+  async function copyImageToClipboard() {
+    const state = hooks.getState();
+    if (!state.image) return;
+    const out = getExportCanvas();
+    if (!out) return;
+    if (!navigator.clipboard || typeof ClipboardItem === "undefined") {
+      hooks.flashStatus("Clipboard image copy is not supported in this browser.");
+      return;
+    }
+    try {
+      const item = new ClipboardItem({
+        "image/png": new Promise((resolve, reject) => {
+          out.toBlob((blob) => {
+            if (!blob) reject(new Error("Could not encode image"));
+            else resolve(blob);
+          }, "image/png");
+        })
+      });
+      await navigator.clipboard.write([item]);
+      hooks.flashStatus("Image copied to clipboard.");
+    } catch (err) {
+      hooks.flashStatus("Could not copy to the clipboard.");
+    }
   }
 
   function onImageLoaded() {
@@ -2200,6 +2437,33 @@
     els.bgColor = document.getElementById("dig-edit-bg-color");
     els.bgHex = document.getElementById("dig-edit-bg-hex");
     els.bgKeyList = document.getElementById("dig-edit-bg-key-list");
+    els.transparencyEnabled = document.getElementById("dig-edit-bg-enabled");
+
+    if (els.transparencyEnabled) {
+      els.transparencyEnabled.addEventListener("change", () => {
+        const state = hooks.getState();
+        const enabling = els.transparencyEnabled.checked;
+        if (enabling) {
+          if (state.edit.transparencyKeys.length === 0) {
+            const rgb = parseColorInput(els.bgHex && els.bgHex.value)
+              || (els.bgColor ? parseColorInput(els.bgColor.value) : null);
+            if (!rgb) {
+              els.transparencyEnabled.checked = false;
+              hooks.flashStatus("Enter a background color first.");
+              return;
+            }
+            addTransparencyKey(state, rgb);
+          } else {
+            state.edit.transparencyEnabled = true;
+            markPreviewDirty();
+          }
+        } else {
+          state.edit.transparencyEnabled = false;
+          markPreviewDirty();
+        }
+        hooks.refreshAll();
+      });
+    }
 
     wireParamSpecs(BG_PARAM_SPECS);
 
@@ -2270,6 +2534,7 @@
       clearCropBtn.addEventListener("click", () => {
         const state = hooks.getState();
         state.edit.crop = null;
+        state.edit.cropAwaitingDraw = true;
         markPreviewDirty();
         hooks.refreshAll();
       });
@@ -2283,6 +2548,8 @@
       hooks.refreshAll();
     });
     document.getElementById("dig-edit-revert").addEventListener("click", revertToOriginal);
+    const copyBtn = document.getElementById("dig-edit-copy");
+    if (copyBtn) copyBtn.addEventListener("click", copyImageToClipboard);
     document.getElementById("dig-edit-save").addEventListener("click", saveImage);
 
     const rotateBtn = document.getElementById("dig-rotate-ccw");
@@ -2308,6 +2575,35 @@
     getPreviewCanvas() {
       return ensurePreview(false);
     },
+    getDisplayCanvas() {
+      const state = hooks.getState();
+      if (!state.image) return null;
+      if (state.activeTab === "edit" || shouldShowTransparencyPreview(state)) {
+        return ensurePreview(isTransparencyActive(state.edit));
+      }
+      return null;
+    },
+    shouldShowTransparencyPreview(state) {
+      return shouldShowTransparencyPreview(state);
+    },
+    isTransparencyActive(edit) {
+      return isTransparencyActive(edit);
+    },
+    canvasHasAlpha,
+    needsAlphaCheckerboard(state, displayImage) {
+      if (!state || !state.image || !displayImage) return false;
+      if (isTransparencyActive(state.edit)) return true;
+      if (shouldShowTransparencyPreview(state)) return true;
+      if (displayImage._hasAlpha === true) return true;
+      if (displayImage === state.image && state.image._hasAlpha === true) return true;
+      if (displayImage._hasAlpha === false) return false;
+      if (canvasHasAlpha(displayImage)) {
+        displayImage._hasAlpha = true;
+        return true;
+      }
+      displayImage._hasAlpha = false;
+      return false;
+    },
     getDisplaySize,
     drawOverlays,
     handleCanvasClick,
@@ -2316,6 +2612,7 @@
     handleMouseUp,
     cancelEditDrag,
     cancelPerspectiveRegion,
+    cancelCropRegion,
     onEditModeChange,
     markPreviewDirty,
     hasPendingEdits(state) {
@@ -2323,12 +2620,13 @@
     },
     applyEdits,
     saveImage,
+    copyImageToClipboard,
     updateCanvasWrap: updateCanvasWrapAlpha,
     getExportCanvas,
     findPerspHandleHit,
     getPerspHandleDisplayPoint,
     movePerspHandleBy,
-    drawZoomPerspHandles,
+    drawZoomPerspOverlay,
     PERSP_HANDLE_LABELS
   };
 

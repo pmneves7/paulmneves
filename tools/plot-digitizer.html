@@ -146,6 +146,7 @@
               </div>
               <div class="digitizer-edit-actions">
                 <button type="button" class="button secondary" id="dig-edit-revert">Revert to original</button>
+                <button type="button" class="button secondary" id="dig-edit-copy">Copy to clipboard</button>
                 <button type="button" class="button secondary" id="dig-edit-save">Save image…</button>
               </div>
               <p class="tool-note digitizer-edit-readout" id="dig-edit-readout">No pending edits.</p>
@@ -165,6 +166,7 @@
               </div>
             </div>
 
+            <div class="digitizer-sidebar-scroll">
             <div data-tab-pane="plot" hidden>
               <h3 class="tool-subheading">Axis values</h3>
               <div class="digitizer-axis-fields">
@@ -196,10 +198,8 @@
                 pixel at a time (hold <kbd>Shift</kbd> for ten). Press <kbd>Esc</kbd> to deselect
                 or cancel a measurement in progress.
               </p>
-            </div>
 
-            <div data-tab-pane="plot" hidden>
-              <h3 class="tool-subheading">Axis options</h3>
+              <h3 class="tool-subheading digitizer-axis-options-heading">Axis options</h3>
               <div class="digitizer-axis-options">
                 <label><input type="checkbox" id="dig-logx" /> Logarithmic X axis</label>
                 <label><input type="checkbox" id="dig-logy" /> Logarithmic Y axis</label>
@@ -214,7 +214,7 @@
               </p>
             </div>
 
-            <div class="digitizer-edit-sidebar-scroll" data-tab-pane="edit">
+            <div data-tab-pane="edit">
               <h3 class="tool-subheading">Orientation</h3>
               <div class="digitizer-edit-actions">
                 <button type="button" class="tool-inline-button" id="dig-rotate-ccw" title="Rotate 90° counter-clockwise">↺ Rotate 90° CCW</button>
@@ -243,13 +243,28 @@
                   <input type="number" id="dig-edit-skew-y" step="0.1" min="-30" max="30" value="0" />
                 </div>
               </div>
+              <div class="digitizer-edit-param">
+                <label for="dig-edit-stretch-x">Horizontal stretch (%)</label>
+                <div class="digitizer-edit-param-controls">
+                  <input type="range" id="dig-edit-stretch-x-range" min="50" max="150" step="1" value="100" />
+                  <input type="number" id="dig-edit-stretch-x" step="1" min="50" max="150" value="100" />
+                </div>
+              </div>
+              <div class="digitizer-edit-param">
+                <label for="dig-edit-stretch-y">Vertical stretch (%)</label>
+                <div class="digitizer-edit-param-controls">
+                  <input type="range" id="dig-edit-stretch-y-range" min="50" max="150" step="1" value="100" />
+                  <input type="number" id="dig-edit-stretch-y" step="1" min="50" max="150" value="100" />
+                </div>
+              </div>
 
               <h3 class="tool-subheading">Correct perspective</h3>
               <p class="tool-note digitizer-edit-note">
                 Use <em>Correct perspective</em> on the image to drag the four green corner handles
                 onto the plot edges, and the blue edge handles to bow each side (barrel or pincushion).
-                Apply edits warps the whole image so the region becomes rectangular. Crop and perspective
-                correction cannot be used at the same time — switching modes clears the other.
+                Apply edits warps the whole image so the region becomes rectangular. If height or width
+                looks off after applying (especially with lens correction), adjust the stretch sliders above.
+                Crop and perspective correction cannot be used at the same time — switching modes clears the other.
               </p>
               <button type="button" class="tool-inline-button digitizer-edit-reset-corners" id="dig-edit-reset-corners">Reset to image bounds</button>
 
@@ -314,6 +329,12 @@
                 or enter a color code and click <em>Add color</em>. Repeat for multiple background colors.
                 Edge pixels stay saturated; only alpha fades (no grey halos).
               </p>
+              <div class="digitizer-axis-options">
+                <label>
+                  <input type="checkbox" id="dig-edit-bg-enabled" />
+                  Enable background transparency
+                </label>
+              </div>
               <div class="digitizer-edit-param">
                 <label for="dig-edit-bg-tolerance">Match tolerance</label>
                 <div class="digitizer-edit-param-controls">
@@ -359,6 +380,7 @@
                 Distances and angles assume a uniform image scale. Use the
                 <em>Figure cleanup</em> tab if the picture needs to be re-oriented or corrected first.
               </p>
+            </div>
             </div>
           </aside>
         </div>

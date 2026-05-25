@@ -381,6 +381,13 @@
       return;
     }
 
+    if (state.activeTab === "edit" && state.mode === "edit-crop" && mode === "edit-crop") {
+      if (window.DigitizerImageEdit) {
+        window.DigitizerImageEdit.cancelCropRegion();
+      }
+      return;
+    }
+
     state.mode = mode;
     state.modeByTab[state.activeTab] = mode;
     state.pendingMeasurement = null;
@@ -467,7 +474,11 @@
 
     if (state.activeTab === "edit") {
       if (state.mode === "edit-crop") {
-        statusEl.textContent = "Click and drag on the image to draw a crop region, or drag the handles to adjust it. Crop and perspective correction cannot be used together.";
+        if (state.edit.cropAwaitingDraw && !state.edit.crop) {
+          statusEl.textContent = "Click and drag on the image to draw a crop region.";
+          return;
+        }
+        statusEl.textContent = "Drag the crop handles to adjust the region. Click Crop region again to cancel and draw a new one. Crop and perspective correction cannot be used together.";
         return;
       }
       if (state.mode === "edit-persp") {
@@ -825,6 +836,24 @@
 
   // --- Drawing ------------------------------------------------------------
 
+  function drawAlphaCheckerboard(context, w, h, cellSize) {
+    const cell = cellSize || 16;
+    context.fillStyle = "#b8bcc4";
+    context.fillRect(0, 0, w, h);
+    context.fillStyle = "#868c96";
+    for (let y = 0; y < h; y += cell) {
+      for (let x = 0; x < w; x += cell) {
+        if ((Math.floor(x / cell) + Math.floor(y / cell)) % 2 === 0) continue;
+        context.fillRect(x, y, cell, cell);
+      }
+    }
+  }
+
+  function needsAlphaCheckerboard(displayImage) {
+    if (!window.DigitizerImageEdit || !window.DigitizerImageEdit.needsAlphaCheckerboard) return false;
+    return window.DigitizerImageEdit.needsAlphaCheckerboard(state, displayImage);
+  }
+
   function draw() {
     if (!state.image) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -832,8 +861,10 @@
     }
 
     let displayImage = state.image;
-    if (state.activeTab === "edit" && window.DigitizerImageEdit) {
-      const preview = window.DigitizerImageEdit.getPreviewCanvas();
+    if (window.DigitizerImageEdit) {
+      const preview = window.DigitizerImageEdit.getDisplayCanvas
+        ? window.DigitizerImageEdit.getDisplayCanvas()
+        : (state.activeTab === "edit" ? window.DigitizerImageEdit.getPreviewCanvas() : null);
       if (preview) displayImage = preview;
     }
 
@@ -843,6 +874,9 @@
     }
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (needsAlphaCheckerboard(displayImage)) {
+      drawAlphaCheckerboard(ctx, canvas.width, canvas.height);
+    }
     ctx.drawImage(displayImage, 0, 0);
     const s = displayScale();
 
@@ -1155,17 +1189,19 @@
 
   function drawZoom() {
     zoomCtx.imageSmoothingEnabled = false;
-    zoomCtx.fillStyle = "#1a1a1a";
-    zoomCtx.fillRect(0, 0, ZOOM_DISPLAY_SIZE, ZOOM_DISPLAY_SIZE);
 
     if (!state.image || !state.cursor || !state.pointerInside) {
+      zoomCtx.fillStyle = "#1a1a1a";
+      zoomCtx.fillRect(0, 0, ZOOM_DISPLAY_SIZE, ZOOM_DISPLAY_SIZE);
       drawZoomCrosshair();
       return;
     }
 
     let zoomSource = state.image;
-    if (state.activeTab === "edit" && window.DigitizerImageEdit) {
-      const preview = window.DigitizerImageEdit.getPreviewCanvas();
+    if (window.DigitizerImageEdit) {
+      const preview = window.DigitizerImageEdit.getDisplayCanvas
+        ? window.DigitizerImageEdit.getDisplayCanvas()
+        : (state.activeTab === "edit" ? window.DigitizerImageEdit.getPreviewCanvas() : null);
       if (preview) zoomSource = preview;
     }
 
@@ -1173,6 +1209,12 @@
     const half = srcSize / 2;
     const sx = state.cursor.x - half;
     const sy = state.cursor.y - half;
+    if (needsAlphaCheckerboard(zoomSource)) {
+      drawAlphaCheckerboard(zoomCtx, ZOOM_DISPLAY_SIZE, ZOOM_DISPLAY_SIZE, 8);
+    } else {
+      zoomCtx.fillStyle = "#1a1a1a";
+      zoomCtx.fillRect(0, 0, ZOOM_DISPLAY_SIZE, ZOOM_DISPLAY_SIZE);
+    }
     try {
       zoomCtx.drawImage(
         zoomSource,
@@ -1227,7 +1269,7 @@
         state.pendingMeasurement.points.forEach((p) => marker(p, color, color, false));
       }
     } else if (state.activeTab === "edit" && window.DigitizerImageEdit) {
-      window.DigitizerImageEdit.drawZoomPerspHandles(marker);
+      window.DigitizerImageEdit.drawZoomPerspOverlay(zoomCtx, sx, sy, k, marker);
     }
 
     drawZoomCrosshair();
