@@ -45,6 +45,19 @@
     <div class="tool-panel tool-panel-wide">
       <form id="lattice-form">
         <section class="tool-section">
+          <h2>Import from CIF (optional)</h2>
+          <p class="tool-note">
+            Load a Crystallographic Information File to auto-fill the real-space lattice parameters.
+            Uncertainties in parentheses such as <code>5.6402(2)</code> are stripped automatically.
+          </p>
+          <div class="tool-cif-controls">
+            <input type="file" id="cif-file" accept=".cif,chemical/x-cif,text/plain" hidden />
+            <button type="button" id="cif-load-button" class="button secondary">Load CIF file…</button>
+            <p id="cif-status" class="tool-cif-status" role="status" aria-live="polite"></p>
+          </div>
+        </section>
+
+        <section class="tool-section">
           <h2>Input</h2>
           <div class="tool-grid tool-grid-aligned">
             <div class="tool-field">
@@ -240,6 +253,7 @@
   </footer>
 
   <script src="../js/site.js"></script>
+  <script src="../js/cif-parser.js"></script>
   <script src="../js/lattice-converter.js"></script>
 </body>
 </html>

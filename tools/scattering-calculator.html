@@ -41,6 +41,19 @@
     <div class="tool-panel tool-panel-wide">
       <form id="scattering-form">
         <section class="tool-section">
+          <h2>Import from CIF (optional)</h2>
+          <p class="tool-note">
+            Load a Crystallographic Information File to auto-fill the lattice parameters and space group.
+            Uncertainties in parentheses such as <code>5.6402(2)</code> are stripped automatically.
+          </p>
+          <div class="tool-cif-controls">
+            <input type="file" id="cif-file" accept=".cif,chemical/x-cif,text/plain" hidden />
+            <button type="button" id="cif-load-button" class="button secondary">Load CIF file…</button>
+            <p id="cif-status" class="tool-cif-status" role="status" aria-live="polite"></p>
+          </div>
+        </section>
+
+        <section class="tool-section">
           <h2>Crystal and beam</h2>
           <div class="tool-grid">
             <div class="tool-field">
@@ -142,13 +155,13 @@
         <table class="tool-table">
           <thead>
             <tr>
-              <th>HKL</th>
-              <th>d (Å)</th>
-              <th>2θ (deg)</th>
-              <th>|Q| (Å⁻¹)</th>
-              <th class="plane-column">In-plane (deg)</th>
-              <th class="plane-column">Out-of-plane (deg)</th>
-              <th class="plane-column">Rotation ω (deg)</th>
+              <th class="sortable" data-sort-key="hkl" role="button" tabindex="0" title="Click to sort by HKL">HKL</th>
+              <th class="sortable" data-sort-key="dSpacing" role="button" tabindex="0" title="Click to sort by d-spacing">d (Å)</th>
+              <th class="sortable" data-sort-key="twoTheta" aria-sort="ascending" role="button" tabindex="0" title="Click to sort by 2θ">2θ (deg)</th>
+              <th class="sortable" data-sort-key="qLength" role="button" tabindex="0" title="Click to sort by |Q|">|Q| (Å⁻¹)</th>
+              <th class="sortable plane-column" data-sort-key="inPlane" role="button" tabindex="0" title="Click to sort by in-plane angle">In-plane (deg)</th>
+              <th class="sortable plane-column" data-sort-key="outOfPlane" role="button" tabindex="0" title="Click to sort by out-of-plane angle">Out-of-plane (deg)</th>
+              <th class="sortable plane-column" data-sort-key="rotation" role="button" tabindex="0" title="Click to sort by rotation ω">Rotation ω (deg)</th>
             </tr>
           </thead>
           <tbody id="peak-table">
@@ -168,10 +181,14 @@
   </footer>
 
   <script src="../js/site.js"></script>
+  <script src="../js/cif-parser.js"></script>
   <script>
     const form = document.getElementById("scattering-form");
     const peakTable = document.getElementById("peak-table");
     const resultSummary = document.getElementById("result-summary");
+    const cifFileInput = document.getElementById("cif-file");
+    const cifLoadButton = document.getElementById("cif-load-button");
+    const cifStatusEl = document.getElementById("cif-status");
 
     const spaceGroupNumberInfo = {
       5: "C", 8: "C", 9: "C", 12: "C", 15: "C", 20: "C", 21: "C", 22: "F", 23: "I", 24: "I",
@@ -476,14 +493,81 @@
       return peaks.sort((a, b) => a.twoTheta - b.twoTheta || a.h - b.h || a.k - b.k || a.l - b.l);
     }
 
+    let cachedPeaks = [];
+    let sortState = { key: "twoTheta", direction: "asc" };
+
+    const sortAccessors = {
+      hkl: (peak) => [peak.h, peak.k, peak.l],
+      dSpacing: (peak) => peak.dSpacing,
+      twoTheta: (peak) => peak.twoTheta,
+      qLength: (peak) => peak.qLength,
+      inPlane: (peak) => peak.inPlane,
+      outOfPlane: (peak) => peak.outOfPlane,
+      rotation: (peak) => peak.rotation
+    };
+
+    const sortLabels = {
+      hkl: "HKL",
+      dSpacing: "d-spacing",
+      twoTheta: "2θ",
+      qLength: "|Q|",
+      inPlane: "in-plane angle",
+      outOfPlane: "out-of-plane angle",
+      rotation: "rotation ω"
+    };
+
+    function sortPeaks(peaks, state) {
+      const accessor = sortAccessors[state.key] || sortAccessors.twoTheta;
+      const sign = state.direction === "asc" ? 1 : -1;
+      const tiebreaker = (a, b) => (a.h - b.h) || (a.k - b.k) || (a.l - b.l);
+
+      return [...peaks].sort((a, b) => {
+        const va = accessor(a);
+        const vb = accessor(b);
+
+        if (Array.isArray(va) && Array.isArray(vb)) {
+          for (let i = 0; i < Math.max(va.length, vb.length); i += 1) {
+            const diff = (va[i] ?? 0) - (vb[i] ?? 0);
+            if (diff !== 0) return sign * diff;
+          }
+          return 0;
+        }
+
+        const aValid = Number.isFinite(va);
+        const bValid = Number.isFinite(vb);
+        if (!aValid && !bValid) return tiebreaker(a, b);
+        if (!aValid) return 1;
+        if (!bValid) return -1;
+
+        const diff = va - vb;
+        if (diff !== 0) return sign * diff;
+        return tiebreaker(a, b);
+      });
+    }
+
+    function updateSortIndicators() {
+      document.querySelectorAll(".tool-table th.sortable").forEach((th) => {
+        if (th.dataset.sortKey === sortState.key) {
+          th.setAttribute("aria-sort", sortState.direction === "asc" ? "ascending" : "descending");
+        } else {
+          th.removeAttribute("aria-sort");
+        }
+      });
+    }
+
     function renderPeaks(peaks) {
+      cachedPeaks = peaks;
+      updateSortIndicators();
+
       if (!peaks.length) {
         peakTable.innerHTML = "<tr><td colspan=\"7\">No allowed peaks found in this range.</td></tr>";
         resultSummary.textContent = "No peaks matched the current inputs and filters.";
         return;
       }
 
-      peakTable.innerHTML = peaks.map((peak) => `
+      const sorted = sortPeaks(peaks, sortState);
+
+      peakTable.innerHTML = sorted.map((peak) => `
         <tr>
           <td>(${peak.h} ${peak.k} ${peak.l})</td>
           <td>${format(peak.dSpacing)}</td>
@@ -495,8 +579,30 @@
         </tr>
       `).join("");
 
-      resultSummary.textContent = `Showing ${peaks.length} allowed peaks sorted by 2θ.`;
+      const directionLabel = sortState.direction === "asc" ? "ascending" : "descending";
+      resultSummary.textContent = `Showing ${peaks.length} allowed peaks sorted by ${sortLabels[sortState.key]} (${directionLabel}). Click a column header to re-sort.`;
     }
+
+    document.querySelectorAll(".tool-table th.sortable").forEach((th) => {
+      const triggerSort = () => {
+        const key = th.dataset.sortKey;
+        if (!key) return;
+        if (sortState.key === key) {
+          sortState = { key, direction: sortState.direction === "asc" ? "desc" : "asc" };
+        } else {
+          sortState = { key, direction: "asc" };
+        }
+        renderPeaks(cachedPeaks);
+      };
+
+      th.addEventListener("click", triggerSort);
+      th.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          triggerSort();
+        }
+      });
+    });
 
     form.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -508,6 +614,77 @@
         resultSummary.textContent = "Please fix the highlighted inputs and try again.";
       }
     });
+
+    function setCifStatus(message, isError) {
+      if (!cifStatusEl) return;
+      cifStatusEl.textContent = message;
+      cifStatusEl.classList.toggle("tool-cif-status-error", Boolean(isError));
+    }
+
+    function applyCifData(data) {
+      const fields = [
+        ["a", "a", data.a],
+        ["b", "b", data.b],
+        ["c", "c", data.c],
+        ["α", "alpha", data.alpha],
+        ["β", "beta", data.beta],
+        ["γ", "gamma", data.gamma]
+      ];
+
+      const missing = fields
+        .filter(([, , value]) => !Number.isFinite(value))
+        .map(([label]) => label);
+
+      if (missing.length === fields.length) {
+        throw new Error("No lattice parameters were found in this CIF file.");
+      }
+      if (missing.length > 0) {
+        throw new Error(`The CIF file is missing: ${missing.join(", ")}.`);
+      }
+
+      fields.forEach(([, id, value]) => {
+        document.getElementById(id).value = String(value);
+      });
+
+      const spaceGroupField = document.getElementById("spacegroup");
+      if (Number.isInteger(data.spaceGroupNumber)) {
+        spaceGroupField.value = String(data.spaceGroupNumber);
+      } else if (data.spaceGroupName) {
+        spaceGroupField.value = data.spaceGroupName;
+      }
+
+      try {
+        renderPeaks(calculatePeaks());
+      } catch (error) {
+        peakTable.innerHTML = `<tr><td colspan="7">${error.message}</td></tr>`;
+        resultSummary.textContent = "Please fix the highlighted inputs and try again.";
+      }
+    }
+
+    if (cifLoadButton && cifFileInput) {
+      cifLoadButton.addEventListener("click", () => cifFileInput.click());
+
+      cifFileInput.addEventListener("change", async () => {
+        const file = cifFileInput.files && cifFileInput.files[0];
+        cifFileInput.value = "";
+        if (!file) return;
+
+        if (typeof parseCif !== "function") {
+          setCifStatus("CIF parser failed to load. Please refresh the page.", true);
+          return;
+        }
+
+        try {
+          const text = await file.text();
+          const data = parseCif(text);
+          applyCifData(data);
+          const description = typeof describeCif === "function" ? describeCif(data) : "";
+          setCifStatus(description ? `Loaded ${file.name} (${description}).` : `Loaded ${file.name}.`);
+        } catch (error) {
+          setCifStatus(`Could not load ${file.name}: ${error.message}`, true);
+        }
+      });
+    }
 
     renderPeaks(calculatePeaks());
   </script>

@@ -33,6 +33,10 @@ const recipCVecInput = document.getElementById("recip-c-vec");
 
 const lookupInput = document.getElementById("lookup-hkl");
 
+const cifFileInput = document.getElementById("cif-file");
+const cifLoadButton = document.getElementById("cif-load-button");
+const cifStatusEl = document.getElementById("cif-status");
+
 const summaryEl = document.getElementById("lattice-summary");
 const resultsEl = document.getElementById("lattice-results");
 
@@ -421,5 +425,61 @@ latticeForm.addEventListener("submit", (event) => {
   event.preventDefault();
   render();
 });
+
+function setCifStatus(message, isError = false) {
+  if (!cifStatusEl) return;
+  cifStatusEl.textContent = message;
+  cifStatusEl.classList.toggle("tool-cif-status-error", Boolean(isError));
+}
+
+function applyCifData(data) {
+  const fields = [
+    ["a", directAInput, data.a],
+    ["b", directBInput, data.b],
+    ["c", directCInput, data.c],
+    ["α", directAlphaInput, data.alpha],
+    ["β", directBetaInput, data.beta],
+    ["γ", directGammaInput, data.gamma]
+  ];
+
+  const missing = fields.filter(([, , value]) => !Number.isFinite(value)).map(([label]) => label);
+  if (missing.length === fields.length) {
+    throw new Error("No lattice parameters were found in this CIF file.");
+  }
+  if (missing.length > 0) {
+    throw new Error(`The CIF file is missing: ${missing.join(", ")}.`);
+  }
+
+  inputModeSelect.value = "direct-params";
+  fields.forEach(([, input, value]) => {
+    input.value = String(value);
+  });
+  render();
+}
+
+if (cifLoadButton && cifFileInput) {
+  cifLoadButton.addEventListener("click", () => cifFileInput.click());
+
+  cifFileInput.addEventListener("change", async () => {
+    const file = cifFileInput.files && cifFileInput.files[0];
+    cifFileInput.value = "";
+    if (!file) return;
+
+    if (typeof parseCif !== "function") {
+      setCifStatus("CIF parser failed to load. Please refresh the page.", true);
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const data = parseCif(text);
+      applyCifData(data);
+      const description = typeof describeCif === "function" ? describeCif(data) : "";
+      setCifStatus(description ? `Loaded ${file.name} (${description}).` : `Loaded ${file.name}.`);
+    } catch (error) {
+      setCifStatus(`Could not load ${file.name}: ${error.message}`, true);
+    }
+  });
+}
 
 render();

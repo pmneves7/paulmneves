@@ -260,6 +260,18 @@ h3 {
   padding: 0.7rem 1.1rem;
   font-weight: 650;
   border: 1px solid var(--accent);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease,
+    border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.button:active {
+  transform: translateY(1px);
 }
 
 .button.primary {
@@ -269,12 +281,21 @@ h3 {
 
 .button.primary:hover {
   background: var(--accent-dark);
+  border-color: var(--accent-dark);
   text-decoration: none;
+  box-shadow: 0 8px 20px rgba(31, 41, 51, 0.18);
 }
 
 .button.secondary {
   background: transparent;
   color: var(--accent);
+}
+
+.button.secondary:hover {
+  background: var(--accent);
+  color: white;
+  text-decoration: none;
+  box-shadow: 0 8px 20px rgba(31, 41, 51, 0.18);
 }
 
 .back-link-panel {
@@ -638,6 +659,47 @@ section {
   font-weight: 700;
 }
 
+.tool-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.tool-table th.sortable:hover {
+  color: var(--accent);
+}
+
+.tool-table th.sortable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.tool-table th.sortable::after {
+  content: "";
+  display: inline-block;
+  margin-left: 0.35em;
+  width: 0.7em;
+  color: var(--accent);
+  font-size: 0.8em;
+  opacity: 0;
+}
+
+.tool-table th.sortable:hover::after {
+  content: "▲";
+  opacity: 0.35;
+}
+
+.tool-table th.sortable[aria-sort="ascending"]::after,
+.tool-table th.sortable[aria-sort="ascending"]:hover::after {
+  content: "▲";
+  opacity: 1;
+}
+
+.tool-table th.sortable[aria-sort="descending"]::after,
+.tool-table th.sortable[aria-sort="descending"]:hover::after {
+  content: "▼";
+  opacity: 1;
+}
+
 .tool-output {
   background: var(--card);
   border: 1px solid var(--border);
@@ -697,6 +759,24 @@ section {
 .tool-subheading {
   font-size: 1.05rem;
   margin: 0 0 0.75rem;
+}
+
+.tool-cif-controls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+}
+
+.tool-cif-status {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0;
+  min-width: 12rem;
+}
+
+.tool-cif-status.tool-cif-status-error {
+  color: #b3261e;
 }
 
 .tool-results-section + .tool-results-section {
