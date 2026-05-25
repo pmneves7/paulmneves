@@ -1,7 +1,7 @@
 const NEWS_ITEMS = [
   {
     date: "May 2026",
-    content: `<em>Single-q Cycloid and Double-q Vortex Lattices in Layered Magnetic Semimetal EuAg<sub>4</sub>Sb<sub>2</sub></em> accepted in <em>Phys. Rev. X</em>.`,
+    content: `<a href="https://arxiv.org/abs/2512.16990"><em>A General Approach to Solving Spin Moiré Superstructures</em></a> accepted in <em>Phys. Rev. X</em>.`,
   },
   {
     date: "April 2026",

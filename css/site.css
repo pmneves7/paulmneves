@@ -210,6 +210,11 @@ h3 {
   margin: 0;
 }
 
+.research-figure a,
+.biography-media a {
+  display: block;
+}
+
 .research-figure img {
   display: block;
   width: 100%;
