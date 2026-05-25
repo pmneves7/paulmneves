@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    name="description"
+    content="Convert between real-space lattice parameters, real-space lattice vectors, and reciprocal-space lattice vectors, and compute reciprocal-vector magnitudes in inverse angstroms."
+  />
+  <title>Real and reciprocal lattice converter | Paul M. Neves</title>
+  <link rel="canonical" href="https://paulmneves.com/tools/lattice-converter.html" />
+  <link rel="icon" type="image/png" href="../media/favicon.png" />
+  <link rel="stylesheet" href="../css/site.css" />
+</head>
+<body>
+  <header>
+    <nav aria-label="Main navigation">
+      <a class="site-title" href="../index.html">Paul M. Neves</a>
+      <div class="nav-links">
+        <a href="../index.html#biography">Biography</a>
+        <a href="../research.html">Research</a>
+        <a href="../publications.html">Publications</a>
+        <a href="../news.html">News</a>
+        <a href="../gallery.html">Gallery</a>
+        <a href="../tools.html">Tools</a>
+        <a href="../index.html#contact">Contact</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <header class="page-header">
+      <h1>Real and reciprocal lattice converter</h1>
+      <p class="lead">
+        Convert between real-space lattice parameters, real-space lattice vectors, and reciprocal-space
+        lattice vectors. Includes reciprocal-vector lengths in inverse angstroms and an HKL lookup for
+        |G(hkl)|.
+      </p>
+    </header>
+
+    <div class="tool-panel tool-panel-wide">
+      <form id="lattice-form">
+        <section class="tool-section">
+          <h2>Input</h2>
+          <div class="tool-grid tool-grid-aligned">
+            <div class="tool-field">
+              <label for="lattice-input-mode">Input as</label>
+              <select id="lattice-input-mode">
+                <option value="direct-params" selected>real-space lattice parameters</option>
+                <option value="direct-vectors">real-space lattice vectors</option>
+                <option value="reciprocal-params">reciprocal-space lattice parameters</option>
+                <option value="reciprocal-vectors">reciprocal-space lattice vectors</option>
+              </select>
+            </div>
+            <div class="tool-field">
+              <label for="lattice-convention">Reciprocal convention</label>
+              <select id="lattice-convention">
+                <option value="physicist" selected>physicist (a* · a = 2π)</option>
+                <option value="crystallographer">crystallographer (a* · a = 1)</option>
+              </select>
+            </div>
+          </div>
+        </section>
+
+        <section class="tool-section" id="direct-params-section">
+          <h3 class="tool-subheading">Real-space lattice parameters</h3>
+          <div class="tool-grid">
+            <div class="tool-field">
+              <label for="direct-a">a (Å)</label>
+              <input type="number" id="direct-a" step="any" min="0" value="4" />
+            </div>
+            <div class="tool-field">
+              <label for="direct-b">b (Å)</label>
+              <input type="number" id="direct-b" step="any" min="0" value="4" />
+            </div>
+            <div class="tool-field">
+              <label for="direct-c">c (Å)</label>
+              <input type="number" id="direct-c" step="any" min="0" value="4" />
+            </div>
+            <div class="tool-field">
+              <label for="direct-alpha">α (deg)</label>
+              <input type="number" id="direct-alpha" step="any" min="0" max="180" value="90" />
+            </div>
+            <div class="tool-field">
+              <label for="direct-beta">β (deg)</label>
+              <input type="number" id="direct-beta" step="any" min="0" max="180" value="90" />
+            </div>
+            <div class="tool-field">
+              <label for="direct-gamma">γ (deg)</label>
+              <input type="number" id="direct-gamma" step="any" min="0" max="180" value="90" />
+            </div>
+          </div>
+        </section>
+
+        <section class="tool-section" id="direct-vectors-section" hidden>
+          <h3 class="tool-subheading">Real-space lattice vectors (Å)</h3>
+          <p class="tool-note">Enter each lattice vector as three Cartesian components separated by spaces or commas.</p>
+          <div class="tool-grid">
+            <div class="tool-field">
+              <label for="direct-a-vec">a vector</label>
+              <input
+                type="text"
+                id="direct-a-vec"
+                value="4 0 0"
+                placeholder="ax ay az"
+                title="Three numeric components separated by spaces or commas, such as 4 0 0 or 4,0,0."
+              />
+            </div>
+            <div class="tool-field">
+              <label for="direct-b-vec">b vector</label>
+              <input
+                type="text"
+                id="direct-b-vec"
+                value="0 4 0"
+                placeholder="bx by bz"
+                title="Three numeric components separated by spaces or commas."
+              />
+            </div>
+            <div class="tool-field">
+              <label for="direct-c-vec">c vector</label>
+              <input
+                type="text"
+                id="direct-c-vec"
+                value="0 0 4"
+                placeholder="cx cy cz"
+                title="Three numeric components separated by spaces or commas."
+              />
+            </div>
+          </div>
+        </section>
+
+        <section class="tool-section" id="reciprocal-params-section" hidden>
+          <h3 class="tool-subheading">Reciprocal-space lattice parameters</h3>
+          <p class="tool-note">α*, β*, γ* are the angles between the reciprocal basis vectors b* &amp; c*, c* &amp; a*, and a* &amp; b* respectively.</p>
+          <div class="tool-grid">
+            <div class="tool-field">
+              <label for="recip-a">a* (Å⁻¹)</label>
+              <input type="number" id="recip-a" step="any" min="0" value="1.5707963" />
+            </div>
+            <div class="tool-field">
+              <label for="recip-b">b* (Å⁻¹)</label>
+              <input type="number" id="recip-b" step="any" min="0" value="1.5707963" />
+            </div>
+            <div class="tool-field">
+              <label for="recip-c">c* (Å⁻¹)</label>
+              <input type="number" id="recip-c" step="any" min="0" value="1.5707963" />
+            </div>
+            <div class="tool-field">
+              <label for="recip-alpha">α* (deg)</label>
+              <input type="number" id="recip-alpha" step="any" min="0" max="180" value="90" />
+            </div>
+            <div class="tool-field">
+              <label for="recip-beta">β* (deg)</label>
+              <input type="number" id="recip-beta" step="any" min="0" max="180" value="90" />
+            </div>
+            <div class="tool-field">
+              <label for="recip-gamma">γ* (deg)</label>
+              <input type="number" id="recip-gamma" step="any" min="0" max="180" value="90" />
+            </div>
+          </div>
+        </section>
+
+        <section class="tool-section" id="reciprocal-vectors-section" hidden>
+          <h3 class="tool-subheading">Reciprocal-space lattice vectors (Å⁻¹)</h3>
+          <p class="tool-note">Enter each reciprocal-lattice vector as three Cartesian components in inverse angstroms.</p>
+          <div class="tool-grid">
+            <div class="tool-field">
+              <label for="recip-a-vec">a* vector</label>
+              <input
+                type="text"
+                id="recip-a-vec"
+                value="1.5707963 0 0"
+                placeholder="a*x a*y a*z"
+                title="Three numeric components separated by spaces or commas, in Å⁻¹."
+              />
+            </div>
+            <div class="tool-field">
+              <label for="recip-b-vec">b* vector</label>
+              <input
+                type="text"
+                id="recip-b-vec"
+                value="0 1.5707963 0"
+                placeholder="b*x b*y b*z"
+                title="Three numeric components separated by spaces or commas, in Å⁻¹."
+              />
+            </div>
+            <div class="tool-field">
+              <label for="recip-c-vec">c* vector</label>
+              <input
+                type="text"
+                id="recip-c-vec"
+                value="0 0 1.5707963"
+                placeholder="c*x c*y c*z"
+                title="Three numeric components separated by spaces or commas, in Å⁻¹."
+              />
+            </div>
+          </div>
+        </section>
+
+        <section class="tool-section">
+          <h3 class="tool-subheading">Reciprocal vector lookup</h3>
+          <p class="tool-note">
+            Enter Miller indices (h k l) to compute G = h·a* + k·b* + l·c*, its absolute value in
+            inverse angstroms, and the corresponding d-spacing. Non-integer indices are allowed
+            (e.g. for satellite peaks).
+          </p>
+          <div class="tool-grid">
+            <div class="tool-field">
+              <label for="lookup-hkl">HKL</label>
+              <input
+                type="text"
+                id="lookup-hkl"
+                value="1 0 0"
+                placeholder="h k l"
+                title="Three numeric Miller indices separated by spaces or commas, such as 1 0 0 or 1,0,0."
+              />
+            </div>
+          </div>
+        </section>
+      </form>
+    </div>
+
+    <div class="tool-results" aria-live="polite">
+      <div class="tool-results-header">
+        <h2>Conversion results</h2>
+        <p id="lattice-summary" class="tool-note"></p>
+      </div>
+      <div id="lattice-results"></div>
+    </div>
+
+    <p class="back-link-panel"><a href="../tools.html">← Back to tools</a></p>
+  </main>
+
+  <footer>
+    © <span id="year"></span> Paul M. Neves.
+  </footer>
+
+  <script src="../js/site.js"></script>
+  <script src="../js/lattice-converter.js"></script>
+</body>
+</html>

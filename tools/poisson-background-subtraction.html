@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    name="description"
+    content="Optimize Poisson counting times for background-subtracted neutron scattering measurements."
+  />
+  <title>Poisson background subtraction | Paul M. Neves</title>
+  <link rel="canonical" href="https://paulmneves.com/tools/poisson-background-subtraction.html" />
+  <link rel="icon" type="image/png" href="../media/favicon.png" />
+  <link rel="stylesheet" href="../css/site.css" />
+</head>
+<body>
+  <header>
+    <nav aria-label="Main navigation">
+      <a class="site-title" href="../index.html">Paul M. Neves</a>
+      <div class="nav-links">
+        <a href="../index.html#biography">Biography</a>
+        <a href="../research.html">Research</a>
+        <a href="../publications.html">Publications</a>
+        <a href="../news.html">News</a>
+        <a href="../gallery.html">Gallery</a>
+        <a href="../tools.html">Tools</a>
+        <a href="../index.html#contact">Contact</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <header class="page-header">
+      <h1>Poisson background subtraction</h1>
+      <p class="lead">
+        Optimize signal and background counting times for a background-subtracted neutron scattering
+        measurement, assuming independent Poisson uncertainty in both channels.
+      </p>
+    </header>
+
+    <div class="tool-panel tool-panel-wide">
+      <form id="poisson-subtraction-form">
+        <section class="tool-section">
+          <h2>Measurement inputs</h2>
+          <p class="tool-note">
+            The optimized time split minimizes the uncertainty of the subtracted rate
+            <code>signal - background</code> for a fixed total counting time.
+          </p>
+
+          <div class="tool-grid tool-grid-aligned">
+            <div class="tool-field">
+              <label for="poisson-signal-rate">Signal rate X (counts/s)</label>
+              <input type="number" id="poisson-signal-rate" step="any" min="0" value="12" required />
+            </div>
+            <div class="tool-field">
+              <label for="poisson-background-rate">Background rate Y (counts/s)</label>
+              <input type="number" id="poisson-background-rate" step="any" min="0" value="3" required />
+            </div>
+            <div class="tool-field">
+              <label for="poisson-signal-model">Interpret X as</label>
+              <select id="poisson-signal-model">
+                <option value="gross">gross signal channel rate, X = net + Y</option>
+                <option value="net">net subtracted rate, measured channel = X + Y</option>
+              </select>
+            </div>
+            <div class="tool-field">
+              <label for="poisson-solve-mode">Solve for</label>
+              <select id="poisson-solve-mode">
+                <option value="relative">required time from relative uncertainty</option>
+                <option value="absolute">required time from absolute uncertainty</option>
+                <option value="time">uncertainty from total count time</option>
+              </select>
+            </div>
+            <div class="tool-field" id="poisson-target-field">
+              <label for="poisson-target">Desired relative uncertainty (%)</label>
+              <input type="number" id="poisson-target" step="any" min="0" value="5" required />
+            </div>
+            <div class="tool-field" id="poisson-total-time-field">
+              <label for="poisson-total-time">Total count time (s)</label>
+              <input type="number" id="poisson-total-time" step="any" min="0" value="600" required />
+            </div>
+            <div class="tool-field">
+              <label for="poisson-precision-mode">Output precision</label>
+              <select id="poisson-precision-mode">
+                <option value="full">full precision</option>
+                <option value="sigfigs" selected>truncate to input sig figs</option>
+                <option value="uncertainty">truncate to input uncertainties</option>
+              </select>
+            </div>
+            <div class="tool-field" id="poisson-sigma-x-field" hidden>
+              <label for="poisson-sigma-x">Uncertainty σ_X (counts/s)</label>
+              <input type="number" id="poisson-sigma-x" step="any" min="0" value="0.5" />
+            </div>
+            <div class="tool-field" id="poisson-sigma-y-field" hidden>
+              <label for="poisson-sigma-y">Uncertainty σ_Y (counts/s)</label>
+              <input type="number" id="poisson-sigma-y" step="any" min="0" value="0.1" />
+            </div>
+          </div>
+        </section>
+      </form>
+    </div>
+
+    <div class="tool-results" aria-live="polite">
+      <div class="tool-results-header">
+        <h2>Optimized count plan</h2>
+        <p id="poisson-summary" class="tool-note"></p>
+      </div>
+      <div id="poisson-results"></div>
+    </div>
+
+    <p class="back-link-panel"><a href="../tools.html">← Back to tools</a></p>
+  </main>
+
+  <footer>
+    © <span id="year"></span> Paul M. Neves.
+  </footer>
+
+  <script src="../js/site.js"></script>
+  <script src="../js/poisson-background-subtraction.js"></script>
+</body>
+</html>

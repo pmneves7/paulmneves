@@ -423,6 +423,22 @@ section {
   gap: 1rem;
 }
 
+.tool-grid-aligned .tool-field {
+  display: grid;
+  grid-template-rows: 3.2rem auto;
+  margin-bottom: 0;
+}
+
+.tool-grid-aligned .tool-field[hidden] {
+  display: none;
+}
+
+.tool-grid-aligned .tool-field label {
+  align-items: flex-start;
+  display: flex;
+  min-height: 3.2rem;
+}
+
 .tool-field {
   margin-bottom: 1.25rem;
 }
@@ -433,16 +449,34 @@ section {
   margin-bottom: 0.35rem;
 }
 
-.tool-field input {
+.tool-field input,
+.tool-field select,
+.tool-field textarea {
+  display: block;
   width: 100%;
   padding: 0.55rem 0.75rem;
   font-size: 1rem;
+  line-height: 1.4;
   border: 1px solid var(--border);
   border-radius: 0.5rem;
   font-family: inherit;
+  background: var(--card);
+  color: var(--text);
 }
 
-.tool-field input:focus {
+.tool-field input,
+.tool-field select {
+  height: 2.65rem;
+}
+
+.tool-field textarea {
+  min-height: 7rem;
+  resize: vertical;
+}
+
+.tool-field input:focus,
+.tool-field select:focus,
+.tool-field textarea:focus {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
@@ -534,6 +568,77 @@ section {
 .tool-table th {
   color: var(--muted);
   font-weight: 700;
+}
+
+.tool-output {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  margin: 0;
+  overflow-x: auto;
+  padding: 1rem;
+  white-space: pre-wrap;
+}
+
+.tool-output-details {
+  margin-top: 1rem;
+}
+
+.tool-output-details ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.tool-result-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.tool-result-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 1rem;
+}
+
+.tool-result-card h3 {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-bottom: 0.35rem;
+}
+
+.tool-result-card p {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.tool-result-card span {
+  color: var(--muted);
+  display: block;
+  font-size: 0.9rem;
+  margin-top: 0.35rem;
+}
+
+.tool-result-card p {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.tool-subheading {
+  font-size: 1.05rem;
+  margin: 0 0 0.75rem;
+}
+
+.tool-results-section + .tool-results-section {
+  margin-top: 1.75rem;
+}
+
+.tool-results-section > h3 {
+  color: var(--accent-dark);
+  font-size: 1.1rem;
+  margin: 0 0 0.75rem;
 }
 
 .gallery-empty {

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Symbolically propagate independent uncertainties through simple formulas." />
+  <title>Error propagation | Paul M. Neves</title>
+  <link rel="canonical" href="https://paulmneves.com/tools/error-propagation.html" />
+  <link rel="icon" type="image/png" href="../media/favicon.png" />
+  <link rel="stylesheet" href="../css/site.css" />
+</head>
+<body>
+  <header>
+    <nav aria-label="Main navigation">
+      <a class="site-title" href="../index.html">Paul M. Neves</a>
+      <div class="nav-links">
+        <a href="../index.html#biography">Biography</a>
+        <a href="../research.html">Research</a>
+        <a href="../publications.html">Publications</a>
+        <a href="../news.html">News</a>
+        <a href="../gallery.html">Gallery</a>
+        <a href="../tools.html">Tools</a>
+        <a href="../index.html#contact">Contact</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <header class="page-header">
+      <h1>Error propagation</h1>
+      <p class="lead">
+        Enter a formula to symbolically propagate independent uncertainties. Lowercase symbols carry
+        uncertainty; uppercase symbols are treated as exact constants.
+      </p>
+    </header>
+
+    <div class="tool-panel tool-panel-wide">
+      <form id="error-propagation-form">
+        <div class="tool-field">
+          <label for="formula">Formula</label>
+          <textarea id="formula" rows="4" spellcheck="false">y=x+z</textarea>
+        </div>
+        <button class="button primary" type="submit">Propagate uncertainty</button>
+      </form>
+    </div>
+
+    <p class="tool-note tool-note-panel">
+      Supported syntax includes <code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>,
+      <code>^</code>, parentheses, and single-argument functions such as <code>sin</code>,
+      <code>cos</code>, <code>tan</code>, <code>exp</code>, <code>log</code>, <code>ln</code>, and
+      <code>sqrt</code>. For example, <code>y=A*x^2/z</code> treats <code>A</code> as exact and
+      propagates uncertainties in <code>x</code> and <code>z</code>.
+    </p>
+
+    <div class="tool-results" aria-live="polite">
+      <div class="tool-results-header">
+        <h2>Result</h2>
+        <p id="uncertainty-summary" class="tool-note"></p>
+      </div>
+      <pre id="uncertainty-result" class="tool-output"></pre>
+      <div id="uncertainty-details" class="tool-output-details"></div>
+    </div>
+
+    <p class="back-link-panel"><a href="../tools.html">← Back to tools</a></p>
+  </main>
+
+  <footer>
+    © <span id="year"></span> Paul M. Neves.
+  </footer>
+
+  <script src="../js/site.js"></script>
+  <script src="../js/error-propagation.js"></script>
+</body>
+</html>

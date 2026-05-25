@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    name="description"
+    content="Downloadable helper scripts for MATLAB, Python, and other languages, including plot-prettifying utilities."
+  />
+  <title>Useful scripts | Paul M. Neves</title>
+  <link rel="canonical" href="https://paulmneves.com/tools/useful-scripts.html" />
+  <link rel="icon" type="image/png" href="../media/favicon.png" />
+  <link rel="stylesheet" href="../css/site.css" />
+</head>
+<body>
+  <header>
+    <nav aria-label="Main navigation">
+      <a class="site-title" href="../index.html">Paul M. Neves</a>
+      <div class="nav-links">
+        <a href="../index.html#biography">Biography</a>
+        <a href="../research.html">Research</a>
+        <a href="../publications.html">Publications</a>
+        <a href="../news.html">News</a>
+        <a href="../gallery.html">Gallery</a>
+        <a href="../tools.html">Tools</a>
+        <a href="../index.html#contact">Contact</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <header class="page-header">
+      <h1>Useful scripts</h1>
+      <p class="lead">
+        A small, growing collection of helper scripts for different languages.
+        Grab whichever flavor matches your workflow.
+      </p>
+    </header>
+
+    <div class="tool-panel tool-panel-wide">
+      <section class="tool-section">
+        <h2>Publication-quality plot formatting</h2>
+        <p class="tool-note">
+          <code>prettify</code> takes an existing figure and cleans it up to publication quality —
+          consistent fonts and sizes, tight margins, sensible tick marks, and a square aspect by
+          default. Drop the file somewhere on your path, then call <code>prettify</code> right
+          before saving your figure.
+        </p>
+        <ul class="link-list">
+          <li>
+            <a href="../files/scripts/prettify.m" download>
+              prettify.m — MATLAB
+            </a>
+          </li>
+          <li>
+            <a href="../files/scripts/prettify.py" download>
+              prettify.py — Python (matplotlib)
+            </a>
+          </li>
+        </ul>
+      </section>
+
+      <section class="tool-section">
+        <h2>N-dimensional data rebinning</h2>
+        <p class="tool-note">
+          <code>NDRebin</code> rebins scattered N-dimensional data onto a regular grid, with
+          optional fractional binning, uncertainty propagation, and arbitrary coordinate axes.
+          Useful for averaging unevenly sampled measurements, integrating over one or more
+          dimensions, or resampling onto a common grid before further analysis.
+        </p>
+        <ul class="link-list">
+          <li>
+            <a href="../files/scripts/NDrebin.py" download>
+              NDrebin.py — Python (NumPy)
+            </a>
+          </li>
+        </ul>
+      </section>
+    </div>
+
+    <p class="back-link-panel spaced"><a href="../tools.html">← Back to tools</a></p>
+  </main>
+
+  <footer>
+    © <span id="year"></span> Paul M. Neves.
+  </footer>
+
+  <script src="../js/site.js"></script>
+</body>
+</html>
