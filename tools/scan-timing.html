@@ -48,7 +48,8 @@
         is <code>T = N · t<sub>scan</sub> + (N − 1) · t<sub>dead</sub></code>. Pick which quantity to solve
         for; the remaining three boxes are your inputs. Durations accept seconds (<code>600</code>),
         colon notation (<code>10:00</code>, <code>1:30:00</code>), or unit tokens
-        (<code>1h 30m</code>, <code>10 min</code>).
+        (<code>1h 30m</code>, <code>10 min</code>). The optional monitor/charge rate converts the
+        count time into a per-scan accumulation target (e.g.&nbsp;Coulombs of proton charge).
       </p>
       <form id="plan-form">
         <div class="tool-grid tool-grid-aligned">
@@ -84,6 +85,22 @@
             </label>
             <input type="time" id="plan-start-time" step="1" />
           </div>
+          <div class="tool-field">
+            <label for="plan-rate">Monitor / charge rate (optional)</label>
+            <input type="number" id="plan-rate" step="any" min="0" placeholder="e.g. 0.0925" />
+          </div>
+          <div class="tool-field">
+            <label for="plan-rate-time-unit">Rate time unit</label>
+            <select id="plan-rate-time-unit">
+              <option value="second">per second</option>
+              <option value="minute" selected>per minute</option>
+              <option value="hour">per hour</option>
+            </select>
+          </div>
+          <div class="tool-field">
+            <label for="plan-rate-unit-label">Quantity label</label>
+            <input type="text" id="plan-rate-unit-label" placeholder="e.g. C, mon, counts" value="C" />
+          </div>
         </div>
       </form>
     </div>
@@ -101,8 +118,11 @@
       <p class="tool-note">
         Provide a calibration window from the run so far — the start time of scan <em>A</em> and the
         end time of scan <em>B</em> — to estimate the average elapsed time per scan (count plus dead),
-        and from that the time the full sequence will finish. Times wrap automatically across one
-        midnight; for runs longer than ~24 h enter the calibration window inside a single day.
+        and from that the time the full sequence will finish. Scan numbers <em>A</em>, <em>B</em>, and
+        "last completed" are absolute (i.e. they match the numbers in your beamline log); if your
+        sequence does not start at scan&nbsp;1, change the "First scan number" field accordingly.
+        Times wrap automatically across one midnight; for runs longer than ~24 h enter the calibration
+        window inside a single day.
       </p>
       <form id="progress-form">
         <div class="tool-grid tool-grid-aligned">
@@ -111,12 +131,16 @@
             <input type="number" id="progress-total" min="1" step="1" value="100" />
           </div>
           <div class="tool-field">
-            <label for="progress-done">Scans completed so far (optional)</label>
-            <input type="number" id="progress-done" min="0" step="1" placeholder="defaults to scan B" />
+            <label for="progress-first">First scan number</label>
+            <input type="number" id="progress-first" step="1" value="1" placeholder="defaults to 1" />
+          </div>
+          <div class="tool-field">
+            <label for="progress-done">Last completed scan number (optional)</label>
+            <input type="number" id="progress-done" step="1" placeholder="defaults to scan B" />
           </div>
           <div class="tool-field">
             <label for="progress-cal-a">Calibration: scan number A</label>
-            <input type="number" id="progress-cal-a" min="1" step="1" value="12" />
+            <input type="number" id="progress-cal-a" step="1" value="12" />
           </div>
           <div class="tool-field">
             <label for="progress-cal-a-time">A start time</label>
@@ -124,7 +148,7 @@
           </div>
           <div class="tool-field">
             <label for="progress-cal-b">Calibration: scan number B</label>
-            <input type="number" id="progress-cal-b" min="1" step="1" value="18" />
+            <input type="number" id="progress-cal-b" step="1" value="18" />
           </div>
           <div class="tool-field">
             <label for="progress-cal-b-time">B end time</label>

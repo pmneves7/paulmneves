@@ -6,11 +6,27 @@ const planDeadInput = document.getElementById("plan-dead");
 const planTotalInput = document.getElementById("plan-total");
 const planStartTimeInput = document.getElementById("plan-start-time");
 const planStartNowButton = document.getElementById("plan-start-now");
+const planRateInput = document.getElementById("plan-rate");
+const planRateTimeUnitInput = document.getElementById("plan-rate-time-unit");
+const planRateUnitLabelInput = document.getElementById("plan-rate-unit-label");
 const planSummary = document.getElementById("plan-summary");
 const planResults = document.getElementById("plan-results");
 
+const RATE_TIME_UNIT_SECONDS = {
+  second: 1,
+  minute: 60,
+  hour: 3600
+};
+
+const RATE_TIME_UNIT_LABEL = {
+  second: "s",
+  minute: "min",
+  hour: "h"
+};
+
 const progressForm = document.getElementById("progress-form");
 const progressTotalInput = document.getElementById("progress-total");
+const progressFirstInput = document.getElementById("progress-first");
 const progressDoneInput = document.getElementById("progress-done");
 const progressCalAInput = document.getElementById("progress-cal-a");
 const progressCalATimeInput = document.getElementById("progress-cal-a-time");
@@ -274,6 +290,36 @@ function computePlan(solveFor, v) {
   return v;
 }
 
+function formatTargetValue(value, sigFigs = 6) {
+  if (!Number.isFinite(value)) return "n/a";
+  if (value === 0) return "0";
+  const abs = Math.abs(value);
+  if (abs < 0.001 || abs >= 1e7) {
+    return value.toExponential(Math.max(0, sigFigs - 1));
+  }
+  let str = value.toPrecision(sigFigs);
+  if (str.includes("e")) str = Number(str).toString();
+  if (str.includes(".")) str = str.replace(/0+$/, "").replace(/\.$/, "");
+  return str;
+}
+
+function readPlanRate() {
+  const raw = planRateInput.value.trim();
+  if (!raw) return null;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return null;
+  const timeUnit = planRateTimeUnitInput.value;
+  const perSecond = value / RATE_TIME_UNIT_SECONDS[timeUnit];
+  const label = planRateUnitLabelInput.value.trim();
+  return {
+    value,
+    timeUnit,
+    timeUnitLabel: RATE_TIME_UNIT_LABEL[timeUnit],
+    perSecond,
+    label
+  };
+}
+
 function renderResultCard(label, value, note = "") {
   return `
     <div class="tool-result-card">
@@ -343,6 +389,24 @@ function renderPlanResults(plan, solveFor, startSecOpt) {
     ));
   }
 
+  if (plan.rate) {
+    const perScanTarget = plan.rate.perSecond * plan.count;
+    const totalTarget = plan.rate.perSecond * plan.totalCount;
+    const unit = plan.rate.label;
+    const unitSuffix = unit ? ` ${unit}` : "";
+    const rateSuffix = unit ? ` ${unit}/${plan.rate.timeUnitLabel}` : ` /${plan.rate.timeUnitLabel}`;
+    cards.push(renderResultCard(
+      "Target per scan",
+      `${formatTargetValue(perScanTarget)}${unitSuffix}`,
+      `${formatTargetValue(plan.rate.value)}${rateSuffix} × ${formatHMS(plan.count)}`
+    ));
+    cards.push(renderResultCard(
+      "Total target (all scans)",
+      `${formatTargetValue(totalTarget)}${unitSuffix}`,
+      `${plan.num} × per-scan target; counting time only`
+    ));
+  }
+
   planResults.innerHTML = `<div class="tool-result-grid">${cards.join("")}</div>`;
 }
 
@@ -364,6 +428,7 @@ function recalcPlan() {
   try {
     const inputs = readPlanInputs(solveFor);
     const plan = computePlan(solveFor, inputs);
+    plan.rate = readPlanRate();
 
     if (solveFor === "num") {
       planNumInput.value = String(plan.num);
@@ -395,21 +460,34 @@ function readProgressInputs() {
     throw new Error("Total scans in the sequence must be a positive integer.");
   }
 
+  let first = 1;
+  if (progressFirstInput.value.trim()) {
+    const f = Number(progressFirstInput.value);
+    if (!Number.isFinite(f) || !Number.isInteger(f)) {
+      throw new Error("First scan number must be an integer.");
+    }
+    first = f;
+  }
+  const lastScan = first + total - 1;
+
   const aRaw = progressCalAInput.value;
   const bRaw = progressCalBInput.value;
   const a = Number(aRaw);
   const b = Number(bRaw);
-  if (!Number.isFinite(a) || a < 1 || !Number.isInteger(a)) {
-    throw new Error("Calibration scan number A must be a positive integer.");
+  if (!Number.isFinite(a) || !Number.isInteger(a)) {
+    throw new Error("Calibration scan number A must be an integer.");
   }
-  if (!Number.isFinite(b) || b < 1 || !Number.isInteger(b)) {
-    throw new Error("Calibration scan number B must be a positive integer.");
+  if (!Number.isFinite(b) || !Number.isInteger(b)) {
+    throw new Error("Calibration scan number B must be an integer.");
+  }
+  if (a < first || a > lastScan) {
+    throw new Error(`Calibration scan A (${a}) is outside the sequence range ${first}–${lastScan}.`);
+  }
+  if (b < first || b > lastScan) {
+    throw new Error(`Calibration scan B (${b}) is outside the sequence range ${first}–${lastScan}.`);
   }
   if (b < a) {
     throw new Error("Calibration scan B must be greater than or equal to scan A.");
-  }
-  if (b > total) {
-    throw new Error("Calibration scan B exceeds the total number of scans.");
   }
 
   const xSec = parseTimeOfDay(progressCalATimeInput.value);
@@ -430,19 +508,19 @@ function readProgressInputs() {
     throw new Error("Calibration window has zero or negative elapsed time.");
   }
 
-  let done = null;
+  let doneScanNumber = null;
   if (progressDoneInput.value.trim()) {
     const d = Number(progressDoneInput.value);
-    if (!Number.isFinite(d) || d < 0 || !Number.isInteger(d)) {
-      throw new Error("Scans completed so far must be a non-negative integer.");
+    if (!Number.isFinite(d) || !Number.isInteger(d)) {
+      throw new Error("Last completed scan number must be an integer.");
     }
-    if (d > total) {
-      throw new Error("Scans completed cannot exceed the total number of scans.");
+    if (d > lastScan) {
+      throw new Error(`Last completed scan number (${d}) exceeds the last scan in the sequence (${lastScan}).`);
     }
     if (d < b) {
-      throw new Error("Scans completed cannot be less than calibration scan B.");
+      throw new Error(`Last completed scan number (${d}) cannot be less than calibration scan B (${b}).`);
     }
-    done = d;
+    doneScanNumber = d;
   }
 
   let currentSec = null;
@@ -457,12 +535,14 @@ function readProgressInputs() {
 
   return {
     total,
+    first,
+    lastScan,
     a,
     b,
     xSec,
     ySec: yWrapped ? ySec + SECONDS_PER_DAY : ySec,
     elapsed,
-    done,
+    doneScanNumber,
     currentSec,
     yWrapped
   };
@@ -471,8 +551,9 @@ function readProgressInputs() {
 function computeProgress(input) {
   const numCalScans = input.b - input.a + 1;
   const perScan = input.elapsed / numCalScans;
-  const completed = input.done != null ? input.done : input.b;
-  const remaining = input.total - completed;
+  const doneScan = input.doneScanNumber != null ? input.doneScanNumber : input.b;
+  const completedCount = doneScan - input.first + 1;
+  const remaining = input.total - completedCount;
 
   let nowSec;
   let nowSource;
@@ -481,23 +562,24 @@ function computeProgress(input) {
     nowSec = input.currentSec + yDays * SECONDS_PER_DAY;
     if (nowSec < input.ySec) nowSec += SECONDS_PER_DAY;
     nowSource = "user-entered current time";
-  } else if (completed === input.b) {
+  } else if (doneScan === input.b) {
     nowSec = input.ySec;
     nowSource = "end of scan B";
   } else {
-    nowSec = input.ySec + (completed - input.b) * perScan;
-    nowSource = `extrapolated from scan B at the calibrated rate`;
+    nowSec = input.ySec + (doneScan - input.b) * perScan;
+    nowSource = "extrapolated from scan B at the calibrated rate";
   }
 
   const remainingTime = remaining * perScan;
   const endSec = nowSec + remainingTime;
-  const fractionDone = input.total > 0 ? completed / input.total : 0;
+  const fractionDone = input.total > 0 ? completedCount / input.total : 0;
 
   return {
     ...input,
     numCalScans,
     perScan,
-    completed,
+    doneScan,
+    completedCount,
     remaining,
     remainingTime,
     nowSec,
@@ -508,6 +590,9 @@ function computeProgress(input) {
 }
 
 function renderProgressResults(p) {
+  const rangeNote = p.first === 1
+    ? `scans 1–${p.lastScan}`
+    : `scans ${p.first}–${p.lastScan}`;
   const cards = [];
   cards.push(renderResultCard(
     "Estimated end time",
@@ -526,8 +611,8 @@ function renderProgressResults(p) {
   ));
   cards.push(renderResultCard(
     "Progress",
-    `${p.completed} / ${p.total}`,
-    `${formatNumberShort(100 * p.fractionDone, 2)}% done; ${p.remaining} scan${p.remaining === 1 ? "" : "s"} remaining`
+    `${p.completedCount} / ${p.total}`,
+    `last completed: scan ${p.doneScan} (of ${rangeNote}); ${formatNumberShort(100 * p.fractionDone, 2)}% done; ${p.remaining} scan${p.remaining === 1 ? "" : "s"} remaining`
   ));
   cards.push(renderResultCard(
     "Time remaining",
@@ -567,7 +652,10 @@ function recalcProgress() {
   planCountInput,
   planDeadInput,
   planTotalInput,
-  planStartTimeInput
+  planStartTimeInput,
+  planRateInput,
+  planRateTimeUnitInput,
+  planRateUnitLabelInput
 ].forEach((input) => {
   input.addEventListener("input", recalcPlan);
   input.addEventListener("change", recalcPlan);
@@ -585,6 +673,7 @@ planStartNowButton.addEventListener("click", () => {
 
 [
   progressTotalInput,
+  progressFirstInput,
   progressDoneInput,
   progressCalAInput,
   progressCalATimeInput,
