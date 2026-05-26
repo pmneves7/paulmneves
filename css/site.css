@@ -1808,8 +1808,41 @@ main.laue-main {
   align-items: center;
 }
 
+.tool-cif-controls + #laue-crystal-form {
+  margin-top: 1rem;
+}
+
+.laue-display-controls {
+  margin-top: 1rem;
+}
+
+.laue-curve-canvas + .button {
+  margin-top: 0.75rem;
+}
+
+.laue-action-row + .tool-grid {
+  margin-top: 1rem;
+}
+
 .laue-load-error {
   color: var(--accent);
+}
+
+.laue-transform-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: min(100%, 280px);
+}
+
+.laue-transform-column .laue-subheading {
+  margin-top: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.laue-load-convention-row {
+  margin-top: 0;
+  margin-bottom: 0;
 }
 
 .laue-curve-row {
@@ -1828,6 +1861,16 @@ main.laue-main {
   border: 1px solid #cbd5e1;
   cursor: crosshair;
   background: #fff;
+}
+
+.laue-overlay-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 720px) {
+  .laue-overlay-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .laue-subheading {
@@ -1872,6 +1915,16 @@ main.laue-main {
   min-height: 280px;
 }
 
+.laue-overlay-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
 .laue-canvas-inner {
   position: absolute;
   left: 0;
@@ -1908,7 +1961,7 @@ main.laue-main {
 }
 
 .laue-align-beam-row {
-  margin-top: 0.5rem;
+  margin-top: 0;
 }
 
 .laue-align-beam-action {

@@ -89,7 +89,7 @@
             </div>
             <div class="tool-field">
               <label for="laue-spacegroup">Space group</label>
-              <input type="text" id="laue-spacegroup" value="Fm-3m" placeholder="symbol or IT number" />
+              <input type="text" id="laue-spacegroup" value="Fd-3m" placeholder="symbol or IT number" />
             </div>
           </form>
         </section>
@@ -143,10 +143,27 @@
               <canvas id="laue-curve-canvas" class="laue-curve-canvas" aria-label="Intensity transfer curve"></canvas>
               <button type="button" class="button secondary" id="laue-curve-reset">Reset curve</button>
             </div>
-            <div class="laue-transform-btns">
-              <button type="button" class="button secondary" id="laue-rotate-cw">Rotate 90° CW</button>
-              <button type="button" class="button secondary" id="laue-flip-h">Flip horizontal</button>
-              <button type="button" class="button secondary" id="laue-flip-v">Flip vertical</button>
+            <div class="laue-transform-column">
+              <div class="laue-transform-btns">
+                <button type="button" class="button secondary" id="laue-rotate-cw">Rotate 90° CW</button>
+                <button type="button" class="button secondary" id="laue-flip-h">Flip horizontal</button>
+                <button type="button" class="button secondary" id="laue-flip-v">Flip vertical</button>
+              </div>
+              <h3 class="laue-subheading">Fix datafile convention on load</h3>
+              <p class="tool-note">Apply when the raw array is stored in a different row/column order.</p>
+              <div class="laue-check-row laue-load-convention-row">
+                <label><input type="checkbox" id="laue-auto-flip-h" /> Flip horizontal on load</label>
+                <label><input type="checkbox" id="laue-auto-flip-v" /> Flip vertical on load</label>
+                <label>
+                  Rotate on load
+                  <select id="laue-auto-rotate">
+                    <option value="0">0°</option>
+                    <option value="1">90° CW</option>
+                    <option value="2">180°</option>
+                    <option value="3">270° CW</option>
+                  </select>
+                </label>
+              </div>
             </div>
           </div>
 
@@ -281,48 +298,50 @@
             <p class="tool-note" id="laue-align-beam-result" aria-live="polite"></p>
 
             <h3 class="laue-subheading">Predicted peak overlay</h3>
-            <div class="tool-grid">
+            <div class="tool-grid laue-overlay-grid">
               <div class="tool-field">
                 <label for="laue-pred-color">Circle color</label>
-                <input type="color" id="laue-pred-color" value="#8b0000" />
+                <input type="color" id="laue-pred-color" value="#006400" />
               </div>
               <div class="tool-field">
                 <label for="laue-pred-linewidth">Line width (px)</label>
-                <input type="number" id="laue-pred-linewidth" step="1" min="1" max="20" value="1" />
+                <input type="number" id="laue-pred-linewidth" step="1" min="1" max="20" value="2" />
               </div>
               <div class="tool-field">
                 <label for="laue-pred-radius">Radius (px)</label>
                 <input type="number" id="laue-pred-radius" step="1" min="2" max="80" value="5" />
               </div>
+              <div class="tool-field">
+                <label for="laue-pred-alpha">Opacity (%)</label>
+                <input type="number" id="laue-pred-alpha" step="1" min="0" max="100" value="80" />
+              </div>
             </div>
             <div class="laue-check-row">
               <label><input type="checkbox" id="laue-show-predicted-peaks" checked /> Show predicted peaks</label>
               <label><input type="checkbox" id="laue-show-beam-center" checked /> Show beam center</label>
-              <label><input type="checkbox" id="laue-show-observed-peaks" checked /> Show detected peaks</label>
             </div>
 
             <h3 class="laue-subheading">Detected peak overlay</h3>
-            <div class="tool-grid">
+            <div class="tool-grid laue-overlay-grid">
               <div class="tool-field">
-                <label for="laue-obs-alpha">Circle opacity (%)</label>
-                <input type="number" id="laue-obs-alpha" step="1" min="0" max="100" value="100" />
+                <label for="laue-obs-color">Circle color</label>
+                <input type="color" id="laue-obs-color" value="#8b0000" />
+              </div>
+              <div class="tool-field">
+                <label for="laue-obs-linewidth">Line width (px)</label>
+                <input type="number" id="laue-obs-linewidth" step="1" min="1" max="20" value="2" />
+              </div>
+              <div class="tool-field">
+                <label for="laue-obs-radius">Radius (px)</label>
+                <input type="number" id="laue-obs-radius" step="1" min="2" max="80" value="5" />
+              </div>
+              <div class="tool-field">
+                <label for="laue-obs-alpha">Opacity (%)</label>
+                <input type="number" id="laue-obs-alpha" step="1" min="0" max="100" value="80" />
               </div>
             </div>
-
-            <h3 class="laue-subheading">Fix datafile convention on load</h3>
-            <p class="tool-note">Apply when the raw array is stored in a different row/column order.</p>
             <div class="laue-check-row">
-              <label><input type="checkbox" id="laue-auto-flip-h" /> Flip horizontal on load</label>
-              <label><input type="checkbox" id="laue-auto-flip-v" /> Flip vertical on load</label>
-              <label>
-                Rotate on load
-                <select id="laue-auto-rotate">
-                  <option value="0">0°</option>
-                  <option value="1">90° CW</option>
-                  <option value="2">180°</option>
-                  <option value="3">270° CW</option>
-                </select>
-              </label>
+              <label><input type="checkbox" id="laue-show-observed-peaks" checked /> Show detected peaks</label>
             </div>
 
             <div class="laue-config-row">
@@ -432,6 +451,7 @@
               <div class="laue-canvas-inner" id="laue-canvas-inner">
                 <canvas id="laue-canvas"></canvas>
               </div>
+              <canvas id="laue-overlay-canvas" class="laue-overlay-canvas" aria-hidden="true"></canvas>
             </div>
             <div class="laue-zoom-rect" id="laue-zoom-rect" hidden></div>
           </div>

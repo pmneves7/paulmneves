@@ -112,14 +112,16 @@
     return { va, vb, vc };
   }
 
+  /** Physicist convention: |Q(hkl)| = 2π/d (Å⁻¹), matching the lattice converter and Q filters in the UI. */
   function reciprocalBasis(params) {
     const { va, vb, vc } = directLatticeVectors(params);
     const volume = dot(va, cross(vb, vc));
     if (Math.abs(volume) < 1e-12) throw new Error("Degenerate unit cell.");
+    const twoPi = 2 * Math.PI;
     return {
-      aStar: scale(cross(vb, vc), 1 / volume),
-      bStar: scale(cross(vc, va), 1 / volume),
-      cStar: scale(cross(va, vb), 1 / volume)
+      aStar: scale(cross(vb, vc), twoPi / volume),
+      bStar: scale(cross(vc, va), twoPi / volume),
+      cStar: scale(cross(va, vb), twoPi / volume)
     };
   }
 
@@ -268,11 +270,13 @@
         x: beamCx + dx * cosR - dy * sinR,
         y: beamCy + dx * sinR + dy * cosR,
         q: qMag,
-        lambda
+        lambda,
+        xLab,
+        yLab
       };
     }
 
-    return { x: cx, y: cy, q: qMag, lambda };
+    return { x: cx, y: cy, q: qMag, lambda, xLab, yLab };
   }
 
   function computePredictedPeaks(params, config, imageSize, isAllowed) {
@@ -299,6 +303,8 @@
         lambda: proj.lambda,
         x: proj.x,
         y: proj.y,
+        xLab: proj.xLab,
+        yLab: proj.yLab,
         onImage: peakOnImage(proj.x, proj.y, imageSize)
       });
     }

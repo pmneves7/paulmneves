@@ -4,6 +4,7 @@
   const STORAGE_KEY = "laue-analysis-config-v1";
 
   const canvas = document.getElementById("laue-canvas");
+  const overlayCanvas = document.getElementById("laue-overlay-canvas");
   const curveCanvas = document.getElementById("laue-curve-canvas");
   const colorbarCanvas = document.getElementById("laue-colorbar");
   const canvasInner = document.getElementById("laue-canvas-inner");
@@ -22,6 +23,7 @@
   const idealResult = document.getElementById("laue-ideal-result");
 
   const ctx = canvas.getContext("2d");
+  const overlayCtx = overlayCanvas ? overlayCanvas.getContext("2d") : null;
   const curveCtx = curveCanvas.getContext("2d");
 
   const state = {
@@ -46,15 +48,19 @@
     },
     rawIntensityRange: null,
     overlay: {
-      predColor: "#8b0000",
-      predLineWidth: 1,
+      predColor: "#006400",
+      predLineWidth: 2,
       predRadius: 5,
-      observedAlpha: 1,
+      predAlpha: 0.8,
+      obsColor: "#8b0000",
+      obsLineWidth: 2,
+      obsRadius: 5,
+      obsAlpha: 0.8,
       showBeamCenter: true,
       showObservedPeaks: true,
       showPredictedPeaks: true
     },
-    crystal: { a: 5.43, b: 5.43, c: 5.43, alpha: 90, beta: 90, gamma: 90, spaceGroup: "Fm-3m" },
+    crystal: { a: 5.43, b: 5.43, c: 5.43, alpha: 90, beta: 90, gamma: 90, spaceGroup: "Fd-3m" },
     instrument: {
       detDistance: 150,
       detWidth: 256,
@@ -321,15 +327,39 @@
     state.instrument.detHeight = h;
   }
 
+  function readOverlayAlpha(inputId) {
+    return Math.min(1, Math.max(0, (num(inputId) ?? 80) / 100));
+  }
+
   function readOverlaySettings() {
     state.overlay.predColor = document.getElementById("laue-pred-color").value;
-    state.overlay.predLineWidth = num("laue-pred-linewidth") || 1;
+    state.overlay.predLineWidth = num("laue-pred-linewidth") || 2;
     state.overlay.predRadius = num("laue-pred-radius") || 5;
-    state.overlay.observedAlpha = Math.min(1, Math.max(0, (num("laue-obs-alpha") ?? 100) / 100));
+    state.overlay.predAlpha = readOverlayAlpha("laue-pred-alpha");
+    state.overlay.obsColor = document.getElementById("laue-obs-color").value;
+    state.overlay.obsLineWidth = num("laue-obs-linewidth") || 2;
+    state.overlay.obsRadius = num("laue-obs-radius") || 5;
+    state.overlay.obsAlpha = readOverlayAlpha("laue-obs-alpha");
     state.overlay.showBeamCenter = document.getElementById("laue-show-beam-center").checked;
     state.overlay.showObservedPeaks = document.getElementById("laue-show-observed-peaks").checked;
     state.overlay.showPredictedPeaks = document.getElementById("laue-show-predicted-peaks").checked;
     return state.overlay;
+  }
+
+  function writeOverlaySettingsToForm(overlay) {
+    const o = overlay || state.overlay;
+    document.getElementById("laue-pred-color").value = o.predColor || "#006400";
+    document.getElementById("laue-pred-linewidth").value = o.predLineWidth ?? 2;
+    document.getElementById("laue-pred-radius").value = o.predRadius ?? 5;
+    document.getElementById("laue-pred-alpha").value = Math.round((o.predAlpha ?? 0.8) * 100);
+    document.getElementById("laue-obs-color").value = o.obsColor || "#8b0000";
+    document.getElementById("laue-obs-linewidth").value = o.obsLineWidth ?? 2;
+    document.getElementById("laue-obs-radius").value = o.obsRadius ?? 5;
+    const obsAlpha = o.obsAlpha ?? o.observedAlpha ?? 0.8;
+    document.getElementById("laue-obs-alpha").value = Math.round(obsAlpha * 100);
+    document.getElementById("laue-show-beam-center").checked = o.showBeamCenter !== false;
+    document.getElementById("laue-show-observed-peaks").checked = o.showObservedPeaks !== false;
+    document.getElementById("laue-show-predicted-peaks").checked = o.showPredictedPeaks !== false;
   }
 
   function readCorrections() {
@@ -672,7 +702,7 @@
     applyViewTransform();
   }
 
-  async function finishImageLoad(statusMessage) {
+  async function finishImageLoad(buildStatusMessage) {
     state.rawIntensityRange = null;
     state.instrument.beamX = null;
     state.instrument.beamY = null;
@@ -685,7 +715,10 @@
     reprocessImage();
     resetViewToFit();
     requestAnimationFrame(() => resetViewToFit());
-    setStatus(statusMessage);
+    if (!state.displayData) {
+      throw new Error("Image could not be displayed.");
+    }
+    setStatus(typeof buildStatusMessage === "function" ? buildStatusMessage() : buildStatusMessage);
   }
 
   async function loadFile(file) {
@@ -693,7 +726,9 @@
     setStatus("Loading…");
     try {
       state.rawData = await LaueFormats.loadLaueFile(file);
-      await finishImageLoad(`Loaded ${file.name} (${state.displayData.width}×${state.displayData.height}, ${state.rawData.source})`);
+      await finishImageLoad(
+        () => `Loaded ${file.name} (${state.displayData.width}×${state.displayData.height}, ${state.rawData.source})`
+      );
     } catch (err) {
       showError(err.message || String(err));
       setStatus("");
@@ -716,7 +751,9 @@
         /* fetch unavailable (e.g. file://) — fall back to Image loader */
       }
       state.rawData = await LaueFormats.loadImageFromUrl(url);
-      await finishImageLoad(`Loaded example (${state.displayData.width}×${state.displayData.height}, image)`);
+      await finishImageLoad(
+        () => `Loaded example (${state.displayData.width}×${state.displayData.height}, image)`
+      );
     } catch (err) {
       showError(err.message || "Could not load example image.");
       setStatus("");
@@ -732,6 +769,24 @@
     updatePredictions();
     persistConfig();
     setStatus(`Detector size set to ${state.displayData.width} × ${state.displayData.height} px (1 px/mm scale).`);
+  }
+
+  function detectorScaleHint(inst, imageSize) {
+    if (!imageSize) return "";
+    const w = imageSize.width;
+    const h = imageSize.height;
+    const dw = inst.detWidth;
+    const dh = inst.detHeight;
+    if (!Number.isFinite(dw) || !Number.isFinite(dh) || dw <= 0 || dh <= 0) return "";
+    const tol = 0.05;
+    if (Math.abs(dw - w) / w > tol || Math.abs(dh - h) / h > tol) {
+      return (
+        ` Detector is ${dw} × ${dh} mm over a ${w} × ${h} px image ` +
+        `(scale ${(w / dw).toFixed(2)} px/mm). Match detector size to the active area in mm, ` +
+        "or use Use image pixel size when 1 px = 1 mm."
+      );
+    }
+    return "";
   }
 
   function updatePredictions() {
@@ -751,17 +806,24 @@
       renderPeaksTable();
       const onImage = state.predictedPeaks.filter((p) => p.onImage).length;
       const total = state.predictedPeaks.length;
+      const scaleHint = detectorScaleHint(state.instrument, imageSize);
       if (!total) {
-        setStatus("No predicted peaks in q range (check lattice, space group, and orientation).");
+        setStatus(
+          "No predicted peaks in Q range (check lattice, space group, sample orientation, and Q min/max)." +
+          scaleHint
+        );
       } else if (!onImage) {
         setStatus(
-          `${total} predicted peaks, none on image. Match detector width/height (mm) to the active area, ` +
-          "click Use image pixel size (1 px = 1 mm), adjust sample angles, or reduce detector distance."
+          `${total} predicted peaks, none on image.${scaleHint} ` +
+          "For backscatter Laue at zero orientation, only high-order reflections may appear far off-screen — " +
+          "try Align HKL to direct beam (e.g. 0 0 1 for Si), adjust sample angles, or check transmission vs backscatter."
         );
       } else if (onImage < total) {
-        setStatus(`${total} predicted peaks, ${onImage} on image (${total - onImage} off-screen).`);
+        setStatus(
+          `${total} predicted peaks, ${onImage} on image (${total - onImage} off-screen).${scaleHint}`
+        );
       } else {
-        setStatus(`${total} predicted peaks on image.`);
+        setStatus(`${total} predicted peaks on image.${scaleHint}`);
       }
     } catch (err) {
       setStatus(err.message);
@@ -789,9 +851,56 @@
     return state.view.totalScale || computeFitScale() * state.view.zoom || 1;
   }
 
-  /** Convert desired on-screen pixels to canvas/image units (constant size when CSS-scaled). */
+  /** Convert desired on-screen pixels to canvas/image units (for hit testing). */
   function screenPxToCanvas(px) {
     return px / viewTotalScale();
+  }
+
+  function imageToViewport(ix, iy) {
+    const total = viewTotalScale();
+    return {
+      x: ix * total + (state.view.tx ?? 0),
+      y: iy * total + (state.view.ty ?? 0)
+    };
+  }
+
+  function syncOverlayCanvas() {
+    if (!overlayCanvas || !overlayCtx || !canvasViewport) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvasViewport.clientWidth;
+    const h = canvasViewport.clientHeight;
+    if (w <= 0 || h <= 0) return;
+    const bw = Math.max(1, Math.round(w * dpr));
+    const bh = Math.max(1, Math.round(h * dpr));
+    if (overlayCanvas.width !== bw || overlayCanvas.height !== bh) {
+      overlayCanvas.width = bw;
+      overlayCanvas.height = bh;
+    }
+    overlayCanvas.style.width = `${w}px`;
+    overlayCanvas.style.height = `${h}px`;
+    overlayCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function hexToRgb(hex) {
+    const h = (hex || "#000000").replace("#", "");
+    if (h.length !== 6) return [0, 0, 0];
+    return [
+      parseInt(h.slice(0, 2), 16),
+      parseInt(h.slice(2, 4), 16),
+      parseInt(h.slice(4, 6), 16)
+    ];
+  }
+
+  function setOverlayStroke(ctx2d, hex, alpha) {
+    const [r, g, b] = hexToRgb(hex);
+    ctx2d.globalAlpha = alpha;
+    ctx2d.strokeStyle = `rgb(${r}, ${g}, ${b})`;
+  }
+
+  function setOverlayFill(ctx2d, hex, alpha) {
+    const [r, g, b] = hexToRgb(hex);
+    ctx2d.globalAlpha = alpha;
+    ctx2d.fillStyle = `rgb(${r}, ${g}, ${b})`;
   }
 
   function clientToImage(event) {
@@ -804,61 +913,77 @@
     };
   }
 
-  function redraw() {
-    if (!state.imageData) return;
-    ctx.putImageData(state.imageData, 0, 0);
-    const px = screenPxToCanvas;
-
-    const beam = beamCenterPosition();
-    const beamX = beam.x;
-    const beamY = beam.y;
-    const beamR = state.instrument.beamRadius;
+  function redrawOverlays() {
+    if (!overlayCanvas || !overlayCtx || !canvasViewport) return;
+    syncOverlayCanvas();
+    const w = canvasViewport.clientWidth;
+    const h = canvasViewport.clientHeight;
+    overlayCtx.clearRect(0, 0, w, h);
+    if (!state.displayData) return;
 
     const overlay = readOverlaySettings();
+    const total = viewTotalScale();
+    const beam = beamCenterPosition();
+    const beamVp = imageToViewport(beam.x, beam.y);
+    const beamR = state.instrument.beamRadius;
 
-    if (overlay.showBeamCenter && state.displayData) {
-      ctx.strokeStyle = "rgba(255, 220, 0, 1)";
-      ctx.lineWidth = px(1);
-      ctx.beginPath();
-      ctx.arc(beamX, beamY, beamR, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.fillStyle = "rgba(255, 220, 0, 1)";
-      ctx.beginPath();
-      ctx.arc(beamX, beamY, px(4 / 3), 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "rgba(255, 120, 0, 1)";
-      ctx.beginPath();
-      ctx.arc(beamX + beamR, beamY, px(5 / 3), 0, Math.PI * 2);
-      ctx.fill();
+    if (overlay.showBeamCenter) {
+      overlayCtx.globalAlpha = 1;
+      overlayCtx.strokeStyle = "rgb(255, 220, 0)";
+      overlayCtx.lineWidth = 1;
+      overlayCtx.beginPath();
+      overlayCtx.arc(beamVp.x, beamVp.y, beamR * total, 0, Math.PI * 2);
+      overlayCtx.stroke();
+      overlayCtx.fillStyle = "rgb(255, 220, 0)";
+      overlayCtx.beginPath();
+      overlayCtx.arc(beamVp.x, beamVp.y, 4, 0, Math.PI * 2);
+      overlayCtx.fill();
+      overlayCtx.fillStyle = "rgb(255, 120, 0)";
+      overlayCtx.beginPath();
+      overlayCtx.arc(beamVp.x + beamR * total, beamVp.y, 5, 0, Math.PI * 2);
+      overlayCtx.fill();
     }
 
-    ctx.font = `${px(11)}px sans-serif`;
-
     if (overlay.showPredictedPeaks) {
-      ctx.strokeStyle = colorInputToRgba(overlay.predColor, 0.95);
-      ctx.lineWidth = px(overlay.predLineWidth);
+      setOverlayStroke(overlayCtx, overlay.predColor, overlay.predAlpha ?? 0.8);
+      overlayCtx.lineWidth = overlay.predLineWidth ?? 2;
       for (const p of state.predictedPeaks) {
         if (!p.onImage) continue;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, px(overlay.predRadius), 0, Math.PI * 2);
-        ctx.stroke();
+        const pos = imageToViewport(p.x, p.y);
+        overlayCtx.beginPath();
+        overlayCtx.arc(pos.x, pos.y, overlay.predRadius, 0, Math.PI * 2);
+        overlayCtx.stroke();
       }
     }
 
     if (overlay.showObservedPeaks) {
-      const obsA = overlay.observedAlpha ?? 1;
+      const obsA = overlay.obsAlpha ?? overlay.observedAlpha ?? 0.8;
+      setOverlayStroke(overlayCtx, overlay.obsColor || "#8b0000", obsA);
+      overlayCtx.lineWidth = overlay.obsLineWidth ?? 2;
       for (const p of state.observedPeaks) {
-        ctx.strokeStyle = p.selected ? `rgba(255, 60, 60, ${obsA})` : `rgba(255, 80, 80, ${obsA})`;
-        ctx.lineWidth = px(1);
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, px(5), 0, Math.PI * 2);
-        ctx.stroke();
+        const pos = imageToViewport(p.x, p.y);
+        overlayCtx.beginPath();
+        overlayCtx.arc(pos.x, pos.y, overlay.obsRadius ?? 5, 0, Math.PI * 2);
+        overlayCtx.stroke();
         if (p.matchedH != null) {
-          ctx.fillStyle = `rgba(255, 255, 255, ${obsA})`;
-          ctx.fillText(`${p.matchedH}${p.matchedK}${p.matchedL}`, p.x + px(6), p.y + px(12));
+          setOverlayFill(overlayCtx, "#ffffff", obsA);
+          overlayCtx.font = "11px sans-serif";
+          overlayCtx.fillText(
+            `${p.matchedH}${p.matchedK}${p.matchedL}`,
+            pos.x + 6,
+            pos.y + 12
+          );
         }
       }
     }
+
+    overlayCtx.globalAlpha = 1;
+  }
+
+  function redraw() {
+    if (!state.imageData) return;
+    ctx.putImageData(state.imageData, 0, 0);
+    redrawOverlays();
   }
 
   function formatAxisIntensity(value) {
@@ -1088,7 +1213,12 @@
       state.corrections = { ...state.corrections, ...obj.corrections };
       writeCorrectionsToForm(state.corrections);
     }
-    if (obj.overlay) state.overlay = { ...state.overlay, ...obj.overlay };
+    if (obj.overlay) {
+      state.overlay = { ...state.overlay, ...obj.overlay };
+      if (obj.overlay.observedAlpha != null && obj.overlay.obsAlpha == null) {
+        state.overlay.obsAlpha = obj.overlay.observedAlpha;
+      }
+    }
     if (obj.observedPeaks) state.observedPeaks = obj.observedPeaks.map((p, i) => ({ ...p, id: i }));
     if (obj.view) state.view = { ...state.view, ...obj.view };
     document.getElementById("laue-colormap").value = state.display.colormap || "gray";
@@ -1096,13 +1226,7 @@
     document.getElementById("laue-vmax").value = state.display.vmax ?? "";
     document.getElementById("laue-reverse-colormap").checked = state.display.reverseColormap !== false;
     document.getElementById("laue-invert-intensity").checked = !!state.display.invertIntensity;
-    document.getElementById("laue-pred-color").value = state.overlay.predColor || "#8b0000";
-    document.getElementById("laue-pred-linewidth").value = state.overlay.predLineWidth ?? 1;
-    document.getElementById("laue-pred-radius").value = state.overlay.predRadius ?? 5;
-    document.getElementById("laue-obs-alpha").value = Math.round((state.overlay.observedAlpha ?? 1) * 100);
-    document.getElementById("laue-show-beam-center").checked = state.overlay.showBeamCenter !== false;
-    document.getElementById("laue-show-observed-peaks").checked = state.overlay.showObservedPeaks !== false;
-    document.getElementById("laue-show-predicted-peaks").checked = state.overlay.showPredictedPeaks !== false;
+    writeOverlaySettingsToForm(state.overlay);
     if (state.rawData) reprocessImage();
     else applyViewTransform();
     drawCurveEditor();
@@ -1466,7 +1590,11 @@
     document.getElementById("laue-reset-orientation").addEventListener("click", resetSampleOrientation);
     document.getElementById("laue-align-beam-btn").addEventListener("click", alignBeamHKL);
 
-    ["laue-pred-color", "laue-pred-linewidth", "laue-pred-radius", "laue-obs-alpha", "laue-show-beam-center", "laue-show-observed-peaks", "laue-show-predicted-peaks"].forEach((id) => {
+    [
+      "laue-pred-color", "laue-pred-linewidth", "laue-pred-radius", "laue-pred-alpha",
+      "laue-obs-color", "laue-obs-linewidth", "laue-obs-radius", "laue-obs-alpha",
+      "laue-show-beam-center", "laue-show-observed-peaks", "laue-show-predicted-peaks"
+    ].forEach((id) => {
       document.getElementById(id).addEventListener("input", () => { readOverlaySettings(); redraw(); persistConfig(); });
       document.getElementById(id).addEventListener("change", () => { readOverlaySettings(); redraw(); persistConfig(); });
     });
@@ -1647,6 +1775,23 @@
           gamma: document.getElementById("laue-gamma"),
           spaceGroup: document.getElementById("laue-spacegroup")
         });
+        if (preset.id === "si-diamond" || preset.id === "ge-diamond") {
+          const crystal = readCrystal();
+          const signs = {
+            omega: num("laue-sign-omega") || 1,
+            chi: num("laue-sign-chi") || 1,
+            phi: num("laue-sign-phi") || 1
+          };
+          const aligned = LaueMath.alignHKLToBeam(
+            crystal,
+            [0, 0, 1],
+            { omega: 0, chi: 0, phi: 0 },
+            signs
+          );
+          document.getElementById("laue-sample-omega").value = aligned.omega;
+          document.getElementById("laue-sample-chi").value = aligned.chi;
+          document.getElementById("laue-sample-phi").value = aligned.phi;
+        }
         updatePredictions();
         persistConfig();
       });
