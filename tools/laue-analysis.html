@@ -91,6 +91,12 @@
               <label for="laue-spacegroup">Space group</label>
               <input type="text" id="laue-spacegroup" value="Fd-3m" placeholder="symbol or IT number" />
             </div>
+            <div class="tool-field tool-field-checkbox">
+              <label for="laue-diamond-basis">
+                <input type="checkbox" id="laue-diamond-basis" checked />
+                Diamond Si/Ge basis extinctions
+              </label>
+            </div>
           </form>
         </section>
 
@@ -318,6 +324,7 @@
             </div>
             <div class="laue-check-row">
               <label><input type="checkbox" id="laue-show-predicted-peaks" checked /> Show predicted peaks</label>
+              <label><input type="checkbox" id="laue-show-predicted-labels" checked /> Show index labels</label>
               <label><input type="checkbox" id="laue-show-beam-center" checked /> Show beam center</label>
             </div>
 
@@ -342,6 +349,7 @@
             </div>
             <div class="laue-check-row">
               <label><input type="checkbox" id="laue-show-observed-peaks" checked /> Show detected peaks</label>
+              <label><input type="checkbox" id="laue-show-observed-labels" checked /> Show index labels</label>
             </div>
 
             <div class="laue-config-row">
@@ -384,15 +392,19 @@
             <label><input type="checkbox" id="laue-refine-det-omega" /> Det. Ω misalign</label>
             <label><input type="checkbox" id="laue-refine-det-chi" /> Det. χ misalign</label>
           </div>
-          <button type="button" class="button primary" id="laue-refine-btn">Run refinement</button>
+          <div class="laue-action-row">
+            <button type="button" class="button primary" id="laue-refine-btn">Run refinement</button>
+            <button type="button" class="button secondary" id="laue-refine-undo-btn" disabled>Undo refinement</button>
+          </div>
           <p class="tool-note" id="laue-refine-result" aria-live="polite"></p>
         </section>
 
         <section class="tool-section">
           <h3 class="laue-subheading">Ideal orientation calculator</h3>
           <p class="tool-note">
-            Specify the reciprocal-lattice direction that should align with the direct beam (+x)
-            and a second direction that should lie in the horizontal (xy) plane.
+            Enter the HKL you placed on the direct beam (lab +x) and a second reflection that should
+            lie in the plane perpendicular to the beam (not the detector x axis). Defaults 0 0 1 and
+            1 0 0 are for a cubic crystal after “Align to beam” on 0 0 1.
           </p>
           <div class="tool-grid">
             <div class="tool-field">
@@ -443,7 +455,10 @@
           <button type="button" class="button secondary laue-zoom-btn" id="laue-zoom-in" title="Zoom in">+</button>
           <button type="button" class="button secondary" id="laue-zoom-reset">Reset zoom</button>
         </div>
-        <p class="laue-status" id="laue-status" aria-live="polite"></p>
+        <div class="laue-status-slot">
+          <p class="laue-status" id="laue-status" aria-live="polite"></p>
+        </div>
+        <div class="laue-viewer-body">
         <p class="laue-viewer-placeholder" id="laue-viewer-placeholder">Load a Laue image to display it here.</p>
         <div class="laue-viewer-frame" id="laue-viewer-frame" hidden>
           <div class="laue-canvas-viewport" id="laue-canvas-viewport">
@@ -460,6 +475,7 @@
             <canvas id="laue-colorbar" class="laue-colorbar" width="28" height="220" aria-label="Intensity colorbar"></canvas>
             <span class="laue-colorbar-label" id="laue-colorbar-min"></span>
           </div>
+        </div>
         </div>
       </aside>
     </div>

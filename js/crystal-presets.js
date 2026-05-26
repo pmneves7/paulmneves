@@ -15,7 +15,8 @@ const CRYSTAL_PRESET_GROUPS = [
         alpha: 90,
         beta: 90,
         gamma: 90,
-        spaceGroup: "Fd-3m"
+        spaceGroup: "Fd-3m",
+        diamondBasis: true
       },
       {
         id: "ge-diamond",
@@ -26,7 +27,8 @@ const CRYSTAL_PRESET_GROUPS = [
         alpha: 90,
         beta: 90,
         gamma: 90,
-        spaceGroup: "Fd-3m"
+        spaceGroup: "Fd-3m",
+        diamondBasis: true
       }
     ]
   },
@@ -190,5 +192,9 @@ function applyCrystalPresetToFields(preset, fieldMap) {
 
   if (fieldMap.spaceGroup && preset.spaceGroup) {
     fieldMap.spaceGroup.value = preset.spaceGroup;
+  }
+
+  if (fieldMap.diamondBasis) {
+    fieldMap.diamondBasis.checked = !!preset.diamondBasis;
   }
 }

@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    name="description"
+    content="Plan small-angle neutron scattering experiments: visible Q range, instrument resolution, and scattering geometry."
+  />
+  <title>SANS experiment planner | Paul M. Neves</title>
+  <link rel="canonical" href="https://paulmneves.com/tools/sans-planner.html" />
+  <link rel="icon" type="image/png" href="../media/favicon.png" />
+  <link rel="stylesheet" href="../css/site.css" />
+</head>
+<body>
+  <header>
+    <nav aria-label="Main navigation">
+      <a class="site-title" href="../index.html">Paul M. Neves</a>
+      <div class="nav-links">
+        <a href="../index.html#biography">Biography</a>
+        <a href="../research.html">Research</a>
+        <a href="../publications.html">Publications</a>
+        <a href="../news.html">News</a>
+        <a href="../gallery.html">Gallery</a>
+        <a href="../tools.html">Tools</a>
+        <a href="../index.html#contact">Contact</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <header class="page-header">
+      <h1>SANS experiment planner</h1>
+      <p class="lead">
+        Estimate the accessible momentum-transfer range and instrument resolution for a
+        pinhole-collimated small-angle neutron scattering (SANS) geometry. Laboratory frame:
+        <strong>x</strong> is the direct beam, <strong>y</strong> horizontal on the detector,
+        <strong>z</strong> vertical.
+      </p>
+      <p class="tool-disclaimer">
+        <strong>Disclaimer:</strong> These tools are experimental and may still have bugs/errors.
+        If you spot one, please <a href="../index.html#contact">tell me</a>!
+      </p>
+    </header>
+
+    <div class="tool-panel tool-panel-wide">
+      <section class="tool-section">
+        <h2>1. Detector geometry</h2>
+        <p class="tool-note">
+          Uses <em>Q</em> = 4π sin(θ)/λ with θ the half scattering angle. Visible <em>Q</em> is
+          bounded by the beamstop (inner radius) and the detector edges (outer radius), measured
+          from the beam position on the detector.
+        </p>
+        <form id="sans-geometry-form" class="tool-grid tool-grid-aligned sans-input-grid" onsubmit="return false">
+          <div class="tool-field">
+            <label for="sans-lambda">Neutron wavelength λ (Å)</label>
+            <input type="number" id="sans-lambda" step="any" min="0" value="5" />
+          </div>
+          <div class="tool-field">
+            <label for="sans-det-width">Detector width (cm)</label>
+            <input type="number" id="sans-det-width" step="any" min="0" value="100" />
+          </div>
+          <div class="tool-field">
+            <label for="sans-det-height">Detector height (cm)</label>
+            <input type="number" id="sans-det-height" step="any" min="0" value="100" />
+          </div>
+          <div class="tool-field">
+            <label for="sans-sample-distance">Sample–detector distance (m)</label>
+            <input type="number" id="sans-sample-distance" step="any" min="0" value="5" />
+          </div>
+          <div class="tool-field">
+            <label for="sans-beam-offset-x">Beam center offset x (mm)</label>
+            <input type="number" id="sans-beam-offset-x" step="any" value="0" />
+          </div>
+          <div class="tool-field">
+            <label for="sans-beam-offset-y">Beam center offset y (mm)</label>
+            <input type="number" id="sans-beam-offset-y" step="any" value="0" />
+          </div>
+          <div class="tool-field">
+            <label for="sans-beamstop-radius">Beamstop radius (mm)</label>
+            <input type="number" id="sans-beamstop-radius" step="any" min="0" value="25" />
+          </div>
+        </form>
+      </section>
+
+      <div class="tool-results" aria-live="polite">
+        <div class="tool-results-header">
+          <h2>Accessible range</h2>
+        </div>
+        <div class="tool-result-grid">
+          <div class="tool-result-card">
+            <h3>|Q| range</h3>
+            <p id="sans-q-range">—</p>
+          </div>
+          <div class="tool-result-card">
+            <h3>Real-space distance</h3>
+            <p id="sans-d-range">—</p>
+            <span>d = 2π / |Q|</span>
+          </div>
+          <div class="tool-result-card">
+            <h3>2θ range</h3>
+            <p id="sans-2theta-range">—</p>
+          </div>
+        </div>
+      </div>
+
+      <section class="tool-section tool-results-section">
+        <h2>Scattering geometry</h2>
+        <div class="sans-plot-grid sans-plot-grid-res">
+          <figure class="sans-plot-figure">
+            <figcaption>|Q| vs 2θ</figcaption>
+            <canvas id="sans-plot-q-2theta" class="sans-plot-canvas" aria-label="|Q| versus two theta"></canvas>
+          </figure>
+          <figure class="sans-plot-figure">
+            <figcaption>q<sub>z</sub> vs 2θ</figcaption>
+            <canvas id="sans-plot-qz-2theta" class="sans-plot-canvas" aria-label="q_z versus two theta"></canvas>
+          </figure>
+          <figure class="sans-plot-figure">
+            <figcaption>q<sub>z</sub> vs √(q<sub>x</sub>² + q<sub>y</sub>²)</figcaption>
+            <canvas id="sans-plot-qperp-qz" class="sans-plot-canvas" aria-label="q_z versus in-plane q"></canvas>
+          </figure>
+        </div>
+      </section>
+
+      <section class="tool-section">
+        <h2>2. Collimation &amp; resolution</h2>
+        <p class="tool-note" id="sans-resolution-note">
+          Pinhole collimation and wavelength spread contributions to the resolution function.
+        </p>
+        <form id="sans-resolution-form" class="tool-grid tool-grid-aligned sans-input-grid" onsubmit="return false">
+          <div class="tool-field">
+            <label for="sans-dll">Δλ/λ (FWHM)</label>
+            <input type="number" id="sans-dll" step="any" min="0" value="0.1" />
+          </div>
+          <div class="tool-field">
+            <label for="sans-pinhole1">First pinhole diameter (mm)</label>
+            <input type="number" id="sans-pinhole1" step="any" min="0" value="30" />
+          </div>
+          <div class="tool-field">
+            <label for="sans-pinhole2">Second pinhole diameter (mm)</label>
+            <input type="number" id="sans-pinhole2" step="any" min="0" value="30" />
+          </div>
+          <div class="tool-field">
+            <label for="sans-aperture1-sample">First aperture–sample distance (m)</label>
+            <input type="number" id="sans-aperture1-sample" step="any" min="0" value="6" />
+          </div>
+          <div class="tool-field">
+            <label for="sans-aperture2-sample">Second aperture–sample distance (m)</label>
+            <input type="number" id="sans-aperture2-sample" step="any" min="0" value="1" />
+          </div>
+          <div class="tool-field">
+            <label for="sans-pixel-width">Detector pixel width (mm)</label>
+            <input type="number" id="sans-pixel-width" step="any" min="0" value="1" />
+          </div>
+          <div class="tool-field">
+            <label for="sans-pixel-height">Detector pixel height (mm)</label>
+            <input type="number" id="sans-pixel-height" step="any" min="0" value="1" />
+          </div>
+        </form>
+      </section>
+
+      <section class="tool-section tool-results-section">
+        <h2>Instrument resolution vs |Q|</h2>
+        <div class="sans-plot-grid sans-plot-grid-res">
+          <figure class="sans-plot-figure">
+            <figcaption>Radial σ along |Q| (Å⁻¹)</figcaption>
+            <canvas id="sans-plot-sigma-x" class="sans-plot-canvas" aria-label="radial resolution versus Q"></canvas>
+          </figure>
+          <figure class="sans-plot-figure">
+            <figcaption>Azimuthal σ (Å⁻¹, blue; deg, orange)</figcaption>
+            <canvas id="sans-plot-sigma-y" class="sans-plot-canvas" aria-label="azimuthal resolution versus Q"></canvas>
+          </figure>
+          <figure class="sans-plot-figure">
+            <figcaption>Rocking-curve σ (Å⁻¹, blue; deg, orange)</figcaption>
+            <canvas id="sans-plot-sigma-z" class="sans-plot-canvas" aria-label="rocking curve resolution versus Q"></canvas>
+          </figure>
+        </div>
+      </section>
+
+      <section class="tool-section">
+        <h2>3. Scattering vector of interest</h2>
+        <p class="tool-note">
+          Specify a momentum transfer to evaluate scattering angle, resolution components, and
+          q<sub>z</sub>. The point is marked on all plots above.
+        </p>
+        <div class="tool-grid">
+          <div class="tool-field">
+            <label for="sans-q-interest">|Q| of interest (Å⁻¹)</label>
+            <input type="number" id="sans-q-interest" step="any" min="0" value="0.025" />
+          </div>
+        </div>
+        <div id="sans-interest-results" class="tool-results-section" aria-live="polite"></div>
+      </section>
+
+      <section class="tool-section">
+        <h2>Configuration</h2>
+        <p class="tool-note">Settings are restored automatically on your next visit to this page.</p>
+        <div class="laue-action-row">
+          <button type="button" class="button secondary" id="sans-save-config-btn">Save config…</button>
+          <button type="button" class="button secondary" id="sans-load-config-btn">Load config…</button>
+          <input type="file" id="sans-config-file" accept="application/json,.json" hidden />
+        </div>
+      </section>
+    </div>
+
+    <p class="back-link-panel"><a href="../tools.html">← Back to tools</a></p>
+  </main>
+
+  <footer>
+    © <span id="year"></span> Paul M. Neves. All rights reserved.
+  </footer>
+
+  <script src="../js/site.js"></script>
+  <script src="../js/sans-planner-math.js"></script>
+  <script src="../js/sans-planner.js"></script>
+</body>
+</html>

@@ -343,14 +343,53 @@
     throw new Error("Unsupported file type. Use PNG/JPEG, .hs2, or .nxs.");
   }
 
-  function catmullRom1D(y0, y1, y2, y3, u) {
+  /** PCHIP slopes (monotone cubic Hermite) — smoother, wider tone response than Catmull–Rom. */
+  function pchipEndpointSlope(h0, h1, delta0, delta1) {
+    let m = ((2 * h0 + h1) * delta0 - h0 * delta1) / (h0 + h1);
+    if (Math.sign(m) !== Math.sign(delta0)) m = 0;
+    else if (Math.sign(delta0) !== Math.sign(delta1) && Math.abs(m) > 3 * Math.abs(delta0)) {
+      m = 3 * delta0;
+    }
+    return m;
+  }
+
+  function pchipSlopes(xs, ys) {
+    const n = xs.length;
+    const m = new Array(n);
+    if (n === 1) return [0];
+    const h = new Array(n - 1);
+    const delta = new Array(n - 1);
+    for (let k = 0; k < n - 1; k += 1) {
+      h[k] = xs[k + 1] - xs[k];
+      delta[k] = h[k] > 1e-12 ? (ys[k + 1] - ys[k]) / h[k] : 0;
+    }
+    if (n === 2) {
+      m[0] = delta[0];
+      m[1] = delta[0];
+      return m;
+    }
+    m[0] = pchipEndpointSlope(h[0], h[1], delta[0], delta[1]);
+    m[n - 1] = pchipEndpointSlope(h[n - 2], h[n - 3], delta[n - 2], delta[n - 3]);
+    for (let i = 1; i < n - 1; i += 1) {
+      if (delta[i - 1] * delta[i] <= 0) {
+        m[i] = 0;
+      } else {
+        const w1 = 2 * h[i] + h[i - 1];
+        const w2 = h[i] + 2 * h[i - 1];
+        m[i] = (w1 + w2) / (w1 / delta[i - 1] + w2 / delta[i]);
+      }
+    }
+    return m;
+  }
+
+  function hermiteSegment(y0, y1, m0, m1, h, u) {
     const u2 = u * u;
     const u3 = u2 * u;
-    return 0.5 * (
-      2 * y1 +
-      (-y0 + y2) * u +
-      (2 * y0 - 5 * y1 + 4 * y2 - y3) * u2 +
-      (-y0 + 3 * y1 - 3 * y2 + y3) * u3
+    return (
+      (2 * u3 - 3 * u2 + 1) * y0 +
+      (u3 - 2 * u2 + u) * h * m0 +
+      (-2 * u3 + 3 * u2) * y1 +
+      (u3 - u2) * h * m1
     );
   }
 
@@ -359,13 +398,14 @@
     const sorted = [...points].sort((a, b) => a.x - b.x);
     if (sorted.length === 1) return sorted[0].y;
 
+    const xs = sorted.map((p) => p.x);
+    const ys = sorted.map((p) => p.y);
     const first = sorted[0];
     const last = sorted[sorted.length - 1];
 
     if (t <= first.x) {
       if (sorted.length < 2) return first.y;
-      const next = sorted[1];
-      const slope = (next.y - first.y) / (next.x - first.x || 1);
+      const slope = (sorted[1].y - first.y) / (sorted[1].x - first.x || 1);
       return first.y + slope * (t - first.x);
     }
     if (t >= last.x) {
@@ -375,18 +415,26 @@
       return last.y + slope * (t - last.x);
     }
 
+    if (sorted.length === 2) {
+      const a = sorted[0];
+      const b = sorted[1];
+      const u = (t - a.x) / (b.x - a.x || 1);
+      return a.y + u * (b.y - a.y);
+    }
+
+    const slopes = pchipSlopes(xs, ys);
     for (let i = 0; i < sorted.length - 1; i += 1) {
-      const a = sorted[i];
-      const b = sorted[i + 1];
-      if (t >= a.x && t <= b.x) {
-        const span = b.x - a.x || 1;
-        const u = (t - a.x) / span;
-        if (sorted.length === 2) {
-          return a.y + u * (b.y - a.y);
-        }
-        const y0 = i > 0 ? sorted[i - 1].y : (2 * a.y - b.y);
-        const y3 = i + 2 < sorted.length ? sorted[i + 2].y : (2 * b.y - a.y);
-        return catmullRom1D(y0, a.y, b.y, y3, u);
+      if (t >= sorted[i].x && t <= sorted[i + 1].x) {
+        const h = sorted[i + 1].x - sorted[i].x || 1;
+        const u = (t - sorted[i].x) / h;
+        return hermiteSegment(
+          sorted[i].y,
+          sorted[i + 1].y,
+          slopes[i],
+          slopes[i + 1],
+          h,
+          u
+        );
       }
     }
     return t;

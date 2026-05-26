@@ -505,6 +505,14 @@ section {
   min-height: 3.2rem;
 }
 
+.sans-input-grid.tool-grid-aligned .tool-field {
+  align-items: stretch;
+}
+
+.sans-input-grid.tool-grid-aligned .tool-field input {
+  align-self: center;
+}
+
 .tool-field {
   margin-bottom: 1.25rem;
 }
@@ -1736,6 +1744,20 @@ main.laue-main {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
 }
 
+.laue-status-slot {
+  flex: 0 0 4.75rem;
+  height: 4.75rem;
+  overflow: hidden;
+}
+
+.laue-viewer-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 280px;
+  min-width: 0;
+}
+
 .laue-viewer-frame {
   display: flex;
   gap: 0.5rem;
@@ -1744,7 +1766,15 @@ main.laue-main {
   min-height: 0;
 }
 
-.laue-viewer-placeholder {
+.laue-viewer-placeholder[hidden] {
+  display: none !important;
+}
+
+.laue-viewer-frame[hidden] {
+  display: none !important;
+}
+
+.laue-viewer-placeholder:not([hidden]) {
   font-size: 0.92rem;
   color: var(--muted, #5a6270);
   text-align: center;
@@ -1753,6 +1783,11 @@ main.laue-main {
   border-radius: 6px;
   background: #f8f9fb;
   margin: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 280px;
 }
 
 .laue-zoom-bar {
@@ -1760,6 +1795,7 @@ main.laue-main {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.4rem;
+  flex: 0 0 auto;
 }
 
 .laue-zoom-btn {
@@ -1824,6 +1860,14 @@ main.laue-main {
   margin-top: 1rem;
 }
 
+.laue-action-row + #laue-refine-result {
+  margin-top: 0.85rem;
+}
+
+#laue-ideal-btn + #laue-ideal-result {
+  margin-top: 0.85rem;
+}
+
 .laue-load-error {
   color: var(--accent);
 }
@@ -1861,6 +1905,36 @@ main.laue-main {
   border: 1px solid #cbd5e1;
   cursor: crosshair;
   background: #fff;
+}
+
+.sans-plot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.25rem;
+}
+
+.sans-plot-grid-res {
+  grid-template-columns: 1fr;
+}
+
+.sans-plot-figure {
+  margin: 0;
+}
+
+.sans-plot-figure figcaption {
+  color: var(--accent-dark);
+  font-size: 0.95rem;
+  font-weight: 650;
+  margin-bottom: 0.5rem;
+}
+
+.sans-plot-canvas {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  display: block;
+  max-width: 100%;
+  width: 100%;
 }
 
 .laue-overlay-grid {
@@ -1974,7 +2048,8 @@ main.laue-main {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0;
+  flex: 0 0 auto;
 }
 
 .laue-mode-btn {
@@ -1996,9 +2071,11 @@ main.laue-main {
 
 .laue-status {
   font-size: 0.88rem;
+  line-height: 1.4;
   color: var(--muted, #5a6270);
-  min-height: 1.25em;
   margin: 0;
+  height: 100%;
+  overflow-y: auto;
 }
 
 .laue-peaks-table tr.laue-peak-offscreen td {

@@ -3,10 +3,9 @@
  * Uses International Tables conventions in the standard setting.
  */
 (function () {
+  // Bravais centering letter for IT space groups 1–230 (standard setting).
   const SPACE_GROUP_CENTERING =
-    "PPPPCPPCCPPCPPCPPPPCCFIIPPPPPPPPPPPPPAAAAFFIIIPPPPPPPPPPPPPPPPCCCCCCFFIIIIPPPPIIPPPPPPIIPPPPPPPPIIPPPPPPPPIIIIPPPPPPPPIIIIPPPPPPPPPPPPPPPPIIIIPPPRPRPPPPPPRPPPPRRPPPPRRPPPPPPPPPPPPPPPPPPPPPPPPPPPPFIPIPPFFIPIPPFFIPPIPFIPFIPPPPFFFFII";
-
-  const DIAMOND_SPACE_GROUPS = new Set([203, 210, 227, 228]);
+    "PPPPCPPCCPPCPPCPPPPCCFIIPPPPPPPPPPCCCAAAAFFIIIPPPPPPPPPPPPPPPPCCCCCCFFIIIIPPPPIIPIPPPPIIPPPPPPPPIIPPPPPPPPIIIIPPPPPPPPIIIIPPPPPPPPPPPPPPPPIIIIPPPRPRPPPPPPRPPPPRRPPPPRRPPPPPPPPPPPPPPPPPPPPPPPPPPPPFIPIPPFFIPIPPFFIPPIPFIPFIPPPPFFFFII";
 
   function mod(value, divisor) {
     return ((value % divisor) + divisor) % divisor;
@@ -61,8 +60,6 @@
         : "P");
 
     const system = hasNumber ? crystalSystem(number) : guessCrystalSystem(normalizedSymbol, centering);
-    const body = normalizedSymbol.slice(centering.length);
-    const isDiamond = DIAMOND_SPACE_GROUPS.has(resolvedNumber) || (centering === "F" && body.startsWith("d"));
 
     return {
       input: trimmed,
@@ -71,9 +68,18 @@
       normalizedSymbol,
       centering,
       system,
-      rhombohedralSetting,
-      isDiamond
+      rhombohedralSetting
     };
+  }
+
+  function normalizeExtinctionOptions(options) {
+    if (options === "obverse" || options === "reverse") {
+      return { rhombohedralSetting: options };
+    }
+    if (options && typeof options === "object") {
+      return options;
+    }
+    return {};
   }
 
   function guessCrystalSystem(normalizedSymbol, centering) {
@@ -295,18 +301,17 @@
   function diamondRules() {
     return [
       {
-        id: "diamond-odd",
-        label: "d-glide (diamond): (hkl) with h, k, l all odd are absent",
-        test(h, k, l) {
-          return !(mod(h, 2) === 1 && mod(k, 2) === 1 && mod(l, 2) === 1);
-        }
-      },
-      {
         id: "diamond-even",
-        label: "d-glide (diamond): (hkl) with h, k, l all even and h + k + l = 4n + 2 are absent",
+        label: "diamond: all-odd allowed; all-even require h + k + l = 4n",
         test(h, k, l) {
-          if (!sameParity(h, k, l) || !isEven(h)) return true;
-          return mod(h + k + l, 4) !== 2;
+          // F-centering rule handles mixed parity elsewhere.
+          if (!sameParity(h, k, l)) return true;
+
+          // all odd are allowed in diamond
+          if (!isEven(h)) return true;
+
+          // all even require h+k+l = 4n
+          return mod(h + k + l, 4) === 0;
         }
       }
     ];
@@ -326,34 +331,39 @@
     const centering = centeringRule(context.centering, context.rhombohedralSetting);
     if (centering) rules.push(centering);
 
-    switch (context.system) {
-      case "monoclinic":
-        rules.push(...monoclinicRules(context.normalizedSymbol));
-        break;
-      case "orthorhombic":
-        rules.push(...orthorhombicRules(context.normalizedSymbol));
-        break;
-      case "tetragonal":
-      case "hexagonal":
-      case "trigonal":
-        rules.push(...tetragonalHexagonalRules(context.normalizedSymbol));
-        break;
-      default:
-        break;
+    if (context.applyScrewGlideRules) {
+      switch (context.system) {
+        case "monoclinic":
+          rules.push(...monoclinicRules(context.normalizedSymbol));
+          break;
+        case "orthorhombic":
+          rules.push(...orthorhombicRules(context.normalizedSymbol));
+          break;
+        case "tetragonal":
+        case "hexagonal":
+        case "trigonal":
+          rules.push(...tetragonalHexagonalRules(context.normalizedSymbol));
+          break;
+        default:
+          break;
+      }
     }
 
-    if (context.isDiamond) {
+    if (context.applyDiamondBasis) {
       rules.push(...diamondRules());
     }
 
     return dedupeRules(rules);
   }
 
-  function resolveExtinctionContext(spaceGroupInput, rhombohedralSettingOverride) {
+  function resolveExtinctionContext(spaceGroupInput, options) {
+    const opts = normalizeExtinctionOptions(options);
     const context = parseSpaceGroupInput(spaceGroupInput);
-    if (rhombohedralSettingOverride === "obverse" || rhombohedralSettingOverride === "reverse") {
-      context.rhombohedralSetting = rhombohedralSettingOverride;
+    if (opts.rhombohedralSetting === "obverse" || opts.rhombohedralSetting === "reverse") {
+      context.rhombohedralSetting = opts.rhombohedralSetting;
     }
+    context.applyDiamondBasis = !!opts.applyDiamondBasis;
+    context.applyScrewGlideRules = !!opts.applyScrewGlideRules;
     context.rules = buildExtinctionRules(context);
     return context;
   }
@@ -392,11 +402,16 @@
       lines.push(`Rhombohedral setting: ${context.rhombohedralSetting} (override with :H or :R in the symbol).`);
     }
 
-    if (context.isDiamond) {
-      lines.push("Diamond-type d-glide rules are applied (Fd-3m and related groups).");
+    if (context.applyDiamondBasis) {
+      lines.push("Diamond Si/Ge basis extinctions are enabled (structure-factor rule, not space-group symmetry).");
     }
 
-    lines.push("Glide and screw rules are inferred from the Hermann-Mauguin symbol; unusual settings may need manual checking.");
+    if (context.applyScrewGlideRules) {
+      lines.push("Screw/glide rules are inferred from the Hermann-Mauguin symbol; unusual settings may need manual checking.");
+    } else {
+      lines.push("Only Bravais centering absences are applied. Screw/glide and most symmetry absences are not filtered.");
+    }
+
     return lines;
   }
 

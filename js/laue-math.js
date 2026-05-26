@@ -86,6 +86,22 @@
     return [[c, -s, 0], [s, c, 0], [0, 0, 1]];
   }
 
+  /** Rotation matrix from axis-angle (Rodrigues), axis in lab frame. */
+  function rotAxis(axis, angleRad) {
+    const a = normalize(axis);
+    const c = Math.cos(angleRad);
+    const s = Math.sin(angleRad);
+    const x = a[0];
+    const y = a[1];
+    const z = a[2];
+    const oc = 1 - c;
+    return [
+      [c + x * x * oc, x * y * oc - z * s, x * z * oc + y * s],
+      [y * x * oc + z * s, c + y * y * oc, y * z * oc - x * s],
+      [z * x * oc - y * s, z * y * oc + x * s, c + z * z * oc]
+    ];
+  }
+
   function matrixFromColumns(c0, c1, c2) {
     return [
       [c0[0], c1[0], c2[0]],
@@ -140,6 +156,106 @@
     const rx = rotX(degToRad(sampleChi * (s.chi || 1)));
     const ry = rotY(degToRad(samplePhi * (s.phi || 1)));
     return mat3Mul(ry, mat3Mul(rx, rz));
+  }
+
+  /**
+   * Invert U = Ry(Φ) Rx(χ) Rz(Ω) to display angles (degrees), undoing per-axis sign multipliers.
+   */
+  function sampleEulerFromUMatrix(m, signs) {
+    const s = signs || { omega: 1, chi: 1, phi: 1 };
+    // rotX stores -sin(χ) in R[1][2] for U = Ry(Φ) Rx(χ) Rz(Ω)
+    const chiRad = Math.asin(clamp(-m[1][2], -1, 1));
+    const cosChi = Math.cos(chiRad);
+    let omegaRad;
+    let phiRad;
+    if (Math.abs(cosChi) > 1e-6) {
+      omegaRad = Math.atan2(m[1][0], m[1][1]);
+      phiRad = Math.atan2(m[0][2], m[2][2]);
+    } else {
+      omegaRad = 0;
+      phiRad = Math.atan2(-m[2][0], m[0][0]);
+    }
+    return {
+      omega: radToDeg(omegaRad) / (s.omega || 1),
+      chi: radToDeg(chiRad) / (s.chi || 1),
+      phi: radToDeg(phiRad) / (s.phi || 1)
+    };
+  }
+
+  function wrapAngleNear(angleDeg, referenceDeg) {
+    let a = angleDeg;
+    const ref = referenceDeg;
+    while (a - ref > 180) a -= 360;
+    while (a - ref < -180) a += 360;
+    return a;
+  }
+
+  /**
+   * Rotate sample orientation so reflection hkl moves to (targetX, targetY) on the image.
+   * Uses detector in-plane axes (2 DOF) with Gauss–Newton steps; stable vs Euler increments.
+   *
+   * @param {object} detector - detOmega, detChi, laueMode, detOmegaMisalign, detChiMisalign
+   */
+  function panSampleOrientationTrackPoint(
+    params,
+    startAngles,
+    signs,
+    detector,
+    hkl,
+    targetX,
+    targetY,
+    projConfig,
+    imageSize
+  ) {
+    const hint = { ...startAngles };
+    let angles = { ...startAngles };
+    const bVec = mat3Vec(bMatrix(params), hkl);
+    const n = detectorNormal(
+      detector.detOmega,
+      detector.detChi,
+      detector.laueMode
+    );
+    const basis = detectorBasis(
+      n,
+      detector.detOmegaMisalign || 0,
+      detector.detChiMisalign || 0
+    );
+
+    for (let iter = 0; iter < 12; iter += 1) {
+      const m = uMatrix(angles.omega, angles.chi, angles.phi, signs);
+      const g = mat3Vec(m, bVec);
+      const proj = projectReflection(g, projConfig, imageSize);
+      if (!proj) return angles;
+
+      const errX = targetX - proj.x;
+      const errY = targetY - proj.y;
+      if (errX * errX + errY * errY < 0.01) break;
+
+      const step = 1e-4;
+      const mU = mat3Mul(rotAxis(basis.u, step), m);
+      const mV = mat3Mul(rotAxis(basis.v, step), m);
+      const pU = projectReflection(mat3Vec(mU, bVec), projConfig, imageSize);
+      const pV = projectReflection(mat3Vec(mV, bVec), projConfig, imageSize);
+      if (!pU || !pV) break;
+
+      const j11 = (pU.x - proj.x) / step;
+      const j12 = (pV.x - proj.x) / step;
+      const j21 = (pU.y - proj.y) / step;
+      const j22 = (pV.y - proj.y) / step;
+      const det = j11 * j22 - j12 * j21;
+      if (Math.abs(det) < 1e-14) break;
+
+      const du = (errX * j22 - errY * j12) / det;
+      const dv = (errY * j11 - errX * j21) / det;
+      const mNew = mat3Mul(rotAxis(basis.u, du), mat3Mul(rotAxis(basis.v, dv), m));
+      const raw = sampleEulerFromUMatrix(mNew, signs);
+      angles = {
+        omega: wrapAngleNear(raw.omega, hint.omega),
+        chi: wrapAngleNear(raw.chi, hint.chi),
+        phi: wrapAngleNear(raw.phi, hint.phi)
+      };
+    }
+    return angles;
   }
 
   function ubMatrix(params, sampleOmega, sampleChi, samplePhi, signs) {
@@ -223,16 +339,17 @@
     const gSq = dot(gLab, gLab);
     if (gSq < 1e-14 || gDot >= 0) return null;
 
-    const lambda = -2 * gDot / gSq;
-    if (!Number.isFinite(lambda) || lambda <= 0) return null;
+    const kMag = -gSq / (2 * gDot); // Å^-1, because G uses 2π/d
+    if (!Number.isFinite(kMag) || kMag <= 0) return null;
 
     const qMag = norm(gLab);
     if (qMag < config.qMin || qMag > config.qMax) return null;
 
-    const kOut = add(scale(beam, 1 / lambda), gLab);
+    const lambda = (2 * Math.PI) / kMag; // physical wavelength in Å
+    const kOut = add(scale(beam, kMag), gLab);
     const kNorm = norm(kOut);
     if (kNorm < 1e-14) return null;
-    const direction = scale(kOut, 1 / kNorm);
+    const direction = normalize(kOut);
 
     const towardDetector = config.laueMode === "backscatter" ? direction[0] < 0 : direction[0] > 0;
     if (!towardDetector) return null;
@@ -311,8 +428,71 @@
     return peaks;
   }
 
+  function syncBeamFromOffsets(cfg, imageSize) {
+    if (!imageSize) return;
+    cfg.beamX = imageSize.width / 2 + (cfg.detOffsetX || 0);
+    cfg.beamY = imageSize.height / 2 + (cfg.detOffsetY || 0);
+  }
+
+  function refinementParamMeta(key, cfg) {
+    const dist = Math.abs(cfg.detDistance) || 150;
+    switch (key) {
+      case "sampleOmega":
+      case "sampleChi":
+      case "samplePhi":
+        return { eps: 0.05, stepMax: 2, min: -360, max: 360 };
+      case "detDistance":
+        return {
+          eps: Math.max(0.5, dist * 0.005),
+          stepMax: Math.max(5, dist * 0.1),
+          min: Math.max(5, dist * 0.25),
+          max: Math.min(5000, dist * 4)
+        };
+      case "detOffsetX":
+      case "detOffsetY":
+        return { eps: 0.25, stepMax: 8, min: -5000, max: 5000 };
+      case "detOmegaMisalign":
+      case "detChiMisalign":
+        return { eps: 0.05, stepMax: 1, min: -45, max: 45 };
+      default:
+        return { eps: 0.05, stepMax: 1, min: -1e6, max: 1e6 };
+    }
+  }
+
+  function clampRefinementConfig(cfg, paramKeys, imageSize) {
+    syncBeamFromOffsets(cfg, imageSize);
+    for (const key of paramKeys) {
+      const meta = refinementParamMeta(key, cfg);
+      cfg[key] = clamp(cfg[key], meta.min, meta.max);
+    }
+    syncBeamFromOffsets(cfg, imageSize);
+    return cfg;
+  }
+
+  function matchResidualRms(params, cfg, imageSize, obs, isAllowed) {
+    const predicted = computePredictedPeaks(params, cfg, imageSize, isAllowed);
+    const predMap = new Map(predicted.map((p) => [`${p.h},${p.k},${p.l}`, p]));
+    let sumSq = 0;
+    let count = 0;
+    for (const obsPeak of obs) {
+      const key = `${obsPeak.matchedH},${obsPeak.matchedK},${obsPeak.matchedL}`;
+      const pred = predMap.get(key);
+      if (!pred) continue;
+      const rx = pred.x - obsPeak.x;
+      const ry = pred.y - obsPeak.y;
+      sumSq += rx * rx + ry * ry;
+      count += 2;
+    }
+    if (!count) return null;
+    return Math.sqrt(sumSq / count);
+  }
+
+  function copyConfig(cfg) {
+    return { ...cfg, sampleSigns: cfg.sampleSigns ? { ...cfg.sampleSigns } : undefined };
+  }
+
   /**
-   * Simple Gauss-Newton refinement of orientation / instrument parameters.
+   * Least-squares refinement with scaled steps, bounds, line search, and LM damping.
    */
   function refineOrientation(params, config, imageSize, observedPeaks, refineFlags, isAllowed, maxIter) {
     const flags = refineFlags || { sampleOmega: true, sampleChi: true, samplePhi: true };
@@ -323,19 +503,30 @@
     ].filter((key) => flags[key]);
 
     if (!paramKeys.length || !observedPeaks.length) {
-      return { config: { ...config }, rms: null, iterations: 0 };
+      return { config: { ...config }, rms: null, iterations: 0, improved: false };
     }
 
-    const cfg = { ...config };
+    const cfg0 = clampRefinementConfig(copyConfig(config), paramKeys, imageSize);
     const obs = observedPeaks.filter((p) => p.matchedH !== undefined);
     if (!obs.length) {
-      return { config: cfg, rms: null, iterations: 0 };
+      return { config: cfg0, rms: null, iterations: 0, improved: false };
     }
 
-    const eps = 0.05;
-    let rms = Infinity;
+    const initialRms = matchResidualRms(params, cfg0, imageSize, obs, isAllowed);
+    if (initialRms == null) {
+      return { config: cfg0, rms: null, iterations: 0, improved: false };
+    }
+
+    let cfg = copyConfig(cfg0);
+    let bestCfg = copyConfig(cfg0);
+    let bestRms = initialRms;
+    let rms = initialRms;
+    let lambda = 0.01;
+    let iterations = 0;
 
     for (let iter = 0; iter < (maxIter || 40); iter += 1) {
+      iterations = iter + 1;
+      syncBeamFromOffsets(cfg, imageSize);
       const predicted = computePredictedPeaks(params, cfg, imageSize, isAllowed);
       const predMap = new Map(predicted.map((p) => [`${p.h},${p.k},${p.l}`, p]));
 
@@ -351,14 +542,27 @@
         const rowX = [];
         const rowY = [];
         for (const pk of paramKeys) {
+          const meta = refinementParamMeta(pk, cfg);
           const saved = cfg[pk];
-          cfg[pk] = saved + eps;
-          const pert = computePredictedPeaks(params, cfg, imageSize, isAllowed);
+          const h = meta.eps;
+
+          cfg[pk] = saved + h;
+          syncBeamFromOffsets(cfg, imageSize);
+          const pertPlus = computePredictedPeaks(params, cfg, imageSize, isAllowed);
+          cfg[pk] = saved - h;
+          syncBeamFromOffsets(cfg, imageSize);
+          const pertMinus = computePredictedPeaks(params, cfg, imageSize, isAllowed);
           cfg[pk] = saved;
-          const pp = pert.find((p) => p.h === obsPeak.matchedH && p.k === obsPeak.matchedK && p.l === obsPeak.matchedL);
-          if (pp) {
-            rowX.push((pp.x - pred.x) / eps);
-            rowY.push((pp.y - pred.y) / eps);
+          syncBeamFromOffsets(cfg, imageSize);
+
+          const pp = pertPlus.find((p) => p.h === obsPeak.matchedH && p.k === obsPeak.matchedK && p.l === obsPeak.matchedL);
+          const pm = pertMinus.find((p) => p.h === obsPeak.matchedH && p.k === obsPeak.matchedK && p.l === obsPeak.matchedL);
+          if (pp && pm) {
+            rowX.push((pp.x - pm.x) / (2 * h));
+            rowY.push((pp.y - pm.y) / (2 * h));
+          } else if (pp) {
+            rowX.push((pp.x - pred.x) / h);
+            rowY.push((pp.y - pred.y) / h);
           } else {
             rowX.push(0);
             rowY.push(0);
@@ -388,21 +592,60 @@
       }
 
       for (let d = 0; d < nParams; d += 1) {
-        jtj[d][d] += 1e-6;
+        const diag = Math.max(jtj[d][d], 1e-8);
+        jtj[d][d] = diag * (1 + lambda);
       }
 
       const delta = solveSymmetric(jtj, jtr.map((v) => -v));
       if (!delta) break;
 
+      let accepted = false;
+      for (let ls = 0; ls < 10; ls += 1) {
+        const scale = Math.pow(0.5, ls);
+        const trial = copyConfig(cfg);
+        for (let i = 0; i < nParams; i += 1) {
+          const key = paramKeys[i];
+          const meta = refinementParamMeta(key, trial);
+          const step = clamp(delta[i] * scale, -meta.stepMax, meta.stepMax);
+          trial[key] -= step;
+        }
+        clampRefinementConfig(trial, paramKeys, imageSize);
+        const trialRms = matchResidualRms(params, trial, imageSize, obs, isAllowed);
+        if (trialRms != null && trialRms < rms) {
+          cfg = trial;
+          rms = trialRms;
+          accepted = true;
+          lambda = Math.max(lambda * 0.3, 1e-4);
+          if (rms < bestRms) {
+            bestRms = rms;
+            bestCfg = copyConfig(cfg);
+          }
+          break;
+        }
+      }
+
+      if (!accepted) {
+        lambda = Math.min(lambda * 5, 1e3);
+        if (lambda > 100) break;
+        continue;
+      }
+
       let maxStep = 0;
       for (let i = 0; i < nParams; i += 1) {
-        cfg[paramKeys[i]] -= delta[i];
         maxStep = Math.max(maxStep, Math.abs(delta[i]));
       }
       if (maxStep < 1e-4) break;
     }
 
-    return { config: cfg, rms, iterations: maxIter || 40 };
+    const improved = bestRms < initialRms - 1e-6;
+    const stable = Number.isFinite(bestRms) && bestRms < initialRms * 5 && bestRms < 500;
+    return {
+      config: stable ? bestCfg : cfg0,
+      rms: stable ? bestRms : initialRms,
+      initialRms,
+      iterations,
+      improved: improved && stable
+    };
   }
 
   function solveSymmetric(a, b) {
@@ -425,32 +668,49 @@
   }
 
   /**
-   * Compute sample-angle corrections to align a crystal direction with the beam
-   * and another direction with the horizontal plane.
+   * Compare how close two reciprocal directions are to the lab-frame targets used in
+   * projection: direct beam along +x; “horizontal” = plane perpendicular to the beam.
    */
   function idealOrientationDeviation(params, currentAngles, targetBeamHKL, targetHorizHKL, signs) {
     const ub = ubMatrix(params, currentAngles.omega, currentAngles.chi, currentAngles.phi, signs);
     const beamVec = normalize(reciprocalVector(targetBeamHKL, ub));
     const horizVec = normalize(reciprocalVector(targetHorizHKL, ub));
-    const desiredBeam = [1, 0, 0];
-    const desiredHoriz = normalize([0, 1, 0]);
+    const beamDir = [1, 0, 0];
+    const refHorizInPlane = normalize([0, 1, 0]);
 
-    const beamAngle = radToDeg(Math.acos(clamp(dot(beamVec, desiredBeam), -1, 1)));
-    const horizProj = subtract(horizVec, scale(desiredBeam, dot(horizVec, desiredBeam)));
+    const beamDot = dot(beamVec, beamDir);
+    const beamMisalignmentDeg = radToDeg(Math.acos(clamp(Math.abs(beamDot), 0, 1)));
+
+    const horizOutOfPlane = Math.abs(dot(horizVec, beamDir));
+    const horizontalMisalignmentDeg = radToDeg(Math.asin(clamp(horizOutOfPlane, 0, 1)));
+
+    const horizProj = subtract(horizVec, scale(beamDir, dot(horizVec, beamDir)));
     const horizNorm = norm(horizProj);
-    const horizAngle = horizNorm < 1e-10
-      ? 0
-      : radToDeg(Math.acos(clamp(dot(normalize(horizProj), desiredHoriz), -1, 1)));
+    let inPlaneAzimuthDeg = 0;
+    if (horizNorm > 1e-10) {
+      const refProj = subtract(refHorizInPlane, scale(beamDir, dot(refHorizInPlane, beamDir)));
+      const refNorm = norm(refProj);
+      if (refNorm > 1e-10) {
+        inPlaneAzimuthDeg = radToDeg(Math.acos(clamp(
+          Math.abs(dot(normalize(horizProj), normalize(refProj))),
+          0,
+          1
+        )));
+      }
+    }
 
-    const crossBeam = cross(desiredBeam, beamVec);
-    const omegaCorr = norm(crossBeam) < 1e-10 ? 0 : radToDeg(Math.atan2(crossBeam[2], crossBeam[1]));
+    const crossBeam = cross(beamDir, beamVec);
+    const omegaCorr = norm(crossBeam) < 1e-10
+      ? 0
+      : radToDeg(Math.atan2(crossBeam[2], crossBeam[1]));
 
     return {
-      beamMisalignmentDeg: beamAngle,
-      horizontalMisalignmentDeg: horizAngle,
+      beamMisalignmentDeg,
+      horizontalMisalignmentDeg,
+      inPlaneAzimuthDeg,
       suggestedOmegaCorrection: omegaCorr,
-      currentBeamDot: dot(beamVec, desiredBeam),
-      currentHorizDot: horizNorm < 1e-10 ? 0 : dot(normalize(horizProj), desiredHoriz)
+      currentBeamDot: beamDot,
+      currentHorizOutOfPlane: horizOutOfPlane
     };
   }
 
@@ -598,6 +858,8 @@
     reciprocalBasis,
     bMatrix,
     uMatrix,
+    sampleEulerFromUMatrix,
+    panSampleOrientationTrackPoint,
     ubMatrix,
     reciprocalVector,
     enumerateHKL,

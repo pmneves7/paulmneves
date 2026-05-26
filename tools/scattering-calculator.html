@@ -104,6 +104,12 @@
                 <option value="reverse">Reverse (h − k + l = 3n)</option>
               </select>
             </div>
+            <div class="tool-field tool-field-checkbox">
+              <label for="diamond-basis-extinctions">
+                <input type="checkbox" id="diamond-basis-extinctions" />
+                Diamond Si/Ge basis extinctions
+              </label>
+            </div>
             <div class="tool-field">
               <label for="wavelength">Wavelength (Å)</label>
               <input type="number" id="wavelength" step="any" min="0" value="1.54" required />
@@ -157,7 +163,7 @@
 
     <div class="tool-panel tool-panel-wide">
       <h2>Extinction rules</h2>
-      <p class="tool-note">Systematic absences applied to the peak list for the current space group:</p>
+      <p class="tool-note">Systematic absences applied to the peak list for the current space group (Bravais centering by default):</p>
       <ol id="extinction-rules" class="tool-extinction-rules">
         <li>Enter a space group and calculate to see the active rules.</li>
       </ol>
@@ -215,6 +221,7 @@
     const crystalPresetSelect = document.getElementById("crystal-preset");
     const extinctionRulesEl = document.getElementById("extinction-rules");
     const rhombohedralSettingEl = document.getElementById("rhombohedral-setting");
+    const diamondBasisEl = document.getElementById("diamond-basis-extinctions");
 
     if (crystalPresetSelect && typeof populateCrystalPresetSelect === "function") {
       populateCrystalPresetSelect(crystalPresetSelect);
@@ -227,7 +234,8 @@
       alpha: document.getElementById("alpha"),
       beta: document.getElementById("beta"),
       gamma: document.getElementById("gamma"),
-      spaceGroup: document.getElementById("spacegroup")
+      spaceGroup: document.getElementById("spacegroup"),
+      diamondBasis: diamondBasisEl
     };
 
     function resetCrystalPresetSelect() {
@@ -261,9 +269,12 @@
       const setting = rhombohedralSettingEl ? rhombohedralSettingEl.value : "auto";
       const override = setting === "auto" ? undefined : setting;
       if (typeof resolveExtinctionContext === "function") {
-        return resolveExtinctionContext(spaceGroup, override);
+        return resolveExtinctionContext(spaceGroup, {
+          rhombohedralSetting: override,
+          applyDiamondBasis: diamondBasisEl ? diamondBasisEl.checked : false
+        });
       }
-      return { rules: [], rhombohedralSetting: "obverse", centering: "P", isDiamond: false };
+      return { rules: [], rhombohedralSetting: "obverse", centering: "P", applyDiamondBasis: false };
     }
 
     function renderExtinctionRules(context) {
@@ -725,6 +736,17 @@
 
     if (rhombohedralSettingEl) {
       rhombohedralSettingEl.addEventListener("change", () => {
+        try {
+          renderPeaks(calculatePeaks());
+        } catch (error) {
+          peakTable.innerHTML = `<tr><td colspan="7">${error.message}</td></tr>`;
+          resultSummary.textContent = "Please fix the highlighted inputs and try again.";
+        }
+      });
+    }
+
+    if (diamondBasisEl) {
+      diamondBasisEl.addEventListener("change", () => {
         try {
           renderPeaks(calculatePeaks());
         } catch (error) {
