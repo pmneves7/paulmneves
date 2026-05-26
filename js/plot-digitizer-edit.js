@@ -2111,6 +2111,7 @@
       state.cursor = { x: p.x, y: p.y };
       state.pointerInside = true;
       startEditDragListeners();
+      if (hooks.updateModeBar) hooks.updateModeBar();
       return true;
     }
 
@@ -2122,6 +2123,7 @@
         state.cursor = { x: p.x, y: p.y };
         state.pointerInside = true;
         startEditDragListeners();
+        if (hooks.updateModeBar) hooks.updateModeBar();
         return true;
       }
       if (state.edit.perspAwaitingDraw) {
@@ -2130,6 +2132,7 @@
         state.cursor = { x: p.x, y: p.y };
         state.pointerInside = true;
         startEditDragListeners();
+        if (hooks.updateModeBar) hooks.updateModeBar();
         return true;
       }
       return true;
@@ -2174,10 +2177,13 @@
           hooks.refreshAll();
         }
       }
+      if (hooks.updateModeBar) hooks.updateModeBar();
     } else if (kind === "persp") {
       if (moved) {
         state.suppressNextClick = true;
         hooks.refreshAll();
+      } else if (hooks.updateModeBar) {
+        hooks.updateModeBar();
       }
     }
     return true;
@@ -2201,7 +2207,7 @@
       state.selected = null;
     }
     markPreviewDirty();
-    hooks.flashStatus("Click and drag on the image to draw a new perspective region.");
+    hooks.flashStatus("Perspective region cancelled.");
     hooks.refreshAll();
   }
 
@@ -2213,8 +2219,61 @@
     state.edit.crop = null;
     state.edit.cropAwaitingDraw = true;
     markPreviewDirty();
-    hooks.flashStatus("Click and drag on the image to draw a new crop region.");
+    hooks.flashStatus("Crop region cancelled.");
     hooks.refreshAll();
+  }
+
+  function hasActiveRegionAction(state) {
+    if (!state.image || state.activeTab !== "edit") return false;
+    if (state.editDrag && (state.editDrag.kind === "crop" || state.editDrag.kind === "persp")) {
+      return true;
+    }
+    if (state.mode === "edit-crop" && state.edit.crop) {
+      return true;
+    }
+    if (state.mode === "edit-persp" && state.edit.corners && state.edit.customCorners) {
+      return true;
+    }
+    return false;
+  }
+
+  function cancelActiveRegion() {
+    const state = hooks.getState();
+    if (state.mode === "edit-crop") {
+      cancelCropRegion();
+      return true;
+    }
+    if (state.mode === "edit-persp") {
+      cancelPerspectiveRegion();
+      return true;
+    }
+    return false;
+  }
+
+  function applyActiveRegionEdit(mode) {
+    const state = hooks.getState();
+    if (!state.image) return false;
+    stopEditDragListeners();
+    state.editDrag = null;
+
+    if (mode === "edit-crop") {
+      if (!hasActiveCrop(state.edit, state.image)) {
+        hooks.flashStatus("Draw a crop region first, then click Crop region again to apply.");
+        hooks.refreshAll();
+        return true;
+      }
+    } else if (mode === "edit-persp") {
+      if (!hasActivePerspective(state.edit, state.image.width, state.image.height)) {
+        hooks.flashStatus("Draw a perspective region first, then click Correct perspective again to apply.");
+        hooks.refreshAll();
+        return true;
+      }
+    } else {
+      return false;
+    }
+
+    applyEdits();
+    return true;
   }
 
   function onEditModeChange(mode) {
@@ -2670,6 +2729,9 @@
     cancelEditDrag,
     cancelPerspectiveRegion,
     cancelCropRegion,
+    cancelActiveRegion,
+    hasActiveRegionAction,
+    applyActiveRegionEdit,
     onEditModeChange,
     markPreviewDirty,
     hasPendingEdits(state) {

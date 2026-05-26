@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta
     name="description"
-    content="Digitize numerical data from an image of a plot by calibrating the axes and clicking on data points."
+    content="Clean up figure images and digitize numerical data from plots, or measure distances and angles on map-like images."
   />
-  <title>Plot digitizer | Paul M. Neves</title>
+  <title>Figure cleanup and digitizer | Paul M. Neves</title>
   <link rel="canonical" href="https://paulmneves.com/tools/plot-digitizer.html" />
   <link rel="icon" type="image/png" href="../media/favicon.png" />
   <link rel="stylesheet" href="../css/site.css" />
@@ -30,14 +30,15 @@
 
   <main>
     <header class="page-header">
-      <h1>Plot digitizer</h1>
+      <h1>Figure cleanup and digitizer</h1>
       <p class="lead">
-        Extract numerical data from an image of a plot, or measure distances and angles on a map-like
-        image. Load an image, optionally clean it up in <em>Figure cleanup</em>, then calibrate axes or a
-        scale bar and click to digitize or measure. A zoomed cursor preview helps you align precisely.
+        Clean up figure images and extract numerical data from plots, or measure distances and angles on
+        map-like images. Crop, remove backgrounds, and correct perspective in <em>Figure cleanup</em>, then
+        calibrate axes or a scale bar and click to digitize or measure. A zoomed cursor preview helps you
+        align precisely.
       </p>
       <p class="tool-disclaimer">
-        <strong>Heads up:</strong> These tools are experimental and may still have bugs/errors.
+        <strong>Disclaimer:</strong> These tools are experimental and may still have bugs/errors.
         If you spot one, please <a href="../index.html#contact">tell me</a>!
       </p>
     </header>
@@ -96,9 +97,10 @@
           </p>
           <div class="digitizer-mode-bar" role="toolbar" aria-label="Figure cleanup mode">
             <button type="button" class="digitizer-mode-btn" data-mode="edit-crop">Crop region</button>
+            <button type="button" class="digitizer-mode-btn" data-mode="edit-bg-pick">Background eyedropper</button>
             <button type="button" class="digitizer-mode-btn" data-mode="edit-persp">Correct perspective</button>
             <button type="button" class="digitizer-mode-btn" data-mode="edit-lens-center">Distortion center</button>
-            <button type="button" class="digitizer-mode-btn" data-mode="edit-bg-pick">Background eyedropper</button>
+            <button type="button" class="digitizer-mode-btn digitizer-mode-cancel" id="dig-edit-cancel-action" hidden>Cancel</button>
           </div>
         </div>
 
@@ -106,7 +108,8 @@
           <p class="tool-note">
             Click two reference points on the <strong>Y</strong> axis and two on the <strong>X</strong> axis
             (in any order), then enter their values to the right. When all four are set, switch to
-            <em>Add points</em> and click inside the plot to digitize data. Right-click an added point
+            <em>Add points</em> and click inside the plot to digitize data, or use the
+            <em>Auto digitize</em> controls below the image. Right-click an added point
             (or use the table) to remove it.
           </p>
           <div class="digitizer-mode-bar" role="toolbar" aria-label="Plot mode">
@@ -158,6 +161,76 @@
                 <button type="button" class="button secondary" id="dig-edit-save">Save image…</button>
               </div>
               <p class="tool-note digitizer-edit-readout" id="dig-edit-readout">No pending edits.</p>
+            </div>
+
+            <div class="digitizer-edit-apply-panel digitizer-auto-panel" data-tab-pane="plot" hidden>
+              <h3 class="tool-subheading">Auto digitize</h3>
+              <p class="tool-note digitizer-auto-note">
+                Define a region mask and pick data/background colors, then enable live auto-digitize
+                to update points as you adjust settings. Region tools modify which pixels are included
+                (whole plot selected by default). Use <em>Subtract from region</em> to remove areas
+                instead of adding them.
+              </p>
+              <div class="digitizer-mode-bar digitizer-auto-mode-bar" role="toolbar" aria-label="Auto region tools">
+                <button type="button" class="digitizer-mode-btn" data-mode="auto-mask-rect">Region rect</button>
+                <button type="button" class="digitizer-mode-btn" data-mode="auto-mask-lasso">Region lasso</button>
+                <button type="button" class="digitizer-mode-btn" data-mode="auto-mask-poly">Region poly</button>
+                <button type="button" class="digitizer-mode-btn" data-mode="auto-pick-data">Pick data</button>
+                <button type="button" class="digitizer-mode-btn" data-mode="auto-pick-bg">Pick bg</button>
+              </div>
+              <div class="digitizer-auto-panel-body">
+                <div class="digitizer-axis-options">
+                  <label>
+                    <input type="checkbox" id="dig-auto-subtract" />
+                    Subtract from region (invert tool)
+                  </label>
+                  <label>
+                    <input type="checkbox" id="dig-auto-grayscale" />
+                    Grayscale only (match luminance, ignore hue)
+                  </label>
+                </div>
+                <div class="digitizer-edit-color-row">
+                  <label class="digitizer-auto-color-label" for="dig-auto-data-color">Data</label>
+                  <input type="color" id="dig-auto-data-color" value="#000000" title="Data color" />
+                  <input type="text" id="dig-auto-data-hex" class="digitizer-edit-hex-input" value="#000000" spellcheck="false" autocomplete="off" maxlength="9" />
+                </div>
+                <div class="digitizer-edit-color-row">
+                  <label class="digitizer-auto-color-label" for="dig-auto-bg-color">Background</label>
+                  <input type="color" id="dig-auto-bg-color" value="#ffffff" title="Background color" />
+                  <input type="text" id="dig-auto-bg-hex" class="digitizer-edit-hex-input" value="#ffffff" spellcheck="false" autocomplete="off" maxlength="9" />
+                </div>
+                <div class="digitizer-edit-moire-methods" role="radiogroup" aria-label="Auto detection mode">
+                  <label>
+                    <input type="radio" name="dig-auto-detect-mode" value="line" checked />
+                    Line mode (column scan)
+                  </label>
+                  <label>
+                    <input type="radio" name="dig-auto-detect-mode" value="point" />
+                    Point mode (scatter)
+                  </label>
+                </div>
+                <div class="digitizer-edit-param">
+                  <label for="dig-auto-tolerance">Color tolerance</label>
+                  <div class="digitizer-edit-param-controls">
+                    <input type="range" id="dig-auto-tolerance-range" min="0" max="120" step="1" value="40" />
+                    <input type="number" id="dig-auto-tolerance" step="1" min="0" max="120" value="40" />
+                  </div>
+                </div>
+                <div class="digitizer-edit-param" id="dig-auto-min-dist-row" hidden>
+                  <label for="dig-auto-min-dist">Min point distance R (px)</label>
+                  <div class="digitizer-edit-param-controls">
+                    <input type="range" id="dig-auto-min-dist-range" min="1" max="80" step="1" value="8" />
+                    <input type="number" id="dig-auto-min-dist" step="1" min="1" max="80" value="8" />
+                  </div>
+                </div>
+                <div class="digitizer-auto-actions">
+                  <button type="button" class="tool-inline-button" id="dig-auto-reset-mask">Reset region</button>
+                  <label class="digitizer-auto-live-toggle">
+                    <input type="checkbox" id="dig-auto-live" />
+                    Live auto-digitize
+                  </label>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -223,6 +296,72 @@
             </div>
 
             <div data-tab-pane="edit">
+              <h3 class="tool-subheading">Crop</h3>
+              <p class="tool-note digitizer-edit-note">Crop and perspective correction are mutually exclusive — switching modes clears the other. Draw a rectangular crop region on the image, or use the fields below for exact values.</p>
+              <div class="digitizer-edit-crop-fields">
+                <div class="tool-field">
+                  <label for="dig-edit-crop-x">X</label>
+                  <input type="number" id="dig-edit-crop-x" step="1" min="0" value="0" />
+                </div>
+                <div class="tool-field">
+                  <label for="dig-edit-crop-y">Y</label>
+                  <input type="number" id="dig-edit-crop-y" step="1" min="0" value="0" />
+                </div>
+                <div class="tool-field">
+                  <label for="dig-edit-crop-w">Width</label>
+                  <input type="number" id="dig-edit-crop-w" step="1" min="1" value="0" />
+                </div>
+                <div class="tool-field">
+                  <label for="dig-edit-crop-h">Height</label>
+                  <input type="number" id="dig-edit-crop-h" step="1" min="1" value="0" />
+                </div>
+              </div>
+              <button type="button" class="tool-inline-button" id="dig-edit-clear-crop">Clear crop</button>
+
+              <h3 class="tool-subheading">Background transparency</h3>
+              <p class="tool-note digitizer-edit-note">
+                Remove background colors and make them transparent. Use the eyedropper on the image,
+                or enter a color code and click <em>Add color</em>. Repeat for multiple background colors.
+                Edge pixels stay saturated; only alpha fades (no grey halos).
+              </p>
+              <div class="digitizer-axis-options">
+                <label>
+                  <input type="checkbox" id="dig-edit-bg-enabled" />
+                  Enable background transparency
+                </label>
+              </div>
+              <div class="digitizer-axis-options">
+                <label>
+                  <input type="checkbox" id="dig-edit-bg-preview-enabled" />
+                  Show preview background
+                </label>
+              </div>
+              <div class="digitizer-edit-color-row">
+                <input type="color" id="dig-edit-bg-preview-color" value="#ffffff" title="Preview background color" />
+                <input type="text" id="dig-edit-bg-preview-hex" class="digitizer-edit-hex-input" placeholder="#ffffff" value="#ffffff" spellcheck="false" autocomplete="off" maxlength="9" />
+              </div>
+              <div class="digitizer-edit-param">
+                <label for="dig-edit-bg-tolerance">Match tolerance</label>
+                <div class="digitizer-edit-param-controls">
+                  <input type="range" id="dig-edit-bg-tolerance-range" min="0" max="120" step="1" value="24" />
+                  <input type="number" id="dig-edit-bg-tolerance" step="1" min="0" max="120" value="24" />
+                </div>
+              </div>
+              <div class="digitizer-edit-param">
+                <label for="dig-edit-bg-softness">Edge softness</label>
+                <div class="digitizer-edit-param-controls">
+                  <input type="range" id="dig-edit-bg-softness-range" min="0" max="120" step="1" value="32" />
+                  <input type="number" id="dig-edit-bg-softness" step="1" min="0" max="120" value="32" />
+                </div>
+              </div>
+              <div class="digitizer-edit-color-row">
+                <input type="color" id="dig-edit-bg-color" value="#ffffff" title="Pick a color" />
+                <input type="text" id="dig-edit-bg-hex" class="digitizer-edit-hex-input" placeholder="#ffffff" spellcheck="false" autocomplete="off" maxlength="9" />
+                <button type="button" class="tool-inline-button" id="dig-edit-bg-add">Add color</button>
+              </div>
+              <ul class="digitizer-edit-key-list" id="dig-edit-bg-key-list" aria-label="Background colors to remove"></ul>
+              <button type="button" class="tool-inline-button" id="dig-edit-bg-clear">Clear all background colors</button>
+
               <h3 class="tool-subheading">Orientation</h3>
               <div class="digitizer-edit-actions">
                 <button type="button" class="tool-inline-button" id="dig-rotate-ccw" title="Rotate 90° counter-clockwise">↺ Rotate 90° CCW</button>
@@ -308,72 +447,6 @@
                   <input type="number" id="dig-edit-moire" step="1" min="0" max="100" value="0" />
                 </div>
               </div>
-
-              <h3 class="tool-subheading">Crop</h3>
-              <p class="tool-note digitizer-edit-note">Crop and perspective correction are mutually exclusive — switching modes clears the other. Draw a rectangular crop region on the image, or use the fields below for exact values.</p>
-              <div class="digitizer-edit-crop-fields">
-                <div class="tool-field">
-                  <label for="dig-edit-crop-x">X</label>
-                  <input type="number" id="dig-edit-crop-x" step="1" min="0" value="0" />
-                </div>
-                <div class="tool-field">
-                  <label for="dig-edit-crop-y">Y</label>
-                  <input type="number" id="dig-edit-crop-y" step="1" min="0" value="0" />
-                </div>
-                <div class="tool-field">
-                  <label for="dig-edit-crop-w">Width</label>
-                  <input type="number" id="dig-edit-crop-w" step="1" min="1" value="0" />
-                </div>
-                <div class="tool-field">
-                  <label for="dig-edit-crop-h">Height</label>
-                  <input type="number" id="dig-edit-crop-h" step="1" min="1" value="0" />
-                </div>
-              </div>
-              <button type="button" class="tool-inline-button" id="dig-edit-clear-crop">Clear crop</button>
-
-              <h3 class="tool-subheading">Background transparency</h3>
-              <p class="tool-note digitizer-edit-note">
-                Remove background colors and make them transparent. Use the eyedropper on the image,
-                or enter a color code and click <em>Add color</em>. Repeat for multiple background colors.
-                Edge pixels stay saturated; only alpha fades (no grey halos).
-              </p>
-              <div class="digitizer-axis-options">
-                <label>
-                  <input type="checkbox" id="dig-edit-bg-enabled" />
-                  Enable background transparency
-                </label>
-              </div>
-              <div class="digitizer-axis-options">
-                <label>
-                  <input type="checkbox" id="dig-edit-bg-preview-enabled" />
-                  Show preview background
-                </label>
-              </div>
-              <div class="digitizer-edit-color-row">
-                <input type="color" id="dig-edit-bg-preview-color" value="#ffffff" title="Preview background color" />
-                <input type="text" id="dig-edit-bg-preview-hex" class="digitizer-edit-hex-input" placeholder="#ffffff" value="#ffffff" spellcheck="false" autocomplete="off" maxlength="9" />
-              </div>
-              <div class="digitizer-edit-param">
-                <label for="dig-edit-bg-tolerance">Match tolerance</label>
-                <div class="digitizer-edit-param-controls">
-                  <input type="range" id="dig-edit-bg-tolerance-range" min="0" max="120" step="1" value="24" />
-                  <input type="number" id="dig-edit-bg-tolerance" step="1" min="0" max="120" value="24" />
-                </div>
-              </div>
-              <div class="digitizer-edit-param">
-                <label for="dig-edit-bg-softness">Edge softness</label>
-                <div class="digitizer-edit-param-controls">
-                  <input type="range" id="dig-edit-bg-softness-range" min="0" max="120" step="1" value="32" />
-                  <input type="number" id="dig-edit-bg-softness" step="1" min="0" max="120" value="32" />
-                </div>
-              </div>
-              <div class="digitizer-edit-color-row">
-                <input type="color" id="dig-edit-bg-color" value="#ffffff" title="Pick a color" />
-                <input type="text" id="dig-edit-bg-hex" class="digitizer-edit-hex-input" placeholder="#ffffff" spellcheck="false" autocomplete="off" maxlength="9" />
-                <button type="button" class="tool-inline-button" id="dig-edit-bg-add">Add color</button>
-              </div>
-              <ul class="digitizer-edit-key-list" id="dig-edit-bg-key-list" aria-label="Background colors to remove"></ul>
-              <button type="button" class="tool-inline-button" id="dig-edit-bg-clear">Clear all background colors</button>
             </div>
 
             <div data-tab-pane="map" hidden>
@@ -466,6 +539,7 @@
 
   <script src="../js/site.js"></script>
   <script src="../js/plot-digitizer-edit.js"></script>
+  <script src="../js/plot-digitizer-auto.js"></script>
   <script src="../js/plot-digitizer.js"></script>
 </body>
 </html>

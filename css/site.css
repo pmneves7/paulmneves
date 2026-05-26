@@ -1086,6 +1086,23 @@ footer {
   cursor: not-allowed;
 }
 
+.digitizer-mode-cancel {
+  border-style: dashed;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.digitizer-mode-cancel:hover:not(:disabled) {
+  border-color: var(--muted);
+  color: var(--text);
+  background: var(--panel-strong);
+}
+
+.digitizer-mode-cancel:focus-visible {
+  outline-color: var(--muted);
+}
+
 .digitizer-canvas-area {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 300px;
@@ -1319,6 +1336,57 @@ footer {
 
 .digitizer-axis-options-heading {
   margin-top: 1.25rem;
+}
+
+.digitizer-auto-heading {
+  margin-top: 1.25rem;
+}
+
+.digitizer-auto-mode-bar {
+  margin: 0.65rem 0 0;
+}
+
+.digitizer-auto-panel .digitizer-auto-mode-bar {
+  margin-bottom: 0.85rem;
+}
+
+.digitizer-auto-panel-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 0.65rem 1.25rem;
+  align-items: start;
+}
+
+.digitizer-auto-panel-body .digitizer-auto-actions {
+  grid-column: 1 / -1;
+}
+
+.digitizer-auto-note {
+  margin: 0 0 0.55rem;
+  font-size: 0.85rem;
+}
+
+.digitizer-auto-color-label {
+  flex: 0 0 5.5rem;
+  font-size: 0.88rem;
+}
+
+.digitizer-auto-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.65rem;
+}
+
+.digitizer-auto-live-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
 }
 
 .digitizer-data {

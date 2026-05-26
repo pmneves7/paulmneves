@@ -32,7 +32,7 @@
         Convert between common energy, wavelength, frequency, temperature, and neutron scattering units.
       </p>
       <p class="tool-disclaimer">
-        <strong>Heads up:</strong> These tools are experimental and may still have bugs/errors.
+        <strong>Disclaimer:</strong> These tools are experimental and may still have bugs/errors.
         If you spot one, please <a href="../index.html#contact">tell me</a>!
       </p>
     </header>
@@ -69,7 +69,7 @@
     <div class="tool-panel tool-panel-wide">
       <h2>Neutron energy ↔ wavelength</h2>
       <p class="tool-note">
-        Uses the non-relativistic neutron de Broglie relation <em>E</em> = 81.81 / λ², with <em>E</em> in meV and λ in Å.
+        Uses the non-relativistic neutron de Broglie relation <em>E</em> = 81.81 / λ², with <em>E</em> in meV and λ in Å, <em>v</em> = <em>h</em> / (<em>m</em>λ), and <em>k</em> = 2π / λ.
       </p>
       <div class="tool-grid">
         <div class="tool-field">
@@ -79,6 +79,14 @@
         <div class="tool-field">
           <label for="neutron-wavelength">Wavelength (Å)</label>
           <input type="number" id="neutron-wavelength" step="any" min="0" placeholder="e.g. 1.8" />
+        </div>
+        <div class="tool-field">
+          <label for="neutron-wavevector">Wavevector (Å⁻¹)</label>
+          <input type="number" id="neutron-wavevector" step="any" min="0" placeholder="e.g. 3.49" />
+        </div>
+        <div class="tool-field">
+          <label for="neutron-velocity">Velocity (m/s)</label>
+          <input type="number" id="neutron-velocity" step="any" min="0" placeholder="e.g. 2200" />
         </div>
       </div>
     </div>
@@ -324,11 +332,16 @@
 
     const neutronEnergyInput = document.getElementById("neutron-energy");
     const neutronWavelengthInput = document.getElementById("neutron-wavelength");
+    const neutronWavevectorInput = document.getElementById("neutron-wavevector");
+    const neutronVelocityInput = document.getElementById("neutron-velocity");
     const momentumDistanceInput = document.getElementById("momentum-distance");
     const momentumQInput = document.getElementById("momentum-q");
     const momentumTwoThetaInput = document.getElementById("momentum-two-theta");
     let updatingNeutron = false;
     let updatingMomentum = false;
+
+    const neutronMass = 1.67492749804e-27;
+    const planckJ = 6.62607015e-34;
 
     function neutronEnergyFromWavelength(lambda) {
       return 81.81 / (lambda * lambda);
@@ -336,6 +349,29 @@
 
     function neutronWavelengthFromEnergy(energy) {
       return Math.sqrt(81.81 / energy);
+    }
+
+    function neutronVelocityFromWavelength(lambda) {
+      return planckJ / (neutronMass * lambda * 1e-10);
+    }
+
+    function neutronWavelengthFromVelocity(velocity) {
+      return planckJ / (neutronMass * velocity) / 1e-10;
+    }
+
+    function neutronWavevectorFromWavelength(lambda) {
+      return 2 * Math.PI / lambda;
+    }
+
+    function neutronWavelengthFromWavevector(k) {
+      return 2 * Math.PI / k;
+    }
+
+    function neutronWavelengthFromSource(source, value) {
+      if (source === "energy") return neutronWavelengthFromEnergy(value);
+      if (source === "wavelength") return value;
+      if (source === "velocity") return neutronWavelengthFromVelocity(value);
+      return neutronWavelengthFromWavevector(value);
     }
 
     function neutronWavelengthValue() {
@@ -415,32 +451,53 @@
       updatingMomentum = false;
     }
 
-    neutronEnergyInput.addEventListener("input", () => {
+    function updateNeutronFrom(source) {
       if (updatingNeutron) return;
-      const energy = parseFloat(neutronEnergyInput.value);
-      if (!neutronEnergyInput.value.trim() || !Number.isFinite(energy) || energy <= 0) {
-        if (!neutronWavelengthInput.value.trim()) neutronWavelengthInput.value = "";
-        updateMomentumTwoTheta();
-        return;
-      }
-      updatingNeutron = true;
-      neutronWavelengthInput.value = formatNumber(neutronWavelengthFromEnergy(energy));
-      updatingNeutron = false;
-      updateMomentumTwoTheta();
-    });
 
-    neutronWavelengthInput.addEventListener("input", () => {
-      if (updatingNeutron) return;
-      const lambda = parseFloat(neutronWavelengthInput.value);
-      if (!neutronWavelengthInput.value.trim() || !Number.isFinite(lambda) || lambda <= 0) {
-        if (!neutronEnergyInput.value.trim()) neutronEnergyInput.value = "";
+      const sourceInput = {
+        energy: neutronEnergyInput,
+        wavelength: neutronWavelengthInput,
+        wavevector: neutronWavevectorInput,
+        velocity: neutronVelocityInput
+      }[source];
+
+      const value = parseFloat(sourceInput.value);
+      if (!sourceInput.value.trim() || !Number.isFinite(value) || value <= 0) {
+        updatingNeutron = true;
+        if (source !== "energy" && !neutronEnergyInput.value.trim()) neutronEnergyInput.value = "";
+        if (source !== "wavelength" && !neutronWavelengthInput.value.trim()) neutronWavelengthInput.value = "";
+        if (source !== "wavevector" && !neutronWavevectorInput.value.trim()) neutronWavevectorInput.value = "";
+        if (source !== "velocity" && !neutronVelocityInput.value.trim()) neutronVelocityInput.value = "";
+        updatingNeutron = false;
         updateMomentumTwoTheta();
         return;
       }
+
+      const wavelength = neutronWavelengthFromSource(source, value);
+      const energy = neutronEnergyFromWavelength(wavelength);
+      const wavevector = neutronWavevectorFromWavelength(wavelength);
+      const velocity = neutronVelocityFromWavelength(wavelength);
+
       updatingNeutron = true;
-      neutronEnergyInput.value = formatNumber(neutronEnergyFromWavelength(lambda));
+      if (source !== "energy") neutronEnergyInput.value = formatNumber(energy);
+      if (source !== "wavelength") neutronWavelengthInput.value = formatNumber(wavelength);
+      if (source !== "wavevector") neutronWavevectorInput.value = formatNumber(wavevector);
+      if (source !== "velocity") neutronVelocityInput.value = formatNumber(velocity);
       updatingNeutron = false;
       updateMomentumTwoTheta();
+    }
+
+    neutronEnergyInput.addEventListener("input", () => updateNeutronFrom("energy"));
+    neutronWavelengthInput.addEventListener("input", () => updateNeutronFrom("wavelength"));
+    neutronWavevectorInput.addEventListener("input", () => updateNeutronFrom("wavevector"));
+    neutronVelocityInput.addEventListener("input", () => updateNeutronFrom("velocity"));
+
+    [neutronEnergyInput, neutronWavelengthInput, neutronWavevectorInput, neutronVelocityInput].forEach((input) => {
+      input.addEventListener("blur", () => {
+        if (!input.value.trim()) return;
+        const value = parseFloat(input.value);
+        if (Number.isFinite(value) && value > 0) input.value = formatNumber(value);
+      });
     });
 
     momentumDistanceInput.addEventListener("input", () => updateMomentumFrom("distance"));

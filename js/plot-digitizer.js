@@ -46,7 +46,8 @@
   const scaleUnitInput = document.getElementById("dig-scale-unit");
   const scaleReadoutEl = document.getElementById("dig-scale-readout");
 
-  const modeButtons = Array.from(document.querySelectorAll(".digitizer-mode-btn"));
+  const modeButtons = Array.from(document.querySelectorAll(".digitizer-mode-btn[data-mode]"));
+  const editCancelBtn = document.getElementById("dig-edit-cancel-action");
   const valueInputs = {
     y1: document.getElementById("dig-y1-val"),
     y2: document.getElementById("dig-y2-val"),
@@ -63,10 +64,14 @@
   // --- Constants & state --------------------------------------------------
 
   const CALIBRATION_KEYS = ["y1", "y2", "x1", "x2"];
-  const PLOT_MODES = new Set(["y1", "y2", "x1", "x2", "add"]);
+  const AUTO_MODES = window.DigitizerAuto ? window.DigitizerAuto.AUTO_MODES : new Set();
+  const PLOT_MODES = new Set(["y1", "y2", "x1", "x2", "add", ...AUTO_MODES]);
   const MAP_MODES = new Set(["scale-a", "scale-b", "measure-distance", "measure-angle"]);
   const EDIT_MODES = window.DigitizerImageEdit ? window.DigitizerImageEdit.EDIT_MODES : new Set();
-  const PLOT_MODE_LABELS = { y1: "Y₁", y2: "Y₂", x1: "X₁", x2: "X₂", add: "Add points" };
+  const PLOT_MODE_LABELS = {
+    y1: "Y₁", y2: "Y₂", x1: "X₁", x2: "X₂", add: "Add points",
+    ...(window.DigitizerAuto ? window.DigitizerAuto.AUTO_MODE_LABELS : {})
+  };
   const MAP_MODE_LABELS = {
     "scale-a": "scale P₁",
     "scale-b": "scale P₂",
@@ -376,22 +381,23 @@
     if (mode === "add" && !readyToDigitize()) return;
 
     if (state.activeTab === "edit" && state.mode === "edit-persp" && mode === "edit-persp") {
-      if (window.DigitizerImageEdit) {
-        window.DigitizerImageEdit.cancelPerspectiveRegion();
+      if (window.DigitizerImageEdit && window.DigitizerImageEdit.applyActiveRegionEdit("edit-persp")) {
+        return;
       }
-      return;
     }
 
     if (state.activeTab === "edit" && state.mode === "edit-crop" && mode === "edit-crop") {
-      if (window.DigitizerImageEdit) {
-        window.DigitizerImageEdit.cancelCropRegion();
+      if (window.DigitizerImageEdit && window.DigitizerImageEdit.applyActiveRegionEdit("edit-crop")) {
+        return;
       }
-      return;
     }
 
     state.mode = mode;
     state.modeByTab[state.activeTab] = mode;
     state.pendingMeasurement = null;
+    if (state.activeTab === "plot" && window.DigitizerAuto && AUTO_MODES.has(mode)) {
+      window.DigitizerAuto.onMaskModeChange(state, mode);
+    }
     if (state.activeTab === "edit" && window.DigitizerImageEdit) {
       window.DigitizerImageEdit.onEditModeChange(mode);
     }
@@ -429,6 +435,15 @@
         btn.classList.toggle("completed", !!state.calibration[m] && m !== state.mode);
       }
     });
+
+    if (editCancelBtn) {
+      const inRegionMode = state.activeTab === "edit"
+        && (state.mode === "edit-crop" || state.mode === "edit-persp");
+      editCancelBtn.hidden = !inRegionMode;
+      editCancelBtn.disabled = !inRegionMode
+        || !window.DigitizerImageEdit
+        || !window.DigitizerImageEdit.hasActiveRegionAction(state);
+    }
   }
 
   function updateStatus() {
@@ -438,6 +453,9 @@
     }
 
     if (state.activeTab === "plot") {
+      if (window.DigitizerAuto && window.DigitizerAuto.updateStatus(state, statusEl)) {
+        return;
+      }
       if (state.mode === "add") {
         statusEl.textContent = "Click to add a data point. Right-click a point (or use the table) to remove it.";
         return;
@@ -479,7 +497,7 @@
           statusEl.textContent = "Click and drag on the image to draw a crop region.";
           return;
         }
-        statusEl.textContent = "Drag the crop handles to adjust the region. Click Crop region again to cancel and draw a new one. Crop and perspective correction cannot be used together.";
+        statusEl.textContent = "Drag the crop handles to adjust the region. Click Crop region again to apply, or Cancel to discard. Crop and perspective correction cannot be used together.";
         return;
       }
       if (state.mode === "edit-persp") {
@@ -487,7 +505,7 @@
           statusEl.textContent = "Click and drag on the image to draw a perspective region.";
           return;
         }
-        statusEl.textContent = "Drag green corner handles for perspective, blue edge handles to bow each side (barrel/pincushion). Click Correct perspective again to cancel the region and draw a new one. Apply edits warps the entire image.";
+        statusEl.textContent = "Drag green corner handles for perspective, blue edge handles to bow each side (barrel/pincushion). Click Correct perspective again to apply, or Cancel to discard.";
         return;
       }
       if (state.mode === "edit-lens-center") {
@@ -545,6 +563,7 @@
     clearBtn.hidden = false;
     if (!state.mode) state.mode = state.modeByTab[state.activeTab];
     if (window.DigitizerImageEdit) window.DigitizerImageEdit.onImageLoaded();
+    if (window.DigitizerAuto) window.DigitizerAuto.onImageLoaded(state);
     refreshAll();
     workspace.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -599,6 +618,7 @@
     showLoadError("");
     statusEl.textContent = "";
     if (window.DigitizerImageEdit) window.DigitizerImageEdit.onImageCleared();
+    if (window.DigitizerAuto) window.DigitizerAuto.onImageCleared(state);
     renderPointsTable();
     renderMeasurementsTable();
     updateCoordReadout();
@@ -759,6 +779,7 @@
     state.cursor = null;
     state.pointerInside = false;
     if (window.DigitizerImageEdit) window.DigitizerImageEdit.markPreviewDirty();
+    if (window.DigitizerAuto) window.DigitizerAuto.onImageLoaded(state);
   }
 
   const CORNER_KEYS_EDIT = ["tl", "tr", "br", "bl"];
@@ -942,6 +963,7 @@
       drawAxisLines(s);
       drawCalibrationMarkers(s);
       drawDataPoints(s);
+      if (window.DigitizerAuto) window.DigitizerAuto.drawOverlays(ctx, s);
     } else if (state.activeTab === "map") {
       drawScaleAnnotation(s);
       drawMeasurements(s);
@@ -1780,6 +1802,14 @@
     btn.addEventListener("click", () => setMode(btn.dataset.mode));
   });
 
+  if (editCancelBtn) {
+    editCancelBtn.addEventListener("click", () => {
+      if (window.DigitizerImageEdit) {
+        window.DigitizerImageEdit.cancelActiveRegion();
+      }
+    });
+  }
+
   // --- Events: plot input fields ------------------------------------------
 
   CALIBRATION_KEYS.forEach((k) => {
@@ -1787,6 +1817,7 @@
       updateModeBar();
       renderPointsTable();
       updateCoordReadout();
+      if (window.DigitizerAuto) window.DigitizerAuto.requestLiveAutoDigitize(true);
     });
   });
   [logXEl, logYEl].forEach((el) => {
@@ -1865,6 +1896,14 @@
         snapCursorToSelection();
         redrawCanvas();
         e.preventDefault();
+        return;
+      }
+    }
+
+    if (state.activeTab === "plot" && window.DigitizerAuto) {
+      if (window.DigitizerAuto.handleMouseDown(p)) {
+        e.preventDefault();
+        return;
       }
     }
   });
@@ -1909,6 +1948,10 @@
       finalizePendingIfReady();
       refreshAll();
       return;
+    }
+
+    if (state.activeTab === "plot" && window.DigitizerAuto) {
+      if (window.DigitizerAuto.handleCanvasClick(p)) return;
     }
 
     // Otherwise: clicking an existing marker / endpoint selects it.
@@ -2067,10 +2110,24 @@
   swapYBtn.addEventListener("click", () => { swapAxisPair("y1", "y2"); refreshAll(); });
   swapXBtn.addEventListener("click", () => { swapAxisPair("x1", "x2"); refreshAll(); });
   linkOriginBtn.addEventListener("click", () => {
+    const onX1Step = state.activeTab === "plot" && state.mode === "x1";
+    const x1WasUnset = !state.calibration.x1;
+    const linkedFromY1 = !!state.calibration.y1;
+
     if (!linkOrigin()) {
       flashStatus("Set Y₁ or X₁ first, then link them to share an origin.");
       return;
     }
+
+    if (onX1Step && linkedFromY1 && x1WasUnset) {
+      state.selected = { type: "calibration", key: "x1" };
+      const next = !state.calibration.y2 ? "y2" : nextCalibrationMode("x1");
+      if (next) {
+        state.mode = next;
+        state.modeByTab.plot = next;
+      }
+    }
+
     refreshAll();
   });
 
@@ -2111,7 +2168,9 @@
 
     if (e.key === "Escape") {
       let changed = false;
-      if (state.pendingMeasurement) {
+      if (state.activeTab === "plot" && window.DigitizerAuto && window.DigitizerAuto.handleEscape(state)) {
+        changed = true;
+      } else if (state.pendingMeasurement) {
         state.pendingMeasurement = null;
         changed = true;
       } else if (state.pointDrag) {
@@ -2159,6 +2218,7 @@
       clientToImage,
       CALIBRATION_KEYS,
       refreshAll,
+      updateModeBar,
       flashStatus,
       transformImage: (kind) => {
         handleTransformClick(kind);
@@ -2169,6 +2229,18 @@
         canvas.height = h;
       },
       redrawCanvas
+    });
+  }
+
+  if (window.DigitizerAuto) {
+    window.DigitizerAuto.init({
+      getState: () => state,
+      clientToImage,
+      displayScale,
+      refreshAll,
+      flashStatus,
+      redrawCanvas,
+      readyToDigitize
     });
   }
 
