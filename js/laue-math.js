@@ -187,16 +187,28 @@
     ]);
   }
 
+  /**
+   * In-plane detector axes: u → image +x, v → image +y (down).
+   */
   function detectorBasis(normal, detOmegaMisalign, detChiMisalign) {
     let n = normalize(normal);
     if (Math.abs(detOmegaMisalign) > 1e-9 || Math.abs(detChiMisalign) > 1e-9) {
       const mis = mat3Mul(rotX(degToRad(detChiMisalign)), rotZ(degToRad(detOmegaMisalign)));
       n = mat3Vec(mis, n);
     }
-    const ref = Math.abs(n[2]) < 0.9 ? [0, 0, 1] : [0, 1, 0];
-    const u = normalize(cross(ref, n));
+    let u = cross([0, 0, 1], n);
+    if (norm(u) < 1e-6) u = cross([0, 1, 0], n);
+    u = normalize(u);
     const v = normalize(cross(n, u));
     return { normal: n, u, v };
+  }
+
+  function peakOnImage(x, y, imageSize, margin) {
+    const pad = margin || 0;
+    return (
+      x >= -pad && x <= imageSize.width + pad &&
+      y >= -pad && y <= imageSize.height + pad
+    );
   }
 
   /**
@@ -220,6 +232,9 @@
     if (kNorm < 1e-14) return null;
     const direction = scale(kOut, 1 / kNorm);
 
+    const towardDetector = config.laueMode === "backscatter" ? direction[0] < 0 : direction[0] > 0;
+    if (!towardDetector) return null;
+
     const n = detectorNormal(config.detOmega, config.detChi, config.laueMode);
     const basis = detectorBasis(n, config.detOmegaMisalign || 0, config.detChiMisalign || 0);
     const planePoint = scale(basis.normal, config.detDistance);
@@ -234,20 +249,24 @@
     const xLab = dot(rel, basis.u);
     const yLab = dot(rel, basis.v);
 
-    const pxPerMmX = imageSize.width / config.detWidth;
-    const pxPerMmY = imageSize.height / config.detHeight;
-    const cx = config.beamX + config.detOffsetX + xLab * pxPerMmX;
-    const cy = config.beamY + config.detOffsetY + yLab * pxPerMmY;
+    const detWidth = Math.max(config.detWidth, 1e-6);
+    const detHeight = Math.max(config.detHeight, 1e-6);
+    const pxPerMmX = imageSize.width / detWidth;
+    const pxPerMmY = imageSize.height / detHeight;
+    const beamCx = config.beamX;
+    const beamCy = config.beamY;
+    const cx = beamCx + xLab * pxPerMmX;
+    const cy = beamCy + yLab * pxPerMmY;
 
     if (config.patternRotation) {
       const rad = degToRad(config.patternRotation);
-      const dx = cx - config.beamX;
-      const dy = cy - config.beamY;
+      const dx = cx - beamCx;
+      const dy = cy - beamCy;
       const cosR = Math.cos(rad);
       const sinR = Math.sin(rad);
       return {
-        x: config.beamX + dx * cosR - dy * sinR,
-        y: config.beamY + dx * sinR + dy * cosR,
+        x: beamCx + dx * cosR - dy * sinR,
+        y: beamCy + dx * sinR + dy * cosR,
         q: qMag,
         lambda
       };
@@ -279,7 +298,8 @@
         q: proj.q,
         lambda: proj.lambda,
         x: proj.x,
-        y: proj.y
+        y: proj.y,
+        onImage: peakOnImage(proj.x, proj.y, imageSize)
       });
     }
     return peaks;
@@ -576,6 +596,8 @@
     reciprocalVector,
     enumerateHKL,
     detectorNormal,
+    detectorBasis,
+    peakOnImage,
     projectReflection,
     computePredictedPeaks,
     refineOrientation,

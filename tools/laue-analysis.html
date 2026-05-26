@@ -130,14 +130,17 @@
               <input type="number" id="laue-vmax" step="any" placeholder="auto" />
             </div>
           </div>
+          <div class="laue-action-row">
+            <button type="button" class="button secondary" id="laue-intensity-autoscale">Set limits to data min/max</button>
+          </div>
           <div class="laue-check-row">
             <label><input type="checkbox" id="laue-reverse-colormap" checked /> Reverse colorscale (visual only)</label>
             <label><input type="checkbox" id="laue-invert-intensity" /> Invert intensity values (flip stored counts)</label>
           </div>
           <div class="laue-curve-row">
             <div>
-              <p class="tool-note">Intensity curve — drag control points; click to add; right-click to remove. End segments extend linearly.</p>
-              <canvas id="laue-curve-canvas" class="laue-curve-canvas" width="280" height="140" aria-label="Intensity transfer curve"></canvas>
+              <p class="tool-note">Intensity curve — drag control points; click to add; right-click to remove. Two points form a line; additional points use smooth splines. End segments extend linearly.</p>
+              <canvas id="laue-curve-canvas" class="laue-curve-canvas" aria-label="Intensity transfer curve"></canvas>
               <button type="button" class="button secondary" id="laue-curve-reset">Reset curve</button>
             </div>
             <div class="laue-transform-btns">
@@ -146,6 +149,23 @@
               <button type="button" class="button secondary" id="laue-flip-v">Flip vertical</button>
             </div>
           </div>
+
+          <h3 class="laue-subheading">Data corrections</h3>
+          <div class="laue-check-row">
+            <label><input type="checkbox" id="laue-correction-blur" /> Gaussian blur</label>
+            <label><input type="checkbox" id="laue-correction-radial" /> Radial normalization</label>
+          </div>
+          <div class="tool-grid">
+            <div class="tool-field">
+              <label for="laue-blur-radius">Blur radius (px)</label>
+              <input type="number" id="laue-blur-radius" step="0.1" min="0" value="1.5" />
+            </div>
+            <div class="tool-field">
+              <label for="laue-radial-bins">Radial bins</label>
+              <input type="number" id="laue-radial-bins" step="1" min="4" max="256" value="32" />
+            </div>
+          </div>
+          <p class="tool-note">Radial normalization divides each pixel by the azimuthal mean at its distance from the beam center (linear interpolation between bins). The intensity scale is re-scaled automatically when this correction is enabled.</p>
         </section>
 
         <section class="tool-section" id="laue-instrument-section">
@@ -165,11 +185,11 @@
               </div>
               <div class="tool-field">
                 <label for="laue-det-width">Detector width (mm)</label>
-                <input type="number" id="laue-det-width" step="any" value="100" />
+                <input type="number" id="laue-det-width" step="any" value="256" />
               </div>
               <div class="tool-field">
                 <label for="laue-det-height">Detector height (mm)</label>
-                <input type="number" id="laue-det-height" step="any" value="100" />
+                <input type="number" id="laue-det-height" step="any" value="256" />
               </div>
             </div>
             <div class="laue-action-row">
@@ -268,19 +288,28 @@
               </div>
               <div class="tool-field">
                 <label for="laue-pred-linewidth">Line width (px)</label>
-                <input type="number" id="laue-pred-linewidth" step="1" min="1" max="20" value="2" />
+                <input type="number" id="laue-pred-linewidth" step="1" min="1" max="20" value="1" />
               </div>
               <div class="tool-field">
                 <label for="laue-pred-radius">Radius (px)</label>
-                <input type="number" id="laue-pred-radius" step="1" min="2" max="80" value="10" />
+                <input type="number" id="laue-pred-radius" step="1" min="2" max="80" value="5" />
               </div>
             </div>
             <div class="laue-check-row">
+              <label><input type="checkbox" id="laue-show-predicted-peaks" checked /> Show predicted peaks</label>
               <label><input type="checkbox" id="laue-show-beam-center" checked /> Show beam center</label>
               <label><input type="checkbox" id="laue-show-observed-peaks" checked /> Show detected peaks</label>
             </div>
 
-            <h3 class="laue-subheading">Auto-orient on load</h3>
+            <h3 class="laue-subheading">Detected peak overlay</h3>
+            <div class="tool-grid">
+              <div class="tool-field">
+                <label for="laue-obs-alpha">Circle opacity (%)</label>
+                <input type="number" id="laue-obs-alpha" step="1" min="0" max="100" value="100" />
+              </div>
+            </div>
+
+            <h3 class="laue-subheading">Fix datafile convention on load</h3>
             <p class="tool-note">Apply when the raw array is stored in a different row/column order.</p>
             <div class="laue-check-row">
               <label><input type="checkbox" id="laue-auto-flip-h" /> Flip horizontal on load</label>
@@ -363,7 +392,7 @@
         <div class="tool-results" aria-live="polite">
           <h3>Predicted reflections</h3>
           <div class="tool-table-wrap">
-            <table class="tool-table">
+            <table class="tool-table laue-peaks-table">
               <thead>
                 <tr>
                   <th>(hkl)</th>
@@ -386,6 +415,7 @@
           <button type="button" class="laue-mode-btn" data-mode="pan-orientation">Pan orientation</button>
           <button type="button" class="laue-mode-btn" data-mode="rotate-pattern">Rotate pattern</button>
           <button type="button" class="laue-mode-btn" data-mode="add-peak">Add peak</button>
+          <button type="button" class="laue-mode-btn" data-mode="move-peak">Move peak</button>
           <button type="button" class="laue-mode-btn" data-mode="remove-peak">Remove peak</button>
         </div>
         <div class="laue-zoom-bar">

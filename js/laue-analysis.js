@@ -26,6 +26,7 @@
 
   const state = {
     rawData: null,
+    transformedData: null,
     displayData: null,
     imageData: null,
     transform: { rotate90: 0, flipH: false, flipV: false },
@@ -37,18 +38,27 @@
       invertIntensity: false,
       curvePoints: [{ x: 0, y: 0 }, { x: 1, y: 1 }]
     },
+    corrections: {
+      gaussianBlur: false,
+      blurRadius: 1.5,
+      radialNormalize: false,
+      radialBins: 32
+    },
+    rawIntensityRange: null,
     overlay: {
       predColor: "#8b0000",
-      predLineWidth: 2,
-      predRadius: 10,
+      predLineWidth: 1,
+      predRadius: 5,
+      observedAlpha: 1,
       showBeamCenter: true,
-      showObservedPeaks: true
+      showObservedPeaks: true,
+      showPredictedPeaks: true
     },
     crystal: { a: 5.43, b: 5.43, c: 5.43, alpha: 90, beta: 90, gamma: 90, spaceGroup: "Fm-3m" },
     instrument: {
       detDistance: 150,
-      detWidth: 100,
-      detHeight: 100,
+      detWidth: 256,
+      detHeight: 256,
       detOffsetX: 0,
       detOffsetY: 0,
       detOmega: 0,
@@ -204,10 +214,66 @@
   }
 
   function buildConfig(inst) {
-    return {
+    const cfg = {
       ...inst,
       sampleSigns: { omega: inst.sampleSignOmega, chi: inst.sampleSignChi, phi: inst.sampleSignPhi }
     };
+    if (state.displayData) {
+      const beam = beamCenterPosition();
+      cfg.beamX = beam.x;
+      cfg.beamY = beam.y;
+    }
+    return cfg;
+  }
+
+  function imageBeamReference() {
+    if (!state.displayData) {
+      return {
+        x: state.instrument.beamX ?? 0,
+        y: state.instrument.beamY ?? 0
+      };
+    }
+    return {
+      x: state.displayData.width / 2,
+      y: state.displayData.height / 2
+    };
+  }
+
+  function beamCenterPosition() {
+    const ref = imageBeamReference();
+    const offsetX = Number.isFinite(state.instrument.detOffsetX)
+      ? state.instrument.detOffsetX
+      : num("laue-det-offset-x");
+    const offsetY = Number.isFinite(state.instrument.detOffsetY)
+      ? state.instrument.detOffsetY
+      : num("laue-det-offset-y");
+    return { x: ref.x + offsetX, y: ref.y + offsetY };
+  }
+
+  function setBeamCenterPosition(x, y) {
+    const ref = imageBeamReference();
+    state.instrument.beamX = ref.x;
+    state.instrument.beamY = ref.y;
+    state.instrument.detOffsetX = x - ref.x;
+    state.instrument.detOffsetY = y - ref.y;
+    document.getElementById("laue-det-offset-x").value = state.instrument.detOffsetX;
+    document.getElementById("laue-det-offset-y").value = state.instrument.detOffsetY;
+  }
+
+  /** Fold legacy beamX/beamY stored away from image center into detector offsets. */
+  function normalizeBeamStorage() {
+    if (!state.displayData) return;
+    const ref = imageBeamReference();
+    const bx = state.instrument.beamX;
+    const by = state.instrument.beamY;
+    if (bx != null && by != null && (Math.abs(bx - ref.x) > 1e-6 || Math.abs(by - ref.y) > 1e-6)) {
+      state.instrument.detOffsetX = (state.instrument.detOffsetX ?? num("laue-det-offset-x")) + (bx - ref.x);
+      state.instrument.detOffsetY = (state.instrument.detOffsetY ?? num("laue-det-offset-y")) + (by - ref.y);
+      document.getElementById("laue-det-offset-x").value = state.instrument.detOffsetX;
+      document.getElementById("laue-det-offset-y").value = state.instrument.detOffsetY;
+    }
+    state.instrument.beamX = ref.x;
+    state.instrument.beamY = ref.y;
   }
 
   function defaultCurvePoints() {
@@ -236,25 +302,160 @@
     return state.display;
   }
 
+  function colorInputToRgba(hex, alpha) {
+    const h = (hex || "#8b0000").replace("#", "");
+    if (h.length !== 6) return `rgba(139, 0, 0, ${alpha})`;
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+
+  function syncDetectorSizeFromImage() {
+    if (!state.displayData) return;
+    const w = state.displayData.width;
+    const h = state.displayData.height;
+    document.getElementById("laue-det-width").value = w;
+    document.getElementById("laue-det-height").value = h;
+    state.instrument.detWidth = w;
+    state.instrument.detHeight = h;
+  }
+
   function readOverlaySettings() {
     state.overlay.predColor = document.getElementById("laue-pred-color").value;
-    state.overlay.predLineWidth = num("laue-pred-linewidth") || 2;
-    state.overlay.predRadius = num("laue-pred-radius") || 10;
+    state.overlay.predLineWidth = num("laue-pred-linewidth") || 1;
+    state.overlay.predRadius = num("laue-pred-radius") || 5;
+    state.overlay.observedAlpha = Math.min(1, Math.max(0, (num("laue-obs-alpha") ?? 100) / 100));
     state.overlay.showBeamCenter = document.getElementById("laue-show-beam-center").checked;
     state.overlay.showObservedPeaks = document.getElementById("laue-show-observed-peaks").checked;
+    state.overlay.showPredictedPeaks = document.getElementById("laue-show-predicted-peaks").checked;
     return state.overlay;
   }
 
-  function applyIntensityRangeFromData() {
-    if (!state.displayData) return;
+  function readCorrections() {
+    state.corrections.gaussianBlur = document.getElementById("laue-correction-blur").checked;
+    state.corrections.blurRadius = Math.max(0, num("laue-blur-radius"));
+    state.corrections.radialNormalize = document.getElementById("laue-correction-radial").checked;
+    state.corrections.radialBins = Math.max(4, Math.round(num("laue-radial-bins") || 32));
+    return state.corrections;
+  }
+
+  function writeCorrectionsToForm(corrections) {
+    const c = corrections || state.corrections;
+    document.getElementById("laue-correction-blur").checked = !!c.gaussianBlur;
+    document.getElementById("laue-correction-radial").checked = !!c.radialNormalize;
+    document.getElementById("laue-blur-radius").value = c.blurRadius ?? 1.5;
+    document.getElementById("laue-radial-bins").value = c.radialBins ?? 32;
+  }
+
+  function autoScaleForRadialNorm() {
+    if (!state.displayData || !readCorrections().radialNormalize) return null;
+    const pr = LaueFormats.intensityPercentileRange(state.displayData.intensities, 0.02, 0.98);
+    const minVal = pr.min;
+    const maxVal = pr.max > minVal ? pr.max : minVal + 1;
+    document.getElementById("laue-vmin").value = minVal;
+    document.getElementById("laue-vmax").value = maxVal;
+    state.display.vmin = minVal;
+    state.display.vmax = maxVal;
+    return { min: minVal, max: maxVal };
+  }
+
+  function restoreRawIntensityRange() {
+    if (!state.rawIntensityRange) return null;
+    document.getElementById("laue-vmin").value = state.rawIntensityRange.min;
+    document.getElementById("laue-vmax").value = state.rawIntensityRange.max;
+    state.display.vmin = state.rawIntensityRange.min;
+    state.display.vmax = state.rawIntensityRange.max;
+    return { ...state.rawIntensityRange };
+  }
+
+  function displayIntensityLimits() {
+    const display = readDisplaySettings();
+    if (!state.displayData) {
+      return { min: display.vmin ?? 0, max: display.vmax ?? 1 };
+    }
     const range = LaueFormats.intensityRange(state.displayData.intensities);
+    return {
+      min: display.vmin ?? range.min,
+      max: display.vmax ?? range.max
+    };
+  }
+
+  function refreshCorrectedDisplay(rescaleIntensity) {
+    if (!state.transformedData) return;
+    if (state.instrument.beamX == null && state.transformedData) {
+      state.instrument.beamX = state.transformedData.width / 2;
+      state.instrument.beamY = state.transformedData.height / 2;
+    }
+    normalizeBeamStorage();
+    const corrections = readCorrections();
+    const beam = beamCenterPosition();
+    state.displayData = LaueFormats.applyCorrections(
+      state.transformedData,
+      corrections,
+      beam.x,
+      beam.y
+    );
+    if (rescaleIntensity !== false) {
+      if (corrections.radialNormalize) autoScaleForRadialNorm();
+      else restoreRawIntensityRange();
+    }
+    const display = readDisplaySettings();
+    const limits = displayIntensityLimits();
+    state.imageData = LaueFormats.renderToImageData(state.displayData, {
+      ...display,
+      vmin: limits.min,
+      vmax: limits.max
+    });
+    canvas.width = state.displayData.width;
+    canvas.height = state.displayData.height;
+    viewerPlaceholder.hidden = true;
+    viewerFrame.hidden = false;
+    updateColorbar();
+    applyViewTransform();
+    updatePredictions();
+    drawCurveEditor();
+    redraw();
+  }
+
+  function onBeamCenterChanged() {
+    if (readCorrections().radialNormalize) refreshCorrectedDisplay();
+    else updatePredictions();
+  }
+
+  function applyIntensityRangeFromData() {
+    const source = state.transformedData || state.displayData;
+    if (!source) return;
+    const range = LaueFormats.intensityRange(source.intensities);
+    state.rawIntensityRange = range;
+    if (!readCorrections().radialNormalize) {
+      document.getElementById("laue-vmin").value = range.min;
+      document.getElementById("laue-vmax").value = range.max;
+      state.display.vmin = range.min;
+      state.display.vmax = range.max;
+    }
+  }
+
+  function setIntensityLimitsToDataRange() {
+    const source = state.displayData || state.transformedData;
+    if (!source) {
+      setStatus("Load an image first.");
+      return;
+    }
+    const range = LaueFormats.intensityRange(source.intensities);
     document.getElementById("laue-vmin").value = range.min;
     document.getElementById("laue-vmax").value = range.max;
     state.display.vmin = range.min;
     state.display.vmax = range.max;
+    if (!readCorrections().radialNormalize) {
+      state.rawIntensityRange = range;
+    }
+    reprocessImage({ rescaleIntensity: false });
+    persistConfig();
+    setStatus(`Intensity limits set to ${formatIntensity(range.min)} – ${formatIntensity(range.max)}.`);
   }
 
-  function reprocessImage() {
+  function reprocessImage(options) {
     if (!state.rawData) return;
     const data = {
       ...state.rawData,
@@ -267,28 +468,15 @@
       flipH: Boolean(state.transform.flipH) !== Boolean(inst.autoFlipH),
       flipV: Boolean(state.transform.flipV) !== Boolean(inst.autoFlipV)
     };
-    state.displayData = LaueFormats.applyDisplayTransform(data, t);
-    if (state.instrument.beamX == null) {
-      state.instrument.beamX = state.displayData.width / 2;
-      state.instrument.beamY = state.displayData.height / 2;
+    state.transformedData = LaueFormats.applyDisplayTransform(data, t);
+    if (!state.rawIntensityRange) {
+      state.rawIntensityRange = LaueFormats.intensityRange(state.transformedData.intensities);
     }
-    const display = readDisplaySettings();
-    const range = LaueFormats.intensityRange(state.displayData.intensities);
-    const vmax = display.vmax ?? range.max;
-    const vmin = display.vmin ?? range.min;
-    state.imageData = LaueFormats.renderToImageData(state.displayData, {
-      ...display,
-      vmin,
-      vmax
-    });
-    canvas.width = state.displayData.width;
-    canvas.height = state.displayData.height;
-    viewerPlaceholder.hidden = true;
-    viewerFrame.hidden = false;
-    updateColorbar();
-    applyViewTransform();
-    updatePredictions();
-    redraw();
+    if (state.instrument.beamX == null) {
+      state.instrument.beamX = state.transformedData.width / 2;
+      state.instrument.beamY = state.transformedData.height / 2;
+    }
+    refreshCorrectedDisplay(options?.rescaleIntensity);
   }
 
   function resetCurve() {
@@ -340,15 +528,15 @@
     if (!state.displayData || !colorbarCanvas) return;
     syncColorbarHeight();
     const display = readDisplaySettings();
-    const range = LaueFormats.intensityRange(state.displayData.intensities);
+    const limits = displayIntensityLimits();
     const result = LaueFormats.renderColorbar(
       colorbarCanvas,
       {
         ...display,
-        vmin: display.vmin ?? range.min,
-        vmax: display.vmax ?? range.max
+        vmin: limits.min,
+        vmax: limits.max
       },
-      state.displayData.maxIntensity
+      limits.max
     ) || { minI: 0, maxI: 0 };
     if (colorbarMaxEl) colorbarMaxEl.textContent = formatIntensity(result.maxI);
     if (colorbarMinEl) colorbarMinEl.textContent = formatIntensity(result.minI);
@@ -404,6 +592,7 @@
     canvasInner.style.transform = `translate(${tx}px, ${ty}px) scale(${total})`;
     canvasInner.style.transformOrigin = "0 0";
     if (zoomLabel) zoomLabel.textContent = `${Math.round(state.view.zoom * 100)}%`;
+    if (state.imageData) redraw();
   }
 
   function viewportPoint(event) {
@@ -483,25 +672,53 @@
     applyViewTransform();
   }
 
+  async function finishImageLoad(statusMessage) {
+    state.rawIntensityRange = null;
+    state.instrument.beamX = null;
+    state.instrument.beamY = null;
+    const meta = state.rawData.meta || {};
+    if (meta.detDistanceMm) {
+      document.getElementById("laue-det-distance").value = meta.detDistanceMm;
+    }
+    reprocessImage();
+    applyIntensityRangeFromData();
+    reprocessImage();
+    resetViewToFit();
+    requestAnimationFrame(() => resetViewToFit());
+    setStatus(statusMessage);
+  }
+
   async function loadFile(file) {
     showError("");
     setStatus("Loading…");
     try {
       state.rawData = await LaueFormats.loadLaueFile(file);
-      state.instrument.beamX = null;
-      state.instrument.beamY = null;
-      const meta = state.rawData.meta || {};
-      if (meta.detDistanceMm) {
-        document.getElementById("laue-det-distance").value = meta.detDistanceMm;
-      }
-      reprocessImage();
-      applyIntensityRangeFromData();
-      reprocessImage();
-      resetViewToFit();
-      requestAnimationFrame(() => resetViewToFit());
-      setStatus(`Loaded ${file.name} (${state.displayData.width}×${state.displayData.height}, ${state.rawData.source})`);
+      await finishImageLoad(`Loaded ${file.name} (${state.displayData.width}×${state.displayData.height}, ${state.rawData.source})`);
     } catch (err) {
       showError(err.message || String(err));
+      setStatus("");
+    }
+  }
+
+  async function loadExamplePng() {
+    showError("");
+    setStatus("Loading…");
+    const url = new URL("../files/laue/example_laue.png", window.location.href).href;
+    try {
+      try {
+        const resp = await fetch(url);
+        if (resp.ok) {
+          const blob = await resp.blob();
+          await loadFile(new File([blob], "example_laue.png", { type: blob.type || "image/png" }));
+          return;
+        }
+      } catch (_) {
+        /* fetch unavailable (e.g. file://) — fall back to Image loader */
+      }
+      state.rawData = await LaueFormats.loadImageFromUrl(url);
+      await finishImageLoad(`Loaded example (${state.displayData.width}×${state.displayData.height}, image)`);
+    } catch (err) {
+      showError(err.message || "Could not load example image.");
       setStatus("");
     }
   }
@@ -511,15 +728,10 @@
       setStatus("Load an image first.");
       return;
     }
-    const w = state.displayData.width;
-    const h = state.displayData.height;
-    document.getElementById("laue-det-width").value = w;
-    document.getElementById("laue-det-height").value = h;
-    state.instrument.detWidth = w;
-    state.instrument.detHeight = h;
+    syncDetectorSizeFromImage();
     updatePredictions();
     persistConfig();
-    setStatus(`Detector size set to ${w} × ${h} px (1 px/mm scale).`);
+    setStatus(`Detector size set to ${state.displayData.width} × ${state.displayData.height} px (1 px/mm scale).`);
   }
 
   function updatePredictions() {
@@ -537,6 +749,20 @@
         isAllowed
       );
       renderPeaksTable();
+      const onImage = state.predictedPeaks.filter((p) => p.onImage).length;
+      const total = state.predictedPeaks.length;
+      if (!total) {
+        setStatus("No predicted peaks in q range (check lattice, space group, and orientation).");
+      } else if (!onImage) {
+        setStatus(
+          `${total} predicted peaks, none on image. Match detector width/height (mm) to the active area, ` +
+          "click Use image pixel size (1 px = 1 mm), adjust sample angles, or reduce detector distance."
+        );
+      } else if (onImage < total) {
+        setStatus(`${total} predicted peaks, ${onImage} on image (${total - onImage} off-screen).`);
+      } else {
+        setStatus(`${total} predicted peaks on image.`);
+      }
     } catch (err) {
       setStatus(err.message);
     }
@@ -549,7 +775,7 @@
       .sort((a, b) => a.hklSq - b.hklSq)
       .slice(0, 200)
       .map((p) => `
-        <tr>
+        <tr class="${p.onImage ? "" : "laue-peak-offscreen"}">
           <td>(${p.h}, ${p.k}, ${p.l})</td>
           <td>${p.q.toFixed(4)}</td>
           <td>${p.x.toFixed(1)}</td>
@@ -559,9 +785,13 @@
     peaksTbody.innerHTML = rows || '<tr><td colspan="4">No peaks in range.</td></tr>';
   }
 
-  function displayScale() {
-    const rect = canvas.getBoundingClientRect();
-    return rect.width ? canvas.width / rect.width : 1;
+  function viewTotalScale() {
+    return state.view.totalScale || computeFitScale() * state.view.zoom || 1;
+  }
+
+  /** Convert desired on-screen pixels to canvas/image units (constant size when CSS-scaled). */
+  function screenPxToCanvas(px) {
+    return px / viewTotalScale();
   }
 
   function clientToImage(event) {
@@ -577,113 +807,247 @@
   function redraw() {
     if (!state.imageData) return;
     ctx.putImageData(state.imageData, 0, 0);
-    const s = displayScale();
+    const px = screenPxToCanvas;
 
-    const beamX = state.instrument.beamX;
-    const beamY = state.instrument.beamY;
+    const beam = beamCenterPosition();
+    const beamX = beam.x;
+    const beamY = beam.y;
     const beamR = state.instrument.beamRadius;
 
     const overlay = readOverlaySettings();
 
-    if (overlay.showBeamCenter && beamX != null) {
-      ctx.strokeStyle = "rgba(255, 220, 0, 0.9)";
-      ctx.lineWidth = 1 / s;
+    if (overlay.showBeamCenter && state.displayData) {
+      ctx.strokeStyle = "rgba(255, 220, 0, 1)";
+      ctx.lineWidth = px(1);
       ctx.beginPath();
       ctx.arc(beamX, beamY, beamR, 0, Math.PI * 2);
       ctx.stroke();
-      ctx.fillStyle = "rgba(255, 220, 0, 0.95)";
+      ctx.fillStyle = "rgba(255, 220, 0, 1)";
       ctx.beginPath();
-      ctx.arc(beamX, beamY, (4 / 3) / s, 0, Math.PI * 2);
+      ctx.arc(beamX, beamY, px(4 / 3), 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = "rgba(255, 120, 0, 0.95)";
+      ctx.fillStyle = "rgba(255, 120, 0, 1)";
       ctx.beginPath();
-      ctx.arc(beamX + beamR, beamY, (5 / 3) / s, 0, Math.PI * 2);
+      ctx.arc(beamX + beamR, beamY, px(5 / 3), 0, Math.PI * 2);
       ctx.fill();
     }
 
-    ctx.font = `${11 / s}px sans-serif`;
-    ctx.strokeStyle = overlay.predColor;
-    ctx.lineWidth = overlay.predLineWidth / s;
-    for (const p of state.predictedPeaks) {
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, overlay.predRadius / s, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.fillStyle = overlay.predColor;
-      ctx.fillText(`${p.h}${p.k}${p.l}`, p.x + overlay.predRadius / s + 2 / s, p.y - 2 / s);
+    ctx.font = `${px(11)}px sans-serif`;
+
+    if (overlay.showPredictedPeaks) {
+      ctx.strokeStyle = colorInputToRgba(overlay.predColor, 0.95);
+      ctx.lineWidth = px(overlay.predLineWidth);
+      for (const p of state.predictedPeaks) {
+        if (!p.onImage) continue;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, px(overlay.predRadius), 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
 
     if (overlay.showObservedPeaks) {
+      const obsA = overlay.observedAlpha ?? 1;
       for (const p of state.observedPeaks) {
-        ctx.strokeStyle = p.selected ? "rgba(255, 60, 60, 0.95)" : "rgba(255, 80, 80, 0.8)";
-        ctx.lineWidth = 1 / s;
+        ctx.strokeStyle = p.selected ? `rgba(255, 60, 60, ${obsA})` : `rgba(255, 80, 80, ${obsA})`;
+        ctx.lineWidth = px(1);
         ctx.beginPath();
-        ctx.arc(p.x, p.y, 5 / s, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, px(5), 0, Math.PI * 2);
         ctx.stroke();
         if (p.matchedH != null) {
-          ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
-          ctx.fillText(`${p.matchedH}${p.matchedK}${p.matchedL}`, p.x + 6 / s, p.y + 12 / s);
+          ctx.fillStyle = `rgba(255, 255, 255, ${obsA})`;
+          ctx.fillText(`${p.matchedH}${p.matchedK}${p.matchedL}`, p.x + px(6), p.y + px(12));
         }
       }
     }
   }
 
-  function curveToPx(pt, w, h) {
+  function formatAxisIntensity(value) {
+    if (!Number.isFinite(value)) return "—";
+    const abs = Math.abs(value);
+    if (abs >= 10000 || (abs > 0 && abs < 0.001)) return value.toExponential(1);
+    if (abs >= 1000) return value.toFixed(0);
+    if (abs >= 10) return value.toFixed(1);
+    return value.toPrecision(3);
+  }
+
+  function curveIntensityRange() {
+    const display = state.display;
+    if (state.displayData) {
+      const range = LaueFormats.intensityRange(state.displayData.intensities);
+      return {
+        min: display.vmin ?? range.min ?? 0,
+        max: display.vmax ?? range.max ?? 1
+      };
+    }
     return {
-      x: pt.x * (w - 20) + 10,
-      y: (1 - pt.y) * (h - 20) + 10
+      min: display.vmin ?? 0,
+      max: display.vmax ?? 1
+    };
+  }
+
+  function intensityAtNorm(t, minI, maxI) {
+    return minI + t * (maxI - minI);
+  }
+
+  const CURVE_LOGICAL_WIDTH = 380;
+  const CURVE_LOGICAL_HEIGHT = 210;
+  const CURVE_DARK_BLUE = "#1e3a8a";
+
+  function prepareCurveCanvas() {
+    const w = CURVE_LOGICAL_WIDTH;
+    const h = CURVE_LOGICAL_HEIGHT;
+    const dpr = window.devicePixelRatio || 1;
+    const bw = Math.round(w * dpr);
+    const bh = Math.round(h * dpr);
+    if (curveCanvas.width !== bw || curveCanvas.height !== bh) {
+      curveCanvas.width = bw;
+      curveCanvas.height = bh;
+    }
+    curveCanvas.style.width = `${w}px`;
+    curveCanvas.style.height = `${h}px`;
+    curveCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    curveCtx.imageSmoothingEnabled = true;
+    curveCtx.imageSmoothingQuality = "high";
+    return { w, h };
+  }
+
+  function curvePlotArea(w, h, leftPad) {
+    const left = leftPad ?? 44;
+    const top = 10;
+    const right = 12;
+    const bottom = 28;
+    return {
+      left,
+      top,
+      right,
+      bottom,
+      width: w - left - right,
+      height: h - top - bottom
+    };
+  }
+
+  function curvePlotLeftPad(minI, maxI) {
+    const samples = [0, 0.5, 1].map((t) => formatAxisIntensity(intensityAtNorm(t, minI, maxI)));
+    const maxLen = Math.max(...samples.map((s) => s.length));
+    return Math.max(44, maxLen * 6.5 + 14);
+  }
+
+  function curveToPx(pt, plot) {
+    return {
+      x: plot.left + pt.x * plot.width,
+      y: plot.top + (1 - pt.y) * plot.height
     };
   }
 
   function drawCurveEditor() {
-    const w = curveCanvas.width;
-    const h = curveCanvas.height;
-    curveCtx.fillStyle = "#1a1d24";
+    const { w, h } = prepareCurveCanvas();
+    const { min: minI, max: maxI } = curveIntensityRange();
+    const plot = curvePlotArea(w, h, curvePlotLeftPad(minI, maxI));
+    const axisColor = "#94a3b8";
+    const textColor = "#334155";
+    const tickFracs = [0, 0.25, 0.5, 0.75, 1];
+
+    curveCtx.fillStyle = "#ffffff";
     curveCtx.fillRect(0, 0, w, h);
-    curveCtx.strokeStyle = "#4a5568";
+
+    curveCtx.strokeStyle = axisColor;
     curveCtx.lineWidth = 1;
-    curveCtx.strokeRect(0.5, 0.5, w - 1, h - 1);
+    curveCtx.beginPath();
+    curveCtx.moveTo(plot.left, plot.top + plot.height + 0.5);
+    curveCtx.lineTo(plot.left + plot.width, plot.top + plot.height + 0.5);
+    curveCtx.moveTo(plot.left + 0.5, plot.top);
+    curveCtx.lineTo(plot.left + 0.5, plot.top + plot.height);
+    curveCtx.stroke();
+
+    curveCtx.fillStyle = textColor;
+    curveCtx.font = "10px system-ui, sans-serif";
+    curveCtx.textAlign = "center";
+    curveCtx.textBaseline = "top";
+    for (const tick of tickFracs) {
+      const x = plot.left + tick * plot.width;
+      curveCtx.beginPath();
+      curveCtx.moveTo(x, plot.top + plot.height);
+      curveCtx.lineTo(x, plot.top + plot.height + 4);
+      curveCtx.stroke();
+      curveCtx.fillText(formatAxisIntensity(intensityAtNorm(tick, minI, maxI)), x, plot.top + plot.height + 6);
+    }
+    curveCtx.fillText("Input intensity", plot.left + plot.width / 2, h - 11);
+
+    curveCtx.textAlign = "right";
+    curveCtx.textBaseline = "middle";
+    for (const tick of tickFracs) {
+      const y = plot.top + (1 - tick) * plot.height;
+      curveCtx.beginPath();
+      curveCtx.moveTo(plot.left - 4, y);
+      curveCtx.lineTo(plot.left, y);
+      curveCtx.stroke();
+      curveCtx.fillText(formatAxisIntensity(intensityAtNorm(tick, minI, maxI)), plot.left - 6, y);
+    }
+    curveCtx.save();
+    curveCtx.translate(14, plot.top + plot.height / 2);
+    curveCtx.rotate(-Math.PI / 2);
+    curveCtx.textAlign = "center";
+    curveCtx.textBaseline = "bottom";
+    curveCtx.fillText("Output intensity", 0, 0);
+    curveCtx.restore();
 
     const pts = [...state.display.curvePoints].sort((a, b) => a.x - b.x);
-    curveCtx.strokeStyle = "#63b3ed";
+    const steps = Math.max(240, Math.round(plot.width * 3));
+    curveCtx.strokeStyle = CURVE_DARK_BLUE;
     curveCtx.lineWidth = 2;
+    curveCtx.lineJoin = "round";
+    curveCtx.lineCap = "round";
     curveCtx.beginPath();
-    for (let i = 0; i <= 100; i += 1) {
-      const t = i / 100;
+    for (let i = 0; i <= steps; i += 1) {
+      const t = i / steps;
       const y = LaueFormats.evaluateCurve(pts, t);
-      const px = t * (w - 20) + 10;
-      const py = (1 - y) * (h - 20) + 10;
-      if (i === 0) curveCtx.moveTo(px, py);
-      else curveCtx.lineTo(px, py);
+      const x = plot.left + t * plot.width;
+      const py = plot.top + (1 - y) * plot.height;
+      if (i === 0) curveCtx.moveTo(x, py);
+      else curveCtx.lineTo(x, py);
     }
     curveCtx.stroke();
 
     for (const pt of pts) {
-      const px = curveToPx(pt, w, h);
-      curveCtx.fillStyle = "#f6ad55";
+      const px = curveToPx(pt, plot);
+      curveCtx.fillStyle = CURVE_DARK_BLUE;
       curveCtx.beginPath();
-      curveCtx.arc(px.x, px.y, 5, 0, Math.PI * 2);
+      curveCtx.arc(px.x, px.y, 4.5, 0, Math.PI * 2);
       curveCtx.fill();
+      curveCtx.strokeStyle = "#ffffff";
+      curveCtx.lineWidth = 1.5;
+      curveCtx.stroke();
     }
   }
 
-  function curvePointFromEvent(event) {
+  function canvasPointFromEvent(event) {
     const rect = curveCanvas.getBoundingClientRect();
-    const x = (event.clientX - rect.left) / rect.width;
-    const y = 1 - (event.clientY - rect.top) / rect.height;
+    const w = CURVE_LOGICAL_WIDTH;
+    const h = CURVE_LOGICAL_HEIGHT;
+    return {
+      x: (event.clientX - rect.left) * (w / Math.max(rect.width, 1)),
+      y: (event.clientY - rect.top) * (h / Math.max(rect.height, 1))
+    };
+  }
+
+  function curvePointFromEvent(event) {
+    const { w, h } = prepareCurveCanvas();
+    const { min: minI, max: maxI } = curveIntensityRange();
+    const plot = curvePlotArea(w, h, curvePlotLeftPad(minI, maxI));
+    const cpos = canvasPointFromEvent(event);
+    const x = (cpos.x - plot.left) / plot.width;
+    const y = 1 - (cpos.y - plot.top) / plot.height;
     return { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) };
   }
 
   function hitCurvePoint(event, radius = 10) {
-    const w = curveCanvas.width;
-    const h = curveCanvas.height;
-    const pos = curvePointFromEvent(event);
+    const { w, h } = prepareCurveCanvas();
+    const { min: minI, max: maxI } = curveIntensityRange();
+    const plot = curvePlotArea(w, h, curvePlotLeftPad(minI, maxI));
+    const cpos = canvasPointFromEvent(event);
     for (let i = 0; i < state.display.curvePoints.length; i += 1) {
-      const pt = state.display.curvePoints[i];
-      const px = pt.x * (w - 20) + 10;
-      const py = (1 - pt.y) * (h - 20) + 10;
-      const cx = pos.x * w;
-      const cy = (1 - pos.y) * h;
-      if ((px - cx) ** 2 + (py - cy) ** 2 < radius * radius) return i;
+      const px = curveToPx(state.display.curvePoints[i], plot);
+      if ((px.x - cpos.x) ** 2 + (px.y - cpos.y) ** 2 < radius * radius) return i;
     }
     return -1;
   }
@@ -694,6 +1058,7 @@
       instrument: readInstrument(),
       transform: state.transform,
       display: readDisplaySettings(),
+      corrections: readCorrections(),
       overlay: readOverlaySettings(),
       view: state.view,
       observedPeaks: state.observedPeaks.map(({ x, y, matchedH, matchedK, matchedL }) => ({
@@ -710,11 +1075,18 @@
         if (el) el.value = val;
       }
     }
-    if (obj.instrument) writeInstrumentToForm(obj.instrument);
+    if (obj.instrument) {
+      writeInstrumentToForm(obj.instrument);
+      normalizeBeamStorage();
+    }
     if (obj.transform) state.transform = { ...obj.transform };
     if (obj.display) {
       state.display = { ...state.display, ...obj.display };
       ensureCurveEndpoints();
+    }
+    if (obj.corrections) {
+      state.corrections = { ...state.corrections, ...obj.corrections };
+      writeCorrectionsToForm(state.corrections);
     }
     if (obj.overlay) state.overlay = { ...state.overlay, ...obj.overlay };
     if (obj.observedPeaks) state.observedPeaks = obj.observedPeaks.map((p, i) => ({ ...p, id: i }));
@@ -725,10 +1097,12 @@
     document.getElementById("laue-reverse-colormap").checked = state.display.reverseColormap !== false;
     document.getElementById("laue-invert-intensity").checked = !!state.display.invertIntensity;
     document.getElementById("laue-pred-color").value = state.overlay.predColor || "#8b0000";
-    document.getElementById("laue-pred-linewidth").value = state.overlay.predLineWidth ?? 2;
-    document.getElementById("laue-pred-radius").value = state.overlay.predRadius ?? 10;
+    document.getElementById("laue-pred-linewidth").value = state.overlay.predLineWidth ?? 1;
+    document.getElementById("laue-pred-radius").value = state.overlay.predRadius ?? 5;
+    document.getElementById("laue-obs-alpha").value = Math.round((state.overlay.observedAlpha ?? 1) * 100);
     document.getElementById("laue-show-beam-center").checked = state.overlay.showBeamCenter !== false;
     document.getElementById("laue-show-observed-peaks").checked = state.overlay.showObservedPeaks !== false;
+    document.getElementById("laue-show-predicted-peaks").checked = state.overlay.showPredictedPeaks !== false;
     if (state.rawData) reprocessImage();
     else applyViewTransform();
     drawCurveEditor();
@@ -850,6 +1224,27 @@
     persistConfig();
   }
 
+  function findObservedPeakIndex(x, y, radiusPx) {
+    const hitR = screenPxToCanvas(radiusPx ?? 12);
+    let best = -1;
+    let bestDist = hitR;
+    for (let i = 0; i < state.observedPeaks.length; i += 1) {
+      const p = state.observedPeaks[i];
+      const d = Math.hypot(p.x - x, p.y - y);
+      if (d < bestDist) {
+        bestDist = d;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  function clearObservedPeakSelection() {
+    for (const p of state.observedPeaks) {
+      p.selected = false;
+    }
+  }
+
   function onCanvasMouseDown(event) {
     if (!state.displayData) return;
 
@@ -863,14 +1258,15 @@
     if (event.button !== 0) return;
 
     const pos = clientToImage(event);
-    const beamX = state.instrument.beamX;
-    const beamY = state.instrument.beamY;
+    const beam = beamCenterPosition();
+    const beamX = beam.x;
+    const beamY = beam.y;
     const beamR = state.instrument.beamRadius;
-    const s = displayScale();
+    const hitR = screenPxToCanvas(10);
 
     if (state.mode === "beam") {
-      const onRadius = Math.hypot(pos.x - (beamX + beamR), pos.y - beamY) < 10 / s;
-      const onCenter = Math.hypot(pos.x - beamX, pos.y - beamY) < 10 / s;
+      const onRadius = Math.hypot(pos.x - (beamX + beamR), pos.y - beamY) < hitR;
+      const onCenter = Math.hypot(pos.x - beamX, pos.y - beamY) < hitR;
       if (onRadius) state.drag = { type: "beam-radius", startR: beamR, cx: beamX, cy: beamY };
       else if (onCenter) state.drag = { type: "beam-center", dx: pos.x - beamX, dy: pos.y - beamY };
       else state.drag = { type: "beam-center", dx: 0, dy: 0 };
@@ -885,9 +1281,27 @@
     }
 
     if (state.mode === "remove-peak") {
-      const hit = state.observedPeaks.findIndex((p) => Math.hypot(p.x - pos.x, p.y - pos.y) < 12 / s);
+      const hit = findObservedPeakIndex(pos.x, pos.y);
       if (hit >= 0) state.observedPeaks.splice(hit, 1);
       redraw();
+      return;
+    }
+
+    if (state.mode === "move-peak") {
+      const hit = findObservedPeakIndex(pos.x, pos.y);
+      if (hit >= 0) {
+        clearObservedPeakSelection();
+        const peak = state.observedPeaks[hit];
+        peak.selected = true;
+        state.drag = {
+          type: "move-peak",
+          index: hit,
+          dx: pos.x - peak.x,
+          dy: pos.y - peak.y
+        };
+        if (canvasViewport) canvasViewport.classList.add("laue-dragging");
+        redraw();
+      }
       return;
     }
 
@@ -913,9 +1327,8 @@
     const pos = clientToImage(event);
 
     if (state.drag.type === "beam-center") {
-      state.instrument.beamX = pos.x - (state.drag.dx || 0);
-      state.instrument.beamY = pos.y - (state.drag.dy || 0);
-      redraw();
+      setBeamCenterPosition(pos.x - (state.drag.dx || 0), pos.y - (state.drag.dy || 0));
+      onBeamCenterChanged();
     } else if (state.drag.type === "beam-radius") {
       state.instrument.beamRadius = Math.max(5, Math.hypot(pos.x - state.drag.cx, pos.y - state.drag.cy));
       redraw();
@@ -934,6 +1347,13 @@
       state.drag.startAngle = angle;
       document.getElementById("laue-pattern-rotation").value = num("laue-pattern-rotation") + delta;
       updatePredictions();
+    } else if (state.drag.type === "move-peak") {
+      const peak = state.observedPeaks[state.drag.index];
+      if (peak) {
+        peak.x = pos.x - state.drag.dx;
+        peak.y = pos.y - state.drag.dy;
+        redraw();
+      }
     }
   }
 
@@ -949,7 +1369,12 @@
       return;
     }
     if (state.drag) {
+      if (state.drag.type === "move-peak") {
+        clearObservedPeakSelection();
+        if (canvasViewport) canvasViewport.classList.remove("laue-dragging");
+      }
       state.drag = null;
+      redraw();
       persistConfig();
     }
   }
@@ -962,12 +1387,18 @@
   }
 
   function setMode(mode) {
+    if (state.drag?.type === "move-peak") {
+      clearObservedPeakSelection();
+      if (canvasViewport) canvasViewport.classList.remove("laue-dragging");
+    }
+    state.drag = null;
     state.mode = mode;
     modeButtons.forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.mode === mode);
     });
     if (canvasViewport) {
       canvasViewport.classList.toggle("laue-zoom-area-mode", mode === "zoom-area");
+      canvasViewport.classList.toggle("laue-move-peak-mode", mode === "move-peak");
     }
     setStatus({
       view: "View mode — scroll wheel to zoom; right-click resets zoom",
@@ -976,6 +1407,7 @@
       "pan-orientation": "Drag to adjust sample Ω and χ",
       "rotate-pattern": "Drag to rotate predicted pattern about beam center",
       "add-peak": "Click to add observed peak",
+      "move-peak": "Click and drag detected peaks to reposition them",
       "remove-peak": "Click to remove nearest observed peak"
     }[mode] || mode);
   }
@@ -1002,14 +1434,8 @@
       }
     });
 
-    document.getElementById("laue-example-btn").addEventListener("click", async () => {
-      try {
-        const resp = await fetch("../files/laue/example_laue.png");
-        const blob = await resp.blob();
-        await loadFile(new File([blob], "example_laue.png", { type: "image/png" }));
-      } catch (err) {
-        showError("Could not load example image.");
-      }
+    document.getElementById("laue-example-btn").addEventListener("click", () => {
+      loadExamplePng();
     });
 
     ["laue-rotate-cw", "laue-flip-h", "laue-flip-v"].forEach((id) => {
@@ -1023,17 +1449,24 @@
     });
 
     document.getElementById("laue-det-size-from-image").addEventListener("click", setDetectorSizeFromImage);
+    document.getElementById("laue-intensity-autoscale").addEventListener("click", setIntensityLimitsToDataRange);
 
     document.getElementById("laue-colormap").addEventListener("change", () => reprocessImage());
-    document.getElementById("laue-vmin").addEventListener("input", () => reprocessImage());
-    document.getElementById("laue-vmax").addEventListener("input", () => reprocessImage());
+    document.getElementById("laue-vmin").addEventListener("input", () => reprocessImage({ rescaleIntensity: false }));
+    document.getElementById("laue-vmax").addEventListener("input", () => reprocessImage({ rescaleIntensity: false }));
     document.getElementById("laue-reverse-colormap").addEventListener("change", () => reprocessImage());
     document.getElementById("laue-invert-intensity").addEventListener("change", () => reprocessImage());
+
+    ["laue-correction-blur", "laue-correction-radial", "laue-blur-radius", "laue-radial-bins"].forEach((id) => {
+      document.getElementById(id).addEventListener("input", () => { reprocessImage(); persistConfig(); });
+      document.getElementById(id).addEventListener("change", () => { reprocessImage(); persistConfig(); });
+    });
+
     document.getElementById("laue-curve-reset").addEventListener("click", resetCurve);
     document.getElementById("laue-reset-orientation").addEventListener("click", resetSampleOrientation);
     document.getElementById("laue-align-beam-btn").addEventListener("click", alignBeamHKL);
 
-    ["laue-pred-color", "laue-pred-linewidth", "laue-pred-radius", "laue-show-beam-center", "laue-show-observed-peaks"].forEach((id) => {
+    ["laue-pred-color", "laue-pred-linewidth", "laue-pred-radius", "laue-obs-alpha", "laue-show-beam-center", "laue-show-observed-peaks", "laue-show-predicted-peaks"].forEach((id) => {
       document.getElementById(id).addEventListener("input", () => { readOverlaySettings(); redraw(); persistConfig(); });
       document.getElementById(id).addEventListener("change", () => { readOverlaySettings(); redraw(); persistConfig(); });
     });
@@ -1132,10 +1565,16 @@
 
     document.querySelectorAll("#laue-crystal-form input, #laue-instrument-form input, #laue-instrument-form select")
       .forEach((el) => {
-        el.addEventListener("input", () => { updatePredictions(); persistConfig(); });
+        el.addEventListener("input", () => {
+          if (el.id === "laue-det-offset-x" || el.id === "laue-det-offset-y") onBeamCenterChanged();
+          else updatePredictions();
+          persistConfig();
+        });
         el.addEventListener("change", () => {
           if (el.id === "laue-auto-flip-h" || el.id === "laue-auto-flip-v" || el.id === "laue-auto-rotate") {
             reprocessImage();
+          } else if (el.id === "laue-det-offset-x" || el.id === "laue-det-offset-y") {
+            onBeamCenterChanged();
           } else {
             updatePredictions();
           }

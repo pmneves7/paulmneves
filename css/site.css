@@ -1814,7 +1814,7 @@ main.laue-main {
 
 .laue-curve-row {
   display: grid;
-  grid-template-columns: minmax(0, 320px) auto;
+  grid-template-columns: minmax(0, 420px) auto;
   gap: 1rem;
   align-items: start;
   margin-top: 0.75rem;
@@ -1822,10 +1822,12 @@ main.laue-main {
 
 .laue-curve-canvas {
   display: block;
-  width: 100%;
-  max-width: 280px;
+  width: 380px;
+  height: 210px;
   border-radius: 6px;
+  border: 1px solid #cbd5e1;
   cursor: crosshair;
+  background: #fff;
 }
 
 .laue-subheading {
@@ -1892,6 +1894,14 @@ main.laue-main {
   cursor: crosshair;
 }
 
+.laue-canvas-viewport.laue-move-peak-mode canvas {
+  cursor: grab;
+}
+
+.laue-canvas-viewport.laue-move-peak-mode.laue-dragging canvas {
+  cursor: grabbing;
+}
+
 .laue-canvas-inner canvas {
   display: block;
   image-rendering: pixelated;
@@ -1936,6 +1946,11 @@ main.laue-main {
   color: var(--muted, #5a6270);
   min-height: 1.25em;
   margin: 0;
+}
+
+.laue-peaks-table tr.laue-peak-offscreen td {
+  color: var(--muted, #888);
+  font-style: italic;
 }
 
 @media (max-width: 1100px) {

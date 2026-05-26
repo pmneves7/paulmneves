@@ -266,37 +266,60 @@
     });
   }
 
+  function imageDataFromImage(img) {
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const n = canvas.width * canvas.height;
+    const intensities = new Float32Array(n);
+    let maxVal = 0;
+    for (let i = 0; i < n; i += 1) {
+      const r = imageData.data[i * 4];
+      const g = imageData.data[i * 4 + 1];
+      const b = imageData.data[i * 4 + 2];
+      const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+      intensities[i] = lum;
+      if (lum > maxVal) maxVal = lum;
+    }
+    return {
+      width: canvas.width,
+      height: canvas.height,
+      intensities,
+      maxIntensity: maxVal,
+      meta: {},
+      source: "image"
+    };
+  }
+
+  function loadImageFromUrl(url) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          resolve(imageDataFromImage(img));
+        } catch (err) {
+          reject(err);
+        }
+      };
+      img.onerror = () => reject(new Error("Could not load image from URL."));
+      img.src = url;
+    });
+  }
+
   function loadImageFile(file) {
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(file);
       const img = new Image();
       img.onload = () => {
-        const canvas = document.createElement("canvas");
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0);
         URL.revokeObjectURL(url);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const n = canvas.width * canvas.height;
-        const intensities = new Float32Array(n);
-        let maxVal = 0;
-        for (let i = 0; i < n; i += 1) {
-          const r = imageData.data[i * 4];
-          const g = imageData.data[i * 4 + 1];
-          const b = imageData.data[i * 4 + 2];
-          const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-          intensities[i] = lum;
-          if (lum > maxVal) maxVal = lum;
+        try {
+          resolve(imageDataFromImage(img));
+        } catch (err) {
+          reject(err);
         }
-        resolve({
-          width: canvas.width,
-          height: canvas.height,
-          intensities,
-          maxIntensity: maxVal,
-          meta: {},
-          source: "image"
-        });
       };
       img.onerror = () => {
         URL.revokeObjectURL(url);
@@ -318,6 +341,17 @@
       return loadImageFile(file);
     }
     throw new Error("Unsupported file type. Use PNG/JPEG, .hs2, or .nxs.");
+  }
+
+  function catmullRom1D(y0, y1, y2, y3, u) {
+    const u2 = u * u;
+    const u3 = u2 * u;
+    return 0.5 * (
+      2 * y1 +
+      (-y0 + y2) * u +
+      (2 * y0 - 5 * y1 + 4 * y2 - y3) * u2 +
+      (-y0 + 3 * y1 - 3 * y2 + y3) * u3
+    );
   }
 
   function evaluateCurve(points, t) {
@@ -345,33 +379,17 @@
       const a = sorted[i];
       const b = sorted[i + 1];
       if (t >= a.x && t <= b.x) {
+        const span = b.x - a.x || 1;
+        const u = (t - a.x) / span;
         if (sorted.length === 2) {
-          const f = (t - a.x) / (b.x - a.x || 1);
-          return a.y + f * (b.y - a.y);
+          return a.y + u * (b.y - a.y);
         }
-        const dx = (b.x - a.x) / 3;
-        return bezierYAtX(a, { x: a.x + dx, y: a.y }, { x: b.x - dx, y: b.y }, b, t);
+        const y0 = i > 0 ? sorted[i - 1].y : (2 * a.y - b.y);
+        const y3 = i + 2 < sorted.length ? sorted[i + 2].y : (2 * b.y - a.y);
+        return catmullRom1D(y0, a.y, b.y, y3, u);
       }
     }
     return t;
-  }
-
-  function cubicAt(a, b, c, d, u) {
-    const v = 1 - u;
-    return v * v * v * a + 3 * v * v * u * b + 3 * v * u * u * c + u * u * u * d;
-  }
-
-  function bezierYAtX(p0, p1, p2, p3, targetX) {
-    let lo = 0;
-    let hi = 1;
-    for (let i = 0; i < 48; i += 1) {
-      const u = (lo + hi) / 2;
-      const x = cubicAt(p0.x, p1.x, p2.x, p3.x, u);
-      if (x < targetX) lo = u;
-      else hi = u;
-    }
-    const u = (lo + hi) / 2;
-    return cubicAt(p0.y, p1.y, p2.y, p3.y, u);
   }
 
   function intensityRange(intensities) {
@@ -383,6 +401,20 @@
       if (v > maxVal) maxVal = v;
     }
     if (!Number.isFinite(minVal)) return { min: 0, max: 1 };
+    return { min: minVal, max: maxVal };
+  }
+
+  function intensityPercentileRange(intensities, loFrac, hiFrac) {
+    const lo = clamp01(loFrac ?? 0.02);
+    const hi = clamp01(hiFrac ?? 0.98);
+    if (!intensities.length) return { min: 0, max: 1 };
+    const sorted = Array.from(intensities).sort((a, b) => a - b);
+    const pick = (frac) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.floor(frac * (sorted.length - 1))))];
+    const minVal = pick(Math.min(lo, hi));
+    const maxVal = pick(Math.max(lo, hi));
+    if (!Number.isFinite(minVal) || !Number.isFinite(maxVal) || maxVal <= minVal) {
+      return intensityRange(intensities);
+    }
     return { min: minVal, max: maxVal };
   }
 
@@ -524,15 +556,171 @@
     return { minI, maxI };
   }
 
+  function gaussianKernel1D(sigma) {
+    const radius = Math.max(1, Math.ceil(sigma * 3));
+    const size = radius * 2 + 1;
+    const kernel = new Float32Array(size);
+    let sum = 0;
+    for (let i = -radius; i <= radius; i += 1) {
+      const w = Math.exp(-(i * i) / (2 * sigma * sigma));
+      kernel[i + radius] = w;
+      sum += w;
+    }
+    for (let i = 0; i < size; i += 1) kernel[i] /= sum;
+    return { kernel, radius };
+  }
+
+  function gaussianBlur(intensities, width, height, sigma) {
+    if (!sigma || sigma <= 0) return intensities.slice();
+    const { kernel, radius } = gaussianKernel1D(sigma);
+    const temp = new Float32Array(intensities.length);
+    const out = new Float32Array(intensities.length);
+
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        let sum = 0;
+        for (let k = -radius; k <= radius; k += 1) {
+          const sx = Math.min(width - 1, Math.max(0, x + k));
+          sum += intensities[y * width + sx] * kernel[k + radius];
+        }
+        temp[y * width + x] = sum;
+      }
+    }
+
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        let sum = 0;
+        for (let k = -radius; k <= radius; k += 1) {
+          const sy = Math.min(height - 1, Math.max(0, y + k));
+          sum += temp[sy * width + x] * kernel[k + radius];
+        }
+        out[y * width + x] = sum;
+      }
+    }
+    return out;
+  }
+
+  function fillEmptyRadialBins(avg, count, bins) {
+    for (let b = 0; b < bins; b += 1) {
+      if (count[b] === 0 || !(avg[b] > 0)) avg[b] = NaN;
+    }
+    for (let pass = 0; pass < bins; pass += 1) {
+      let done = true;
+      for (let b = 0; b < bins; b += 1) {
+        if (Number.isFinite(avg[b])) continue;
+        done = false;
+        let lo = b - 1;
+        let hi = b + 1;
+        while (lo >= 0 && !Number.isFinite(avg[lo])) lo -= 1;
+        while (hi < bins && !Number.isFinite(avg[hi])) hi += 1;
+        if (lo >= 0 && hi < bins) avg[b] = (avg[lo] + avg[hi]) / 2;
+        else if (lo >= 0) avg[b] = avg[lo];
+        else if (hi < bins) avg[b] = avg[hi];
+      }
+      if (done) break;
+    }
+    for (let b = 0; b < bins; b += 1) {
+      if (!Number.isFinite(avg[b]) || avg[b] <= 0) avg[b] = 1;
+    }
+  }
+
+  function radialNormalize(intensities, width, height, centerX, centerY, nBins) {
+    const bins = Math.max(4, Math.round(nBins));
+    const n = width * height;
+    const out = new Float32Array(n);
+    const maxR = Math.max(
+      Math.hypot(centerX, centerY),
+      Math.hypot(width - centerX, centerY),
+      Math.hypot(centerX, height - centerY),
+      Math.hypot(width - centerX, height - centerY),
+      1e-6
+    );
+    const sum = new Float64Array(bins);
+    const count = new Float64Array(bins);
+    const avg = new Float32Array(bins);
+
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const r = Math.hypot(x - centerX, y - centerY);
+        const idx = y * width + x;
+        const bin = Math.min(bins - 1, Math.floor((r / maxR) * bins));
+        sum[bin] += intensities[idx];
+        count[bin] += 1;
+      }
+    }
+
+    for (let b = 0; b < bins; b += 1) {
+      avg[b] = count[b] > 0 ? sum[b] / count[b] : 0;
+    }
+    fillEmptyRadialBins(avg, count, bins);
+
+    const validMeans = [];
+    for (let b = 0; b < bins; b += 1) {
+      if (avg[b] > 0) validMeans.push(avg[b]);
+    }
+    validMeans.sort((a, b) => a - b);
+    const medianMean = validMeans.length
+      ? validMeans[Math.floor(validMeans.length / 2)]
+      : 1;
+    const meanFloor = Math.max(1e-12, medianMean * 0.01);
+
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const r = Math.hypot(x - centerX, y - centerY);
+        const idx = y * width + x;
+        const f = Math.min(bins - 1, Math.max(0, (r / maxR) * bins));
+        const b0 = Math.floor(f);
+        const b1 = Math.min(bins - 1, b0 + 1);
+        const t = f - b0;
+        const mean = avg[b0] * (1 - t) + avg[b1] * t;
+        out[idx] = intensities[idx] / Math.max(mean, meanFloor);
+      }
+    }
+    return out;
+  }
+
+  function applyCorrections(data, corrections, centerX, centerY) {
+    let intensities = data.intensities;
+    if (corrections.gaussianBlur && corrections.blurRadius > 0) {
+      intensities = gaussianBlur(intensities, data.width, data.height, corrections.blurRadius);
+    }
+    if (corrections.radialNormalize) {
+      intensities = radialNormalize(
+        intensities,
+        data.width,
+        data.height,
+        centerX,
+        centerY,
+        corrections.radialBins
+      );
+    }
+    if (intensities === data.intensities) {
+      return data;
+    }
+    let maxVal = 0;
+    for (let i = 0; i < intensities.length; i += 1) {
+      if (intensities[i] > maxVal) maxVal = intensities[i];
+    }
+    return {
+      ...data,
+      intensities,
+      maxIntensity: maxVal
+    };
+  }
+
   global.LaueFormats = {
     COLORMAPS: Object.keys(COLORMAPS),
     loadLaueFile,
     loadImageFile,
+    loadImageFromUrl,
     readHs2,
     readNxs,
     renderToImageData,
     renderColorbar,
     applyDisplayTransform,
+    applyCorrections,
+    gaussianBlur,
+    radialNormalize,
     evaluateCurve,
     displayMappedT,
     intensityToDisplayT,
@@ -541,6 +729,7 @@
     getEffectiveIntensity,
     getEffectiveIntensities,
     colorForMappedT,
-    intensityRange
+    intensityRange,
+    intensityPercentileRange
   };
 })(window);
