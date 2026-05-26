@@ -24,7 +24,7 @@
 
   const swapYBtn = document.getElementById("dig-swap-y");
   const swapXBtn = document.getElementById("dig-swap-x");
-  const linkOriginBtn = document.getElementById("dig-link-origin");
+  const linkOriginEl = document.getElementById("dig-link-origin");
   const swapScaleBtn = document.getElementById("dig-scale-swap");
   const rotateCcwBtn = document.getElementById("dig-rotate-ccw");
   const flipHBtn = document.getElementById("dig-flip-h");
@@ -97,6 +97,7 @@
 
     // Plot mode state
     calibration: { y1: null, y2: null, x1: null, x2: null },
+    linkOrigin: false,
     points: [],
 
     // Map mode state
@@ -577,6 +578,7 @@
     state.selected = null;
     state.pointDrag = null;
     state.suppressNextClick = false;
+    state.linkOrigin = false;
   }
 
   function hasCalibrationOrPoints() {
@@ -596,6 +598,7 @@
     CALIBRATION_KEYS.forEach((k) => { valueInputs[k].value = ""; });
     if (scaleDistanceInput) scaleDistanceInput.value = "";
     if (scaleUnitInput) scaleUnitInput.value = "";
+    if (linkOriginEl) linkOriginEl.checked = false;
     state.modeByTab.plot = "y1";
     state.modeByTab.map = "scale-a";
     state.mode = state.modeByTab[state.activeTab];
@@ -866,6 +869,9 @@
     if (!p) return false;
     p.x += dx;
     p.y += dy;
+    if (state.selected.type === "calibration") {
+      syncLinkedOrigin(state.selected.key);
+    }
     return true;
   }
 
@@ -883,6 +889,9 @@
     if (!pt) return;
     pt.x = p.x;
     pt.y = p.y;
+    if (state.selected && state.selected.type === "calibration") {
+      syncLinkedOrigin(state.selected.key);
+    }
     state.cursor = { x: pt.x, y: pt.y };
     state.pointerInside = true;
     state.pointDrag.moved = true;
@@ -1668,7 +1677,16 @@
     }
   }
 
-  function linkOrigin() {
+  function syncLinkedOrigin(fromKey) {
+    if (!state.linkOrigin) return;
+    if (fromKey === "y1" && state.calibration.y1) {
+      state.calibration.x1 = { x: state.calibration.y1.x, y: state.calibration.y1.y };
+    } else if (fromKey === "x1" && state.calibration.x1) {
+      state.calibration.y1 = { x: state.calibration.x1.x, y: state.calibration.x1.y };
+    }
+  }
+
+  function applyLinkOrigin() {
     const y1 = state.calibration.y1;
     const x1 = state.calibration.x1;
     if (y1) {
@@ -1680,6 +1698,17 @@
       return true;
     }
     return false;
+  }
+
+  function advanceFromLinkedX1Step() {
+    if (state.activeTab !== "plot" || state.mode !== "x1") return;
+    if (!state.calibration.y1 || !state.calibration.x1) return;
+    state.selected = { type: "calibration", key: "x1" };
+    const next = !state.calibration.y2 ? "y2" : nextCalibrationMode("x1");
+    if (next) {
+      state.mode = next;
+      state.modeByTab.plot = next;
+    }
   }
 
   function swapScaleEndpoints() {
@@ -1984,6 +2013,9 @@
     if (state.mode && state.mode in state.calibration) {
       const wasAlreadySet = !!state.calibration[state.mode];
       state.calibration[state.mode] = p;
+      if (state.linkOrigin && (state.mode === "y1" || state.mode === "x1")) {
+        syncLinkedOrigin(state.mode);
+      }
       state.selected = { type: "calibration", key: state.mode };
       if (!wasAlreadySet) {
         const next = nextCalibrationMode(state.mode);
@@ -2109,27 +2141,22 @@
 
   swapYBtn.addEventListener("click", () => { swapAxisPair("y1", "y2"); refreshAll(); });
   swapXBtn.addEventListener("click", () => { swapAxisPair("x1", "x2"); refreshAll(); });
-  linkOriginBtn.addEventListener("click", () => {
-    const onX1Step = state.activeTab === "plot" && state.mode === "x1";
-    const x1WasUnset = !state.calibration.x1;
-    const linkedFromY1 = !!state.calibration.y1;
-
-    if (!linkOrigin()) {
-      flashStatus("Set Y₁ or X₁ first, then link them to share an origin.");
-      return;
-    }
-
-    if (onX1Step && linkedFromY1 && x1WasUnset) {
-      state.selected = { type: "calibration", key: "x1" };
-      const next = !state.calibration.y2 ? "y2" : nextCalibrationMode("x1");
-      if (next) {
-        state.mode = next;
-        state.modeByTab.plot = next;
+  if (linkOriginEl) {
+    linkOriginEl.addEventListener("change", () => {
+      state.linkOrigin = linkOriginEl.checked;
+      if (!state.linkOrigin) {
+        refreshAll();
+        return;
       }
-    }
-
-    refreshAll();
-  });
+      if (!applyLinkOrigin()) {
+        flashStatus("Set Y₁ or X₁ first, then enable linking to share an origin.");
+        refreshAll();
+        return;
+      }
+      advanceFromLinkedX1Step();
+      refreshAll();
+    });
+  }
 
   // --- Events: scale actions / output -------------------------------------
 

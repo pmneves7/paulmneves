@@ -1103,6 +1103,31 @@ footer {
   outline-color: var(--muted);
 }
 
+.digitizer-mode-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+.digitizer-mode-link:has(input:checked) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.digitizer-mode-link input {
+  margin: 0;
+  cursor: pointer;
+}
+
 .digitizer-canvas-area {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 300px;
@@ -1672,6 +1697,268 @@ footer {
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
 }
 
+/* Laue analysis tool */
+main.laue-main {
+  max-width: none;
+  padding-bottom: 2rem;
+}
+
+.laue-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.25rem;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 0 1.25rem;
+}
+
+.laue-tools-scroll {
+  flex: 1 1 0;
+  min-width: 0;
+  max-height: calc(100vh - 7rem);
+  overflow-y: auto;
+  margin: 0;
+}
+
+.laue-viewer-panel {
+  flex: 0 0 min(48vw, 620px);
+  position: sticky;
+  top: 1rem;
+  align-self: flex-start;
+  max-height: calc(100vh - 2rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.85rem;
+  border: 1px solid var(--border, #c8ccd4);
+  border-radius: 8px;
+  background: var(--bg, #fff);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+}
+
+.laue-viewer-frame {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.laue-viewer-placeholder {
+  font-size: 0.92rem;
+  color: var(--muted, #5a6270);
+  text-align: center;
+  padding: 3rem 1rem;
+  border: 1px dashed var(--border, #c8ccd4);
+  border-radius: 6px;
+  background: #f8f9fb;
+  margin: 0;
+}
+
+.laue-zoom-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.laue-zoom-btn {
+  min-width: 2rem;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.laue-zoom-label {
+  font-size: 0.85rem;
+  min-width: 3.5rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.laue-colorbar-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.laue-colorbar {
+  display: block;
+  border-radius: 3px;
+  flex: 1 1 auto;
+}
+
+.laue-colorbar-label {
+  font-size: 0.72rem;
+  color: var(--muted, #5a6270);
+  font-variant-numeric: tabular-nums;
+  writing-mode: horizontal-tb;
+}
+
+.laue-loader,
+.laue-config-row,
+.laue-action-row,
+.laue-transform-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.laue-load-error {
+  color: var(--accent);
+}
+
+.laue-curve-row {
+  display: grid;
+  grid-template-columns: minmax(0, 320px) auto;
+  gap: 1rem;
+  align-items: start;
+  margin-top: 0.75rem;
+}
+
+.laue-curve-canvas {
+  display: block;
+  width: 100%;
+  max-width: 280px;
+  border-radius: 6px;
+  cursor: crosshair;
+}
+
+.laue-subheading {
+  font-size: 1.05rem;
+  margin: 1.25rem 0 0.65rem;
+}
+
+.laue-check-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem 1.25rem;
+  margin: 0.65rem 0 1rem;
+  font-size: 0.92rem;
+}
+
+.laue-check-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.laue-canvas-section {
+  margin-top: 1.25rem;
+}
+
+.laue-canvas-viewport {
+  flex: 1 1 auto;
+  overflow: hidden;
+  position: relative;
+  min-height: 280px;
+  max-height: calc(100vh - 12rem);
+  border: 1px solid var(--border, #c8ccd4);
+  border-radius: 6px;
+  background: #111;
+  line-height: 0;
+}
+
+.laue-canvas-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 280px;
+}
+
+.laue-canvas-inner {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  display: block;
+}
+
+.laue-zoom-rect {
+  position: absolute;
+  border: 1px dashed rgba(255, 255, 255, 0.95);
+  background: rgba(100, 180, 255, 0.18);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.laue-canvas-viewport.laue-zoom-area-mode,
+.laue-canvas-viewport.laue-zoom-area-mode canvas {
+  cursor: crosshair;
+}
+
+.laue-canvas-inner canvas {
+  display: block;
+  image-rendering: pixelated;
+}
+
+.laue-align-beam-row {
+  margin-top: 0.5rem;
+}
+
+.laue-align-beam-action {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.laue-mode-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+
+.laue-mode-btn {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--border, #c8ccd4);
+  border-radius: 5px;
+  background: var(--bg, #fff);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.laue-mode-btn.active {
+  background: var(--accent, #2b6cb0);
+  border-color: var(--accent, #2b6cb0);
+  color: #fff;
+}
+
+.laue-status {
+  font-size: 0.88rem;
+  color: var(--muted, #5a6270);
+  min-height: 1.25em;
+  margin: 0;
+}
+
+@media (max-width: 1100px) {
+  .laue-layout {
+    flex-direction: column;
+  }
+
+  .laue-viewer-panel {
+    position: static;
+    flex: 1 1 auto;
+    width: 100%;
+    max-height: none;
+  }
+
+  .laue-tools-scroll {
+    max-height: none;
+  }
+
+  .laue-canvas-viewport {
+    max-height: 70vh;
+  }
+}
+
 @media (max-width: 800px) {
   nav {
     align-items: flex-start;
@@ -1712,5 +1999,9 @@ footer {
 
   .digitizer-canvas-wrap {
     max-height: 60vh;
+  }
+
+  .laue-curve-row {
+    grid-template-columns: 1fr;
   }
 }

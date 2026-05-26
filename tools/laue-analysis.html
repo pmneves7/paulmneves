@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    name="description"
+    content="Index and refine x-ray and neutron Laue diffraction patterns from area-detector images."
+  />
+  <title>Laue analysis | Paul M. Neves</title>
+  <link rel="canonical" href="https://paulmneves.com/tools/laue-analysis.html" />
+  <link rel="icon" type="image/png" href="../media/favicon.png" />
+  <link rel="stylesheet" href="../css/site.css" />
+</head>
+<body>
+  <header>
+    <nav aria-label="Main navigation">
+      <a class="site-title" href="../index.html">Paul M. Neves</a>
+      <div class="nav-links">
+        <a href="../index.html#biography">Biography</a>
+        <a href="../research.html">Research</a>
+        <a href="../publications.html">Publications</a>
+        <a href="../news.html">News</a>
+        <a href="../gallery.html">Gallery</a>
+        <a href="../tools.html">Tools</a>
+        <a href="../index.html#contact">Contact</a>
+      </div>
+    </nav>
+  </header>
+
+  <main class="laue-main">
+    <header class="page-header">
+      <h1>Laue analysis</h1>
+      <p class="lead">
+        Index x-ray and neutron Laue patterns from area-detector images. Import crystal parameters
+        from a CIF or manual entry, load detector images (PNG, NorthStar .hs2, or NeXus .nxs),
+        overlay predicted reflections, auto-detect peaks, and refine orientation.
+      </p>
+      <p class="tool-disclaimer">
+        <strong>Disclaimer:</strong> These tools are experimental and may still have bugs/errors.
+        If you spot one, please <a href="../index.html#contact">tell me</a>!
+      </p>
+    </header>
+
+    <div class="laue-layout">
+      <div class="laue-tools-scroll tool-panel tool-panel-wide">
+        <section class="tool-section">
+          <h2>1. Crystal parameters</h2>
+          <p class="tool-note">
+            Laboratory frame: <strong>x</strong> primary beam, <strong>y</strong> horizontal, <strong>z</strong> vertical.
+            At zero sample Euler angles (Ω, χ, Φ), the crystallographic <strong>a</strong> axis lies on +x,
+            <strong>b</strong> in the xy-plane, and <strong>c</strong> completes a right-handed system.
+          </p>
+          <div class="tool-cif-controls">
+            <input type="file" id="cif-file" accept=".cif,chemical/x-cif,text/plain" hidden />
+            <div class="tool-field tool-cif-preset">
+              <label for="crystal-preset">Standard crystal</label>
+              <select id="crystal-preset">
+                <option value="">Custom / manual entry</option>
+              </select>
+            </div>
+            <button type="button" id="cif-load-button" class="button secondary">Load CIF file…</button>
+            <p id="cif-status" class="tool-cif-status" role="status" aria-live="polite"></p>
+          </div>
+          <form id="laue-crystal-form" class="tool-grid" onsubmit="return false">
+            <div class="tool-field">
+              <label for="laue-a">a (Å)</label>
+              <input type="number" id="laue-a" step="any" min="0" value="5.431" />
+            </div>
+            <div class="tool-field">
+              <label for="laue-b">b (Å)</label>
+              <input type="number" id="laue-b" step="any" min="0" value="5.431" />
+            </div>
+            <div class="tool-field">
+              <label for="laue-c">c (Å)</label>
+              <input type="number" id="laue-c" step="any" min="0" value="5.431" />
+            </div>
+            <div class="tool-field">
+              <label for="laue-alpha">α (°)</label>
+              <input type="number" id="laue-alpha" step="any" min="0" max="180" value="90" />
+            </div>
+            <div class="tool-field">
+              <label for="laue-beta">β (°)</label>
+              <input type="number" id="laue-beta" step="any" min="0" max="180" value="90" />
+            </div>
+            <div class="tool-field">
+              <label for="laue-gamma">γ (°)</label>
+              <input type="number" id="laue-gamma" step="any" min="0" max="180" value="90" />
+            </div>
+            <div class="tool-field">
+              <label for="laue-spacegroup">Space group</label>
+              <input type="text" id="laue-spacegroup" value="Fm-3m" placeholder="symbol or IT number" />
+            </div>
+          </form>
+        </section>
+
+        <section class="tool-section">
+          <h2>2. Laue image</h2>
+          <p class="tool-note">
+            Upload a standard image, paste from the clipboard (<kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>V</kbd>),
+            or load a NorthStar <code>.hs2</code> or NeXus <code>.nxs</code> file.
+          </p>
+          <div class="laue-loader">
+            <button type="button" class="button secondary" id="laue-upload-btn">Choose file…</button>
+            <input type="file" id="laue-file-input" accept="image/*,.hs2,.nxs" hidden />
+            <button type="button" class="button secondary" id="laue-example-btn">Load example PNG</button>
+          </div>
+          <p class="tool-note laue-load-error" id="laue-load-error" hidden></p>
+
+          <div class="laue-display-controls tool-grid">
+            <div class="tool-field">
+              <label for="laue-colormap">Colorscale</label>
+              <select id="laue-colormap">
+                <option value="gray" selected>Greyscale</option>
+                <option value="viridis">Viridis</option>
+                <option value="inferno">Inferno</option>
+                <option value="plasma">Plasma</option>
+                <option value="magma">Magma</option>
+                <option value="cividis">Cividis</option>
+                <option value="hot">Hot</option>
+                <option value="coolwarm">Cool–warm</option>
+              </select>
+            </div>
+            <div class="tool-field">
+              <label for="laue-vmin">Intensity min</label>
+              <input type="number" id="laue-vmin" step="any" value="0" />
+            </div>
+            <div class="tool-field">
+              <label for="laue-vmax">Intensity max</label>
+              <input type="number" id="laue-vmax" step="any" placeholder="auto" />
+            </div>
+          </div>
+          <div class="laue-check-row">
+            <label><input type="checkbox" id="laue-reverse-colormap" checked /> Reverse colorscale (visual only)</label>
+            <label><input type="checkbox" id="laue-invert-intensity" /> Invert intensity values (flip stored counts)</label>
+          </div>
+          <div class="laue-curve-row">
+            <div>
+              <p class="tool-note">Intensity curve — drag control points; click to add; right-click to remove. End segments extend linearly.</p>
+              <canvas id="laue-curve-canvas" class="laue-curve-canvas" width="280" height="140" aria-label="Intensity transfer curve"></canvas>
+              <button type="button" class="button secondary" id="laue-curve-reset">Reset curve</button>
+            </div>
+            <div class="laue-transform-btns">
+              <button type="button" class="button secondary" id="laue-rotate-cw">Rotate 90° CW</button>
+              <button type="button" class="button secondary" id="laue-flip-h">Flip horizontal</button>
+              <button type="button" class="button secondary" id="laue-flip-v">Flip vertical</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="tool-section" id="laue-instrument-section">
+          <h2>3. Instrument &amp; orientation</h2>
+          <form id="laue-instrument-form" onsubmit="return false">
+            <div class="tool-grid">
+              <div class="tool-field">
+                <label for="laue-laue-mode">Laue geometry</label>
+                <select id="laue-laue-mode">
+                  <option value="transmission">Transmission (ω = 0)</option>
+                  <option value="backscatter" selected>Backscatter (ω = 180°)</option>
+                </select>
+              </div>
+              <div class="tool-field">
+                <label for="laue-det-distance">Detector distance (mm)</label>
+                <input type="number" id="laue-det-distance" step="any" value="150" />
+              </div>
+              <div class="tool-field">
+                <label for="laue-det-width">Detector width (mm)</label>
+                <input type="number" id="laue-det-width" step="any" value="100" />
+              </div>
+              <div class="tool-field">
+                <label for="laue-det-height">Detector height (mm)</label>
+                <input type="number" id="laue-det-height" step="any" value="100" />
+              </div>
+            </div>
+            <div class="laue-action-row">
+              <button type="button" class="button secondary" id="laue-det-size-from-image">Use image pixel size</button>
+            </div>
+            <div class="tool-grid">
+              <div class="tool-field">
+                <label for="laue-det-offset-x">Detector X offset (px)</label>
+                <input type="number" id="laue-det-offset-x" step="any" value="0" />
+              </div>
+              <div class="tool-field">
+                <label for="laue-det-offset-y">Detector Y offset (px)</label>
+                <input type="number" id="laue-det-offset-y" step="any" value="0" />
+              </div>
+              <div class="tool-field">
+                <label for="laue-det-omega">Detector Ω (°)</label>
+                <input type="number" id="laue-det-omega" step="any" value="0" title="Azimuth of detector normal about z" />
+              </div>
+              <div class="tool-field">
+                <label for="laue-det-chi">Detector χ (°)</label>
+                <input type="number" id="laue-det-chi" step="any" value="90" title="Polar angle of detector normal from +z" />
+              </div>
+              <div class="tool-field">
+                <label for="laue-det-omega-mis">Detector Ω misalign (°)</label>
+                <input type="number" id="laue-det-omega-mis" step="any" value="0" />
+              </div>
+              <div class="tool-field">
+                <label for="laue-det-chi-mis">Detector χ misalign (°)</label>
+                <input type="number" id="laue-det-chi-mis" step="any" value="0" />
+              </div>
+            </div>
+
+            <h3 class="laue-subheading">Sample orientation (Euler angles)</h3>
+            <div class="tool-grid">
+              <div class="tool-field">
+                <label for="laue-sample-omega">Sample Ω (°)</label>
+                <input type="number" id="laue-sample-omega" step="any" value="0" />
+              </div>
+              <div class="tool-field">
+                <label for="laue-sample-chi">Sample χ (°)</label>
+                <input type="number" id="laue-sample-chi" step="any" value="0" />
+              </div>
+              <div class="tool-field">
+                <label for="laue-sample-phi">Sample Φ (°)</label>
+                <input type="number" id="laue-sample-phi" step="any" value="0" />
+              </div>
+              <div class="tool-field">
+                <label for="laue-sign-omega">Ω sign</label>
+                <select id="laue-sign-omega"><option value="1">+1</option><option value="-1">−1</option></select>
+              </div>
+              <div class="tool-field">
+                <label for="laue-sign-chi">χ sign</label>
+                <select id="laue-sign-chi"><option value="1">+1</option><option value="-1">−1</option></select>
+              </div>
+              <div class="tool-field">
+                <label for="laue-sign-phi">Φ sign</label>
+                <select id="laue-sign-phi"><option value="1">+1</option><option value="-1">−1</option></select>
+              </div>
+              <div class="tool-field">
+                <label for="laue-max-hkl-sq">Max h²+k²+l²</label>
+                <input type="number" id="laue-max-hkl-sq" step="1" min="1" value="25" />
+              </div>
+              <div class="tool-field">
+                <label for="laue-q-min">Q min (Å⁻¹)</label>
+                <input type="number" id="laue-q-min" step="any" min="0" value="0" />
+              </div>
+              <div class="tool-field">
+                <label for="laue-q-max">Q max (Å⁻¹)</label>
+                <input type="number" id="laue-q-max" step="any" min="0" value="10" />
+              </div>
+              <div class="tool-field">
+                <label for="laue-pattern-rotation">Pattern rotation (°)</label>
+                <input type="number" id="laue-pattern-rotation" step="any" value="0" />
+              </div>
+            </div>
+            <div class="laue-action-row">
+              <button type="button" class="button secondary" id="laue-reset-orientation">Reset sample orientation</button>
+            </div>
+            <div class="tool-grid laue-align-beam-row">
+              <div class="tool-field">
+                <label for="laue-align-beam-hkl">Align HKL to direct beam</label>
+                <input type="text" id="laue-align-beam-hkl" value="0 0 1" placeholder="h k l" />
+              </div>
+              <div class="tool-field laue-align-beam-action">
+                <label>&nbsp;</label>
+                <button type="button" class="button secondary" id="laue-align-beam-btn">Align to beam</button>
+              </div>
+            </div>
+            <p class="tool-note" id="laue-align-beam-result" aria-live="polite"></p>
+
+            <h3 class="laue-subheading">Predicted peak overlay</h3>
+            <div class="tool-grid">
+              <div class="tool-field">
+                <label for="laue-pred-color">Circle color</label>
+                <input type="color" id="laue-pred-color" value="#8b0000" />
+              </div>
+              <div class="tool-field">
+                <label for="laue-pred-linewidth">Line width (px)</label>
+                <input type="number" id="laue-pred-linewidth" step="1" min="1" max="20" value="2" />
+              </div>
+              <div class="tool-field">
+                <label for="laue-pred-radius">Radius (px)</label>
+                <input type="number" id="laue-pred-radius" step="1" min="2" max="80" value="10" />
+              </div>
+            </div>
+            <div class="laue-check-row">
+              <label><input type="checkbox" id="laue-show-beam-center" checked /> Show beam center</label>
+              <label><input type="checkbox" id="laue-show-observed-peaks" checked /> Show detected peaks</label>
+            </div>
+
+            <h3 class="laue-subheading">Auto-orient on load</h3>
+            <p class="tool-note">Apply when the raw array is stored in a different row/column order.</p>
+            <div class="laue-check-row">
+              <label><input type="checkbox" id="laue-auto-flip-h" /> Flip horizontal on load</label>
+              <label><input type="checkbox" id="laue-auto-flip-v" /> Flip vertical on load</label>
+              <label>
+                Rotate on load
+                <select id="laue-auto-rotate">
+                  <option value="0">0°</option>
+                  <option value="1">90° CW</option>
+                  <option value="2">180°</option>
+                  <option value="3">270° CW</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="laue-config-row">
+              <button type="button" class="button secondary" id="laue-save-config-btn">Save config…</button>
+              <button type="button" class="button secondary" id="laue-load-config-btn">Load config…</button>
+              <input type="file" id="laue-config-file" accept="application/json,.json" hidden />
+            </div>
+          </form>
+        </section>
+
+        <section class="tool-section">
+          <h3 class="laue-subheading">Peak detection &amp; matching</h3>
+          <div class="tool-grid">
+            <div class="tool-field">
+              <label for="laue-peak-threshold">Threshold intensity</label>
+              <input type="number" id="laue-peak-threshold" step="any" value="500" />
+            </div>
+            <div class="tool-field">
+              <label for="laue-peak-min-radius">Min peak radius (px)</label>
+              <input type="number" id="laue-peak-min-radius" step="1" min="1" value="3" />
+            </div>
+          </div>
+          <div class="laue-action-row">
+            <button type="button" class="button secondary" id="laue-auto-detect-btn">Auto-detect peaks</button>
+            <button type="button" class="button secondary" id="laue-match-btn">Match to predicted</button>
+            <button type="button" class="button secondary" id="laue-clear-peaks-btn">Remove all peaks</button>
+          </div>
+        </section>
+
+        <section class="tool-section">
+          <h3 class="laue-subheading">Orientation refinement</h3>
+          <p class="tool-note">Least-squares fit of observed peak positions. Default: sample Ω, χ, Φ only.</p>
+          <div class="laue-check-row">
+            <label><input type="checkbox" id="laue-refine-omega" checked /> Sample Ω</label>
+            <label><input type="checkbox" id="laue-refine-chi" checked /> Sample χ</label>
+            <label><input type="checkbox" id="laue-refine-phi" checked /> Sample Φ</label>
+            <label><input type="checkbox" id="laue-refine-distance" /> Detector distance</label>
+            <label><input type="checkbox" id="laue-refine-offset-x" /> Det. X offset</label>
+            <label><input type="checkbox" id="laue-refine-offset-y" /> Det. Y offset</label>
+            <label><input type="checkbox" id="laue-refine-det-omega" /> Det. Ω misalign</label>
+            <label><input type="checkbox" id="laue-refine-det-chi" /> Det. χ misalign</label>
+          </div>
+          <button type="button" class="button primary" id="laue-refine-btn">Run refinement</button>
+          <p class="tool-note" id="laue-refine-result" aria-live="polite"></p>
+        </section>
+
+        <section class="tool-section">
+          <h3 class="laue-subheading">Ideal orientation calculator</h3>
+          <p class="tool-note">
+            Specify the reciprocal-lattice direction that should align with the direct beam (+x)
+            and a second direction that should lie in the horizontal (xy) plane.
+          </p>
+          <div class="tool-grid">
+            <div class="tool-field">
+              <label for="laue-target-beam-hkl">Direct-beam direction (h k l)</label>
+              <input type="text" id="laue-target-beam-hkl" value="0 0 1" placeholder="h k l" />
+            </div>
+            <div class="tool-field">
+              <label for="laue-target-horiz-hkl">Horizontal-plane direction (h k l)</label>
+              <input type="text" id="laue-target-horiz-hkl" value="1 0 0" placeholder="h k l" />
+            </div>
+          </div>
+          <button type="button" class="button secondary" id="laue-ideal-btn">Calculate deviation</button>
+          <p class="tool-note" id="laue-ideal-result" aria-live="polite"></p>
+        </section>
+
+        <div class="tool-results" aria-live="polite">
+          <h3>Predicted reflections</h3>
+          <div class="tool-table-wrap">
+            <table class="tool-table">
+              <thead>
+                <tr>
+                  <th>(hkl)</th>
+                  <th>|G| (Å⁻¹)</th>
+                  <th>x (px)</th>
+                  <th>y (px)</th>
+                </tr>
+              </thead>
+              <tbody id="laue-peaks-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <aside class="laue-viewer-panel" aria-label="Laue image viewer">
+        <div class="laue-mode-bar" role="toolbar" aria-label="Canvas interaction modes">
+          <button type="button" class="laue-mode-btn active" data-mode="view">View</button>
+          <button type="button" class="laue-mode-btn" data-mode="zoom-area">Zoom area</button>
+          <button type="button" class="laue-mode-btn" data-mode="beam">Beam center</button>
+          <button type="button" class="laue-mode-btn" data-mode="pan-orientation">Pan orientation</button>
+          <button type="button" class="laue-mode-btn" data-mode="rotate-pattern">Rotate pattern</button>
+          <button type="button" class="laue-mode-btn" data-mode="add-peak">Add peak</button>
+          <button type="button" class="laue-mode-btn" data-mode="remove-peak">Remove peak</button>
+        </div>
+        <div class="laue-zoom-bar">
+          <button type="button" class="button secondary laue-zoom-btn" id="laue-zoom-out" title="Zoom out">−</button>
+          <span class="laue-zoom-label" id="laue-zoom-label">100%</span>
+          <button type="button" class="button secondary laue-zoom-btn" id="laue-zoom-in" title="Zoom in">+</button>
+          <button type="button" class="button secondary" id="laue-zoom-reset">Reset zoom</button>
+        </div>
+        <p class="laue-status" id="laue-status" aria-live="polite"></p>
+        <p class="laue-viewer-placeholder" id="laue-viewer-placeholder">Load a Laue image to display it here.</p>
+        <div class="laue-viewer-frame" id="laue-viewer-frame" hidden>
+          <div class="laue-canvas-viewport" id="laue-canvas-viewport">
+            <div class="laue-canvas-stage" id="laue-canvas-stage">
+              <div class="laue-canvas-inner" id="laue-canvas-inner">
+                <canvas id="laue-canvas"></canvas>
+              </div>
+            </div>
+            <div class="laue-zoom-rect" id="laue-zoom-rect" hidden></div>
+          </div>
+          <div class="laue-colorbar-column">
+            <span class="laue-colorbar-label" id="laue-colorbar-max"></span>
+            <canvas id="laue-colorbar" class="laue-colorbar" width="28" height="220" aria-label="Intensity colorbar"></canvas>
+            <span class="laue-colorbar-label" id="laue-colorbar-min"></span>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <p class="back-link-panel"><a href="../tools.html">← Back to tools</a></p>
+  </main>
+
+  <footer>
+    © <span id="year"></span> Paul M. Neves. All rights reserved.
+  </footer>
+
+  <script src="../js/site.js"></script>
+  <script src="../js/cif-parser.js"></script>
+  <script src="../js/crystal-presets.js"></script>
+  <script src="../js/scattering-extinctions.js"></script>
+  <script src="../js/laue-math.js"></script>
+  <script src="../js/laue-formats.js"></script>
+  <script src="../js/laue-analysis.js"></script>
+</body>
+</html>

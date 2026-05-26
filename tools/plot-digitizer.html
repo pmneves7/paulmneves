@@ -117,6 +117,10 @@
             <button type="button" class="digitizer-mode-btn" data-mode="y2">Set Y₂</button>
             <button type="button" class="digitizer-mode-btn" data-mode="x1">Set X₁</button>
             <button type="button" class="digitizer-mode-btn" data-mode="x2">Set X₂</button>
+            <label class="digitizer-mode-link" title="Keep X₁ at the same pixel position as Y₁ (shared origin)">
+              <input type="checkbox" id="dig-link-origin" />
+              Link X₁ = Y₁
+            </label>
             <button type="button" class="digitizer-mode-btn" data-mode="add" disabled>Add points</button>
           </div>
         </div>
@@ -271,7 +275,6 @@
               <div class="digitizer-axis-actions">
                 <button type="button" class="tool-inline-button" id="dig-swap-y">Swap Y₁ ↔ Y₂</button>
                 <button type="button" class="tool-inline-button" id="dig-swap-x">Swap X₁ ↔ X₂</button>
-                <button type="button" class="tool-inline-button" id="dig-link-origin" title="Set X₁ to the same pixel position as Y₁ (or vice versa) for a shared origin">Link X₁ = Y₁</button>
               </div>
               <p class="tool-note digitizer-axis-actions-note">
                 Tip: left-click any marker or point to select it, then use the
