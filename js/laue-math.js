@@ -374,29 +374,29 @@
     const pxPerMmY = imageSize.height / detHeight;
     const beamCx = config.beamX;
     const beamCy = config.beamY;
-    const cx = beamCx + xLab * pxPerMmX;
-    const cy = beamCy + yLab * pxPerMmY;
 
-    if (config.patternRotation) {
-      const rad = degToRad(config.patternRotation);
-      const dx = cx - beamCx;
-      const dy = cy - beamCy;
+    let xLabRot = xLab;
+    let yLabRot = yLab;
+    const rotDeg = config.patternRotation || 0;
+    if (Math.abs(rotDeg) > 1e-12) {
+      const rad = degToRad(rotDeg);
       const cosR = Math.cos(rad);
       const sinR = Math.sin(rad);
-      return {
-        x: beamCx + dx * cosR - dy * sinR,
-        y: beamCy + dx * sinR + dy * cosR,
-        q: qMag,
-        lambda,
-        xLab,
-        yLab
-      };
+      xLabRot = xLab * cosR - yLab * sinR;
+      yLabRot = xLab * sinR + yLab * cosR;
     }
 
-    return { x: cx, y: cy, q: qMag, lambda, xLab, yLab };
+    const cx = beamCx + xLabRot * pxPerMmX;
+    const cy = beamCy + yLabRot * pxPerMmY;
+
+    return { x: cx, y: cy, q: qMag, lambda, xLab: xLabRot, yLab: yLabRot };
   }
 
   function computePredictedPeaks(params, config, imageSize, isAllowed) {
+    if (imageSize) syncBeamFromOffsets(config, imageSize);
+    const imageMargin = imageSize
+      ? Math.max(8, 0.02 * Math.min(imageSize.width, imageSize.height))
+      : 0;
     const ub = ubMatrix(
       params,
       config.sampleOmega,
@@ -422,7 +422,7 @@
         y: proj.y,
         xLab: proj.xLab,
         yLab: proj.yLab,
-        onImage: peakOnImage(proj.x, proj.y, imageSize)
+        onImage: peakOnImage(proj.x, proj.y, imageSize, imageMargin)
       });
     }
     return peaks;

@@ -1021,7 +1021,6 @@
       setOverlayStroke(overlayCtx, overlay.predColor, predA);
       overlayCtx.lineWidth = overlay.predLineWidth ?? 2;
       for (const p of state.predictedPeaks) {
-        if (!p.onImage) continue;
         const pos = imageToViewport(p.x, p.y);
         overlayCtx.beginPath();
         overlayCtx.arc(pos.x, pos.y, overlay.predRadius, 0, Math.PI * 2);
@@ -1524,7 +1523,6 @@
   function findNearestPredictedPeak(x, y) {
     let best = null;
     for (const p of state.predictedPeaks) {
-      if (!p.onImage) continue;
       const d = Math.hypot(p.x - x, p.y - y);
       if (!best || d < best.d) best = { peak: p, d };
     }
