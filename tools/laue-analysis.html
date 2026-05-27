@@ -12,7 +12,7 @@
   <link rel="icon" type="image/png" href="../media/favicon.png" />
   <link rel="stylesheet" href="../css/site.css" />
 </head>
-<body>
+<body class="laue-page">
   <header>
     <nav aria-label="Main navigation">
       <a class="site-title" href="../index.html">Paul M. Neves</a>
@@ -33,7 +33,7 @@
       <h1>Laue analysis</h1>
       <p class="lead">
         Index x-ray and neutron Laue patterns from area-detector images. Import crystal parameters
-        from a CIF or manual entry, load detector images (PNG, NorthStar .hs2, or NeXus .nxs),
+        from a CIF or manual entry, load detector images (PNG, NorthStar .hs2, or NeXus/HDF5),
         overlay predicted reflections, auto-detect peaks, and refine orientation.
       </p>
       <p class="tool-disclaimer">
@@ -91,12 +91,6 @@
               <label for="laue-spacegroup">Space group</label>
               <input type="text" id="laue-spacegroup" value="Fd-3m" placeholder="symbol or IT number" />
             </div>
-            <div class="tool-field tool-field-checkbox">
-              <label for="laue-diamond-basis">
-                <input type="checkbox" id="laue-diamond-basis" checked />
-                Diamond Si/Ge basis extinctions
-              </label>
-            </div>
           </form>
         </section>
 
@@ -104,11 +98,11 @@
           <h2>2. Laue image</h2>
           <p class="tool-note">
             Upload a standard image, paste from the clipboard (<kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>V</kbd>),
-            or load a NorthStar <code>.hs2</code> or NeXus <code>.nxs</code> file.
+            or load a NorthStar <code>.hs2</code> or NeXus/HDF5 file (<code>.nxs</code>, <code>.h5</code>, <code>.hdf5</code>, <code>.nexus</code>).
           </p>
           <div class="laue-loader">
             <button type="button" class="button secondary" id="laue-upload-btn">Choose file…</button>
-            <input type="file" id="laue-file-input" accept="image/*,.hs2,.nxs" hidden />
+            <input type="file" id="laue-file-input" accept="image/*,.hs2,.nxs,.nexus,.h5,.hdf5,.nxs.ngv" hidden />
             <button type="button" class="button secondary" id="laue-example-btn">Load example PNG</button>
           </div>
           <p class="tool-note laue-load-error" id="laue-load-error" hidden></p>
@@ -143,34 +137,33 @@
             <label><input type="checkbox" id="laue-reverse-colormap" checked /> Reverse colorscale (visual only)</label>
             <label><input type="checkbox" id="laue-invert-intensity" /> Invert intensity values (flip stored counts)</label>
           </div>
-          <div class="laue-curve-row">
-            <div>
-              <p class="tool-note">Intensity curve — drag control points; click to add; right-click to remove. Two points form a line; additional points use smooth splines. End segments extend linearly.</p>
-              <canvas id="laue-curve-canvas" class="laue-curve-canvas" aria-label="Intensity transfer curve"></canvas>
-              <button type="button" class="button secondary" id="laue-curve-reset">Reset curve</button>
-            </div>
-            <div class="laue-transform-column">
-              <div class="laue-transform-btns">
-                <button type="button" class="button secondary" id="laue-rotate-cw">Rotate 90° CW</button>
-                <button type="button" class="button secondary" id="laue-flip-h">Flip horizontal</button>
-                <button type="button" class="button secondary" id="laue-flip-v">Flip vertical</button>
-              </div>
-              <h3 class="laue-subheading">Fix datafile convention on load</h3>
-              <p class="tool-note">Apply when the raw array is stored in a different row/column order.</p>
-              <div class="laue-check-row laue-load-convention-row">
-                <label><input type="checkbox" id="laue-auto-flip-h" /> Flip horizontal on load</label>
-                <label><input type="checkbox" id="laue-auto-flip-v" /> Flip vertical on load</label>
-                <label>
-                  Rotate on load
-                  <select id="laue-auto-rotate">
-                    <option value="0">0°</option>
-                    <option value="1">90° CW</option>
-                    <option value="2">180°</option>
-                    <option value="3">270° CW</option>
-                  </select>
-                </label>
-              </div>
-            </div>
+
+          <h3 class="laue-subheading">Intensity curve</h3>
+          <p class="tool-note">Drag control points; click to add; right-click to remove. Two points form a line; additional points use smooth splines. End segments extend linearly.</p>
+          <div class="laue-curve-block">
+            <canvas id="laue-curve-canvas" class="laue-curve-canvas" aria-label="Intensity transfer curve"></canvas>
+            <button type="button" class="button secondary" id="laue-curve-reset">Reset curve</button>
+          </div>
+
+          <div class="laue-transform-btns">
+            <button type="button" class="button secondary" id="laue-rotate-cw">Rotate 90° CW</button>
+            <button type="button" class="button secondary" id="laue-flip-h">Flip horizontal</button>
+            <button type="button" class="button secondary" id="laue-flip-v">Flip vertical</button>
+          </div>
+          <h3 class="laue-subheading">Fix datafile convention on load</h3>
+          <p class="tool-note">Apply when the raw array is stored in a different row/column order.</p>
+          <div class="laue-check-row laue-load-convention-row">
+            <label><input type="checkbox" id="laue-auto-flip-h" /> Flip horizontal on load</label>
+            <label><input type="checkbox" id="laue-auto-flip-v" /> Flip vertical on load</label>
+            <label>
+              Rotate on load
+              <select id="laue-auto-rotate">
+                <option value="0">0°</option>
+                <option value="1">90° CW</option>
+                <option value="2">180°</option>
+                <option value="3">270° CW</option>
+              </select>
+            </label>
           </div>
 
           <h3 class="laue-subheading">Data corrections</h3>
@@ -273,7 +266,7 @@
               </div>
               <div class="tool-field">
                 <label for="laue-max-hkl-sq">Max h²+k²+l²</label>
-                <input type="number" id="laue-max-hkl-sq" step="1" min="1" value="25" />
+                <input type="number" id="laue-max-hkl-sq" step="1" min="1" value="200" />
               </div>
               <div class="tool-field">
                 <label for="laue-q-min">Q min (Å⁻¹)</label>
@@ -369,7 +362,11 @@
             </div>
             <div class="tool-field">
               <label for="laue-peak-min-radius">Min peak radius (px)</label>
-              <input type="number" id="laue-peak-min-radius" step="1" min="1" value="3" />
+              <input type="number" id="laue-peak-min-radius" step="1" min="1" value="10" />
+            </div>
+            <div class="tool-field">
+              <label for="laue-match-radius">Match radius (px)</label>
+              <input type="number" id="laue-match-radius" step="1" min="1" value="25" />
             </div>
           </div>
           <div class="laue-action-row">
@@ -381,7 +378,7 @@
 
         <section class="tool-section">
           <h3 class="laue-subheading">Orientation refinement</h3>
-          <p class="tool-note">Least-squares fit of observed peak positions. Default: sample Ω, χ, Φ only.</p>
+          <p class="tool-note">Local least-squares fit from the current approximate orientation. Auto-detect, match peaks, then refine sample/detector parameters.</p>
           <div class="laue-check-row">
             <label><input type="checkbox" id="laue-refine-omega" checked /> Sample Ω</label>
             <label><input type="checkbox" id="laue-refine-chi" checked /> Sample χ</label>
@@ -441,19 +438,15 @@
       <aside class="laue-viewer-panel" aria-label="Laue image viewer">
         <div class="laue-mode-bar" role="toolbar" aria-label="Canvas interaction modes">
           <button type="button" class="laue-mode-btn active" data-mode="view">View</button>
-          <button type="button" class="laue-mode-btn" data-mode="zoom-area">Zoom area</button>
-          <button type="button" class="laue-mode-btn" data-mode="beam">Beam center</button>
+          <button type="button" class="laue-mode-btn" data-mode="zoom-area">Zoom</button>
+          <button type="button" class="laue-mode-btn" data-mode="pan-view">Pan view</button>
+          <button type="button" class="laue-mode-btn laue-mode-action" id="laue-zoom-reset">Reset zoom</button>
+          <button type="button" class="laue-mode-btn" data-mode="beam">Move beam center</button>
           <button type="button" class="laue-mode-btn" data-mode="pan-orientation">Pan orientation</button>
           <button type="button" class="laue-mode-btn" data-mode="rotate-pattern">Rotate pattern</button>
           <button type="button" class="laue-mode-btn" data-mode="add-peak">Add peak</button>
           <button type="button" class="laue-mode-btn" data-mode="move-peak">Move peak</button>
           <button type="button" class="laue-mode-btn" data-mode="remove-peak">Remove peak</button>
-        </div>
-        <div class="laue-zoom-bar">
-          <button type="button" class="button secondary laue-zoom-btn" id="laue-zoom-out" title="Zoom out">−</button>
-          <span class="laue-zoom-label" id="laue-zoom-label">100%</span>
-          <button type="button" class="button secondary laue-zoom-btn" id="laue-zoom-in" title="Zoom in">+</button>
-          <button type="button" class="button secondary" id="laue-zoom-reset">Reset zoom</button>
         </div>
         <div class="laue-status-slot">
           <p class="laue-status" id="laue-status" aria-live="polite"></p>

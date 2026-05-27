@@ -104,12 +104,6 @@
                 <option value="reverse">Reverse (h − k + l = 3n)</option>
               </select>
             </div>
-            <div class="tool-field tool-field-checkbox">
-              <label for="diamond-basis-extinctions">
-                <input type="checkbox" id="diamond-basis-extinctions" />
-                Diamond Si/Ge basis extinctions
-              </label>
-            </div>
             <div class="tool-field">
               <label for="wavelength">Wavelength (Å)</label>
               <input type="number" id="wavelength" step="any" min="0" value="1.54" required />
@@ -221,7 +215,8 @@
     const crystalPresetSelect = document.getElementById("crystal-preset");
     const extinctionRulesEl = document.getElementById("extinction-rules");
     const rhombohedralSettingEl = document.getElementById("rhombohedral-setting");
-    const diamondBasisEl = document.getElementById("diamond-basis-extinctions");
+
+    const crystalMeta = { presetId: "", structureModel: "", chemicalFormula: "" };
 
     if (crystalPresetSelect && typeof populateCrystalPresetSelect === "function") {
       populateCrystalPresetSelect(crystalPresetSelect);
@@ -234,12 +229,27 @@
       alpha: document.getElementById("alpha"),
       beta: document.getElementById("beta"),
       gamma: document.getElementById("gamma"),
-      spaceGroup: document.getElementById("spacegroup"),
-      diamondBasis: diamondBasisEl
+      spaceGroup: document.getElementById("spacegroup")
     };
+
+    function readCrystalForExtinctions(spaceGroup) {
+      return {
+        spaceGroup: spaceGroup || document.getElementById("spacegroup").value || "P",
+        presetId: crystalMeta.presetId,
+        structureModel: crystalMeta.structureModel,
+        chemicalFormula: crystalMeta.chemicalFormula
+      };
+    }
+
+    function setCrystalMeta(meta) {
+      crystalMeta.presetId = meta.presetId || "";
+      crystalMeta.structureModel = meta.structureModel || "";
+      crystalMeta.chemicalFormula = meta.chemicalFormula || "";
+    }
 
     function resetCrystalPresetSelect() {
       if (crystalPresetSelect) crystalPresetSelect.value = "";
+      setCrystalMeta({ chemicalFormula: crystalMeta.chemicalFormula });
     }
 
     if (crystalPresetSelect) {
@@ -250,6 +260,11 @@
         if (!preset) return;
 
         applyCrystalPresetToFields(preset, latticeFieldMap);
+        setCrystalMeta({
+          presetId: preset.id,
+          structureModel: preset.structureModel || "",
+          chemicalFormula: ""
+        });
 
         try {
           renderPeaks(calculatePeaks());
@@ -269,18 +284,15 @@
       const setting = rhombohedralSettingEl ? rhombohedralSettingEl.value : "auto";
       const override = setting === "auto" ? undefined : setting;
       if (typeof resolveExtinctionContext === "function") {
-        return resolveExtinctionContext(spaceGroup, {
-          rhombohedralSetting: override,
-          applyDiamondBasis: diamondBasisEl ? diamondBasisEl.checked : false
-        });
+        return resolveExtinctionContext(spaceGroup, { rhombohedralSetting: override });
       }
-      return { rules: [], rhombohedralSetting: "obverse", centering: "P", applyDiamondBasis: false };
+      return { rules: [], rhombohedralSetting: "obverse", centering: "P" };
     }
 
-    function renderExtinctionRules(context) {
+    function renderExtinctionRules(context, crystal) {
       if (!extinctionRulesEl) return;
       const lines = typeof describeExtinctionRules === "function"
-        ? describeExtinctionRules(context)
+        ? describeExtinctionRules(context, crystal)
         : ["Extinction module failed to load."];
       const items = lines.slice(1);
       extinctionRulesEl.innerHTML = items.length
@@ -288,8 +300,11 @@
         : "<li>No extinction rules inferred.</li>";
     }
 
-    function isAllowedBySpaceGroup(h, k, l, context) {
-      if (typeof isReflectionAllowed === "function") {
+    function isAllowedBySpaceGroup(h, k, l, context, crystal) {
+      if (typeof isReflectionAllowedWithCrystal === "function") {
+        return isReflectionAllowedWithCrystal(h, k, l, crystal, context);
+      }
+      if (typeof isReflectionAllowed === "function" && context) {
         return isReflectionAllowed(h, k, l, context);
       }
       if (h === 0 && k === 0 && l === 0) return false;
@@ -495,8 +510,9 @@
 
     function calculatePeaks() {
       const inputs = collectInputs();
+      const crystal = readCrystalForExtinctions(inputs.spaceGroup);
       const extinctionContext = getExtinctionContext(inputs.spaceGroup);
-      renderExtinctionRules(extinctionContext);
+      renderExtinctionRules(extinctionContext, crystal);
       const basis = makeReciprocalBasis(inputs);
       const plane = makePlane(basis);
       const peaks = [];
@@ -504,7 +520,7 @@
       for (let h = -inputs.maxIndex; h <= inputs.maxIndex; h += 1) {
         for (let k = -inputs.maxIndex; k <= inputs.maxIndex; k += 1) {
           for (let l = -inputs.maxIndex; l <= inputs.maxIndex; l += 1) {
-            if (!isAllowedBySpaceGroup(h, k, l, extinctionContext)) continue;
+            if (!isAllowedBySpaceGroup(h, k, l, extinctionContext, crystal)) continue;
 
             const gVector = reciprocalVector([h, k, l], basis);
             const gLength = norm(gVector);
@@ -699,14 +715,19 @@
         spaceGroupField.value = data.spaceGroupName;
       }
 
+      setCrystalMeta({
+        presetId: "",
+        structureModel: "",
+        chemicalFormula: data.chemicalFormula || ""
+      });
+      if (crystalPresetSelect) crystalPresetSelect.value = "";
+
       try {
         renderPeaks(calculatePeaks());
       } catch (error) {
         peakTable.innerHTML = `<tr><td colspan="7">${error.message}</td></tr>`;
         resultSummary.textContent = "Please fix the highlighted inputs and try again.";
       }
-
-      resetCrystalPresetSelect();
     }
 
     if (cifLoadButton && cifFileInput) {
@@ -736,17 +757,6 @@
 
     if (rhombohedralSettingEl) {
       rhombohedralSettingEl.addEventListener("change", () => {
-        try {
-          renderPeaks(calculatePeaks());
-        } catch (error) {
-          peakTable.innerHTML = `<tr><td colspan="7">${error.message}</td></tr>`;
-          resultSummary.textContent = "Please fix the highlighted inputs and try again.";
-        }
-      });
-    }
-
-    if (diamondBasisEl) {
-      diamondBasisEl.addEventListener("change", () => {
         try {
           renderPeaks(calculatePeaks());
         } catch (error) {

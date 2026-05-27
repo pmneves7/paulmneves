@@ -469,22 +469,37 @@
     return cfg;
   }
 
-  function matchResidualRms(params, cfg, imageSize, obs, isAllowed) {
+  const MISSING_REFLECTION_PENALTY_PX = 1000;
+
+  function matchResidualStats(params, cfg, imageSize, obs, isAllowed) {
     const predicted = computePredictedPeaks(params, cfg, imageSize, isAllowed);
     const predMap = new Map(predicted.map((p) => [`${p.h},${p.k},${p.l}`, p]));
+    const penaltySq = MISSING_REFLECTION_PENALTY_PX * MISSING_REFLECTION_PENALTY_PX;
     let sumSq = 0;
     let count = 0;
+    let missing = 0;
+
     for (const obsPeak of obs) {
       const key = `${obsPeak.matchedH},${obsPeak.matchedK},${obsPeak.matchedL}`;
       const pred = predMap.get(key);
-      if (!pred) continue;
+      if (!pred) {
+        missing += 1;
+        sumSq += penaltySq;
+        count += 2;
+        continue;
+      }
       const rx = pred.x - obsPeak.x;
       const ry = pred.y - obsPeak.y;
       sumSq += rx * rx + ry * ry;
       count += 2;
     }
-    if (!count) return null;
-    return Math.sqrt(sumSq / count);
+
+    if (!count) return { rms: null, missing: obs.length };
+    return { rms: Math.sqrt(sumSq / count), missing };
+  }
+
+  function matchResidualRms(params, cfg, imageSize, obs, isAllowed) {
+    return matchResidualStats(params, cfg, imageSize, obs, isAllowed).rms;
   }
 
   function copyConfig(cfg) {
@@ -512,7 +527,9 @@
       return { config: cfg0, rms: null, iterations: 0, improved: false };
     }
 
-    const initialRms = matchResidualRms(params, cfg0, imageSize, obs, isAllowed);
+    const initialStats = matchResidualStats(params, cfg0, imageSize, obs, isAllowed);
+    const initialRms = initialStats.rms;
+    const initialMissing = initialStats.missing;
     if (initialRms == null) {
       return { config: cfg0, rms: null, iterations: 0, improved: false };
     }
@@ -520,6 +537,7 @@
     let cfg = copyConfig(cfg0);
     let bestCfg = copyConfig(cfg0);
     let bestRms = initialRms;
+    let bestMissing = initialMissing;
     let rms = initialRms;
     let lambda = 0.01;
     let iterations = 0;
@@ -573,9 +591,8 @@
 
       if (residuals.length < paramKeys.length) break;
 
-      let sumSq = 0;
-      for (const r of residuals) sumSq += r * r;
-      rms = Math.sqrt(sumSq / residuals.length);
+      const iterStats = matchResidualStats(params, cfg, imageSize, obs, isAllowed);
+      rms = iterStats.rms;
 
       const nParams = paramKeys.length;
       const nRes = residuals.length;
@@ -607,17 +624,20 @@
           const key = paramKeys[i];
           const meta = refinementParamMeta(key, trial);
           const step = clamp(delta[i] * scale, -meta.stepMax, meta.stepMax);
-          trial[key] -= step;
+          trial[key] += step;
         }
         clampRefinementConfig(trial, paramKeys, imageSize);
-        const trialRms = matchResidualRms(params, trial, imageSize, obs, isAllowed);
-        if (trialRms != null && trialRms < rms) {
+        const trialStats = matchResidualStats(params, trial, imageSize, obs, isAllowed);
+        if (trialStats.rms != null
+          && trialStats.missing <= iterStats.missing
+          && trialStats.rms < rms) {
           cfg = trial;
-          rms = trialRms;
+          rms = trialStats.rms;
           accepted = true;
           lambda = Math.max(lambda * 0.3, 1e-4);
-          if (rms < bestRms) {
+          if (rms < bestRms || (Math.abs(rms - bestRms) < 1e-6 && trialStats.missing < bestMissing)) {
             bestRms = rms;
+            bestMissing = trialStats.missing;
             bestCfg = copyConfig(cfg);
           }
           break;
@@ -637,7 +657,7 @@
       if (maxStep < 1e-4) break;
     }
 
-    const improved = bestRms < initialRms - 1e-6;
+    const improved = bestRms < initialRms - 1e-6 && bestMissing <= initialMissing;
     const stable = Number.isFinite(bestRms) && bestRms < initialRms * 5 && bestRms < 500;
     return {
       config: stable ? bestCfg : cfg0,
@@ -769,37 +789,163 @@
     };
   }
 
-  function autoDetectPeaks(intensities, width, height, threshold, minRadius) {
+  function autoDetectPeaks(intensities, width, height, threshold, minRadius, options) {
+    const opts = {
+      minPixels: Math.max(4, Math.round(Math.PI * Math.max(1, minRadius) ** 2 * 0.35)),
+      minSigmaPx: Math.max(0.6, minRadius * 0.25),
+      maxSigmaPx: Math.max(3, minRadius * 4),
+      minIntegratedSignal: 0,
+      beamX: width / 2,
+      beamY: height / 2,
+      ...options
+    };
+
+    const visited = new Uint8Array(width * height);
     const peaks = [];
-    const r = Math.max(1, Math.round(minRadius));
-    const rSq = r * r;
+    const neighbors = [
+      [-1, -1], [0, -1], [1, -1],
+      [-1, 0], [1, 0],
+      [-1, 1], [0, 1], [1, 1]
+    ];
 
-    for (let y = r; y < height - r; y += 1) {
-      for (let x = r; x < width - r; x += 1) {
-        const idx = y * width + x;
-        const val = intensities[idx];
-        if (val < threshold) continue;
+    function idx(x, y) {
+      return y * width + x;
+    }
 
-        let isMax = true;
-        for (let dy = -r; dy <= r && isMax; dy += 1) {
-          for (let dx = -r; dx <= r; dx += 1) {
-            if (dx * dx + dy * dy > rSq) continue;
-            if (dx === 0 && dy === 0) continue;
-            const nIdx = (y + dy) * width + (x + dx);
-            if (intensities[nIdx] > val) {
-              isMax = false;
-              break;
+    for (let y0 = 0; y0 < height; y0 += 1) {
+      for (let x0 = 0; x0 < width; x0 += 1) {
+        const start = idx(x0, y0);
+        if (visited[start] || intensities[start] < threshold) continue;
+
+        const stack = [[x0, y0]];
+        visited[start] = 1;
+
+        const pixels = [];
+        let maxVal = -Infinity;
+        let maxX = x0;
+        let maxY = y0;
+
+        while (stack.length) {
+          const [x, y] = stack.pop();
+          const i = idx(x, y);
+          const val = intensities[i];
+
+          pixels.push([x, y, val]);
+
+          if (val > maxVal) {
+            maxVal = val;
+            maxX = x;
+            maxY = y;
+          }
+
+          for (const [dx, dy] of neighbors) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+
+            const ni = idx(nx, ny);
+            if (visited[ni]) continue;
+
+            visited[ni] = 1;
+            if (intensities[ni] >= threshold) {
+              stack.push([nx, ny]);
             }
           }
         }
-        if (isMax) peaks.push({ x, y, intensity: val, id: peaks.length });
+
+        if (pixels.length < opts.minPixels) continue;
+
+        let wSum = 0;
+        let xSum = 0;
+        let ySum = 0;
+        let signalSum = 0;
+
+        for (const [x, y, val] of pixels) {
+          const w = Math.max(0, val - threshold);
+          wSum += w;
+          xSum += w * x;
+          ySum += w * y;
+          signalSum += w;
+        }
+
+        if (wSum <= 0 || signalSum < opts.minIntegratedSignal) continue;
+
+        const cx = xSum / wSum;
+        const cy = ySum / wSum;
+
+        let mxx = 0;
+        let myy = 0;
+        let mxy = 0;
+
+        for (const [x, y, val] of pixels) {
+          const w = Math.max(0, val - threshold);
+          const dx = x - cx;
+          const dy = y - cy;
+          mxx += w * dx * dx;
+          myy += w * dy * dy;
+          mxy += w * dx * dy;
+        }
+
+        mxx /= wSum;
+        myy /= wSum;
+        mxy /= wSum;
+
+        const trace = mxx + myy;
+        const detTerm = Math.sqrt(Math.max(0, (mxx - myy) ** 2 + 4 * mxy * mxy));
+        const lambda1 = Math.max(0, 0.5 * (trace + detTerm));
+        const lambda2 = Math.max(0, 0.5 * (trace - detTerm));
+
+        const sigmaMajor = Math.sqrt(lambda1);
+        const sigmaMinor = Math.sqrt(lambda2);
+
+        if (sigmaMajor < opts.minSigmaPx || sigmaMinor < opts.minSigmaPx * 0.35) continue;
+        if (sigmaMajor > opts.maxSigmaPx) continue;
+
+        const bx = opts.beamX;
+        const by = opts.beamY;
+        const rx = cx - bx;
+        const ry = cy - by;
+        const rr = Math.hypot(rx, ry);
+
+        let sigmaRadial = sigmaMajor;
+        let sigmaTransverse = sigmaMinor;
+
+        if (rr > 1e-6) {
+          const erx = rx / rr;
+          const ery = ry / rr;
+          const etx = -ery;
+          const ety = erx;
+
+          const varRadial = erx * erx * mxx + 2 * erx * ery * mxy + ery * ery * myy;
+          const varTransverse = etx * etx * mxx + 2 * etx * ety * mxy + ety * ety * myy;
+
+          sigmaRadial = Math.sqrt(Math.max(0, varRadial));
+          sigmaTransverse = Math.sqrt(Math.max(0, varTransverse));
+        }
+
+        peaks.push({
+          x: cx,
+          y: cy,
+          maxX,
+          maxY,
+          intensity: maxVal,
+          integratedIntensity: signalSum,
+          areaPixels: pixels.length,
+          sigmaMajor,
+          sigmaMinor,
+          sigmaRadial,
+          sigmaTransverse,
+          id: peaks.length
+        });
       }
     }
 
-    peaks.sort((a, b) => b.intensity - a.intensity);
-    const minSep = r * 2;
+    peaks.sort((a, b) => b.integratedIntensity - a.integratedIntensity);
+
+    const minSep = Math.max(2, minRadius * 1.5);
     const minSepSq = minSep * minSep;
     const filtered = [];
+
     for (const peak of peaks) {
       let tooClose = false;
       for (const kept of filtered) {
@@ -810,15 +956,27 @@
           break;
         }
       }
-      if (!tooClose) filtered.push(peak);
+      if (!tooClose) {
+        peak.id = filtered.length;
+        filtered.push(peak);
+      }
     }
+
     return filtered;
   }
 
   function matchObservedToPredicted(observed, predicted, maxDistPx) {
     const maxDistSq = maxDistPx * maxDistPx;
     const used = new Set();
-    const matched = observed.map((obs) => ({ ...obs }));
+
+    const matched = observed.map((obs) => {
+      const clean = { ...obs };
+      delete clean.matchedH;
+      delete clean.matchedK;
+      delete clean.matchedL;
+      delete clean.matchDist;
+      return clean;
+    });
 
     for (const obs of matched) {
       let best = null;

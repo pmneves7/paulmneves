@@ -15,7 +15,6 @@
   const viewerPlaceholder = document.getElementById("laue-viewer-placeholder");
   const colorbarMaxEl = document.getElementById("laue-colorbar-max");
   const colorbarMinEl = document.getElementById("laue-colorbar-min");
-  const zoomLabel = document.getElementById("laue-zoom-label");
   const statusEl = document.getElementById("laue-status");
   const loadError = document.getElementById("laue-load-error");
   const peaksTbody = document.getElementById("laue-peaks-tbody");
@@ -63,6 +62,7 @@
       showObservedLabels: true
     },
     crystal: { a: 5.43, b: 5.43, c: 5.43, alpha: 90, beta: 90, gamma: 90, spaceGroup: "Fd-3m" },
+    crystalMeta: { presetId: "si-diamond", structureModel: "diamond", chemicalFormula: "" },
     instrument: {
       detDistance: 150,
       detWidth: 256,
@@ -86,12 +86,13 @@
       beamX: null,
       beamY: null,
       beamRadius: 30,
-      maxHklSq: 25,
+      maxHklSq: 200,
       qMin: 0,
       qMax: 10,
       patternRotation: 0,
       peakThreshold: 500,
-      peakMinRadius: 3
+      peakMinRadius: 10,
+      peakMatchRadius: 25
     },
     predictedPeaks: [],
     observedPeaks: [],
@@ -127,8 +128,24 @@
       beta: num("laue-beta"),
       gamma: num("laue-gamma"),
       spaceGroup: document.getElementById("laue-spacegroup").value.trim(),
-      diamondBasis: document.getElementById("laue-diamond-basis").checked
+      presetId: state.crystalMeta.presetId || "",
+      structureModel: state.crystalMeta.structureModel || "",
+      chemicalFormula: state.crystalMeta.chemicalFormula || ""
     };
+  }
+
+  function setCrystalMeta(meta) {
+    state.crystalMeta = {
+      presetId: meta.presetId || "",
+      structureModel: meta.structureModel || "",
+      chemicalFormula: meta.chemicalFormula || ""
+    };
+  }
+
+  function clearCrystalPresetMeta() {
+    setCrystalMeta({ chemicalFormula: state.crystalMeta.chemicalFormula });
+    const presetSelect = document.getElementById("crystal-preset");
+    if (presetSelect) presetSelect.value = "";
   }
 
   function readInstrument() {
@@ -158,6 +175,7 @@
     inst.patternRotation = num("laue-pattern-rotation");
     inst.peakThreshold = num("laue-peak-threshold");
     inst.peakMinRadius = num("laue-peak-min-radius");
+    inst.peakMatchRadius = num("laue-match-radius");
     if (state.instrument.beamX != null) {
       inst.beamX = state.instrument.beamX;
       inst.beamY = state.instrument.beamY;
@@ -190,7 +208,8 @@
       "laue-q-max": inst.qMax,
       "laue-pattern-rotation": inst.patternRotation,
       "laue-peak-threshold": inst.peakThreshold,
-      "laue-peak-min-radius": inst.peakMinRadius
+      "laue-peak-min-radius": inst.peakMinRadius,
+      "laue-match-radius": inst.peakMatchRadius
     };
     for (const [id, val] of Object.entries(fields)) {
       const el = document.getElementById(id);
@@ -211,19 +230,24 @@
   function extinctionContext() {
     if (!window.resolveExtinctionContext) return null;
     try {
-      const crystal = readCrystal();
-      return resolveExtinctionContext(crystal.spaceGroup, {
-        applyDiamondBasis: crystal.diamondBasis
-      });
+      return resolveExtinctionContext(readCrystal().spaceGroup);
     } catch (_) {
       return null;
     }
   }
 
   function isAllowed(h, k, l) {
+    const crystal = readCrystal();
     const ctx = extinctionContext();
-    if (!ctx || !window.isReflectionAllowed) return true;
-    return isReflectionAllowed(h, k, l, ctx);
+    if (typeof isReflectionAllowedWithCrystal === "function") {
+      return isReflectionAllowedWithCrystal(h, k, l, crystal, ctx);
+    }
+    if (ctx && window.isReflectionAllowed && !isReflectionAllowed(h, k, l, ctx)) return false;
+    if (window.hasDiamondBasisExtinctions && hasDiamondBasisExtinctions(crystal)) {
+      return window.diamondBasisAllowed(h, k, l);
+    }
+    if (h === 0 && k === 0 && l === 0) return false;
+    return true;
   }
 
   function buildConfig(inst) {
@@ -632,7 +656,6 @@
 
     canvasInner.style.transform = `translate(${tx}px, ${ty}px) scale(${total})`;
     canvasInner.style.transformOrigin = "0 0";
-    if (zoomLabel) zoomLabel.textContent = `${Math.round(state.view.zoom * 100)}%`;
     if (state.imageData) redraw();
   }
 
@@ -738,7 +761,18 @@
     try {
       state.rawData = await LaueFormats.loadLaueFile(file);
       await finishImageLoad(
-        () => `Loaded ${file.name} (${state.displayData.width}×${state.displayData.height}, ${state.rawData.source})`
+        () => {
+          let msg = `Loaded ${file.name} (${state.displayData.width}×${state.displayData.height}, ${state.rawData.source})`;
+          const diag = state.rawData.meta && state.rawData.meta.hs2Diagnostics;
+          if (diag) {
+            msg += ` — ${diag.fileSize} B, offset ${diag.offset}, ${diag.dtype} ${diag.endianness.slice(0, 2).toUpperCase()}, min/max ${diag.min}/${diag.max}`;
+          }
+          const nexusPath = state.rawData.meta && state.rawData.meta.nexusPath;
+          if (nexusPath) {
+            msg += ` — ${nexusPath}`;
+          }
+          return msg;
+        }
       );
     } catch (err) {
       showError(err.message || String(err));
@@ -913,9 +947,26 @@
   }
 
   function drawPeakIndexLabel(ctx2d, pos, h, k, l, alpha) {
+    const text = formatPeakIndexLabel(h, k, l);
+    const textX = pos.x + 6;
+    const textY = pos.y + 12;
+    const fontSize = 11;
+    const padX = 3;
+    const padY = 2;
+
+    ctx2d.font = `${fontSize}px sans-serif`;
+    const textWidth = ctx2d.measureText(text).width;
+    const boxX = textX - padX;
+    const boxY = textY - fontSize - padY;
+    const boxW = textWidth + padX * 2;
+    const boxH = fontSize + padY * 2;
+
+    ctx2d.globalAlpha = 0.5;
+    ctx2d.fillStyle = "rgb(0, 0, 0)";
+    ctx2d.fillRect(boxX, boxY, boxW, boxH);
+
     setOverlayFill(ctx2d, "#ffffff", alpha);
-    ctx2d.font = "11px sans-serif";
-    ctx2d.fillText(formatPeakIndexLabel(h, k, l), pos.x + 6, pos.y + 12);
+    ctx2d.fillText(text, textX, textY);
   }
 
   function setOverlayFill(ctx2d, hex, alpha) {
@@ -1199,6 +1250,7 @@
   function saveConfigToObject() {
     return {
       crystal: readCrystal(),
+      crystalMeta: { ...state.crystalMeta },
       instrument: readInstrument(),
       transform: state.transform,
       display: readDisplaySettings(),
@@ -1215,14 +1267,19 @@
     if (!obj) return;
     if (obj.crystal) {
       for (const [key, val] of Object.entries(obj.crystal)) {
-        if (key === "diamondBasis") {
-          const el = document.getElementById("laue-diamond-basis");
-          if (el) el.checked = !!val;
-          continue;
-        }
+        if (key === "presetId" || key === "structureModel" || key === "chemicalFormula") continue;
         const el = document.getElementById(`laue-${key === "spaceGroup" ? "spacegroup" : key}`);
         if (el) el.value = val;
       }
+    }
+    if (obj.crystalMeta) {
+      setCrystalMeta(obj.crystalMeta);
+    } else if (obj.crystal) {
+      setCrystalMeta({
+        presetId: obj.crystal.presetId,
+        structureModel: obj.crystal.structureModel,
+        chemicalFormula: obj.crystal.chemicalFormula
+      });
     }
     if (obj.instrument) {
       writeInstrumentToForm(obj.instrument);
@@ -1284,21 +1341,48 @@
       maxI,
       display.invertIntensity
     );
+    const beam = beamCenterPosition();
     state.observedPeaks = LaueMath.autoDetectPeaks(
       intensities,
       state.displayData.width,
       state.displayData.height,
       inst.peakThreshold,
-      inst.peakMinRadius
+      inst.peakMinRadius,
+      {
+        beamX: beam.x,
+        beamY: beam.y
+      }
     );
     matchPeaks();
     redraw();
     setStatus(`Detected ${state.observedPeaks.length} peaks.`);
   }
 
+  const MIN_MATCHED_PEAKS_FOR_REFINE = 6;
+
+  function matchRadiusPx() {
+    const radius = num("laue-match-radius");
+    return radius > 0 ? radius : 25;
+  }
+
+  function countMatchedPeaks(peaks) {
+    return peaks.filter((p) => p.matchedH != null).length;
+  }
+
+  function matchPeaksStatusMessage() {
+    const radius = matchRadiusPx();
+    const matched = countMatchedPeaks(state.observedPeaks);
+    const total = state.observedPeaks.length;
+    return `Matched ${matched} / ${total} observed peaks within ${radius} px.`;
+  }
+
   function matchPeaks() {
-    const matched = LaueMath.matchObservedToPredicted(state.observedPeaks, state.predictedPeaks, 25);
-    state.observedPeaks = matched;
+    state.observedPeaks = LaueMath.matchObservedToPredicted(
+      state.observedPeaks,
+      state.predictedPeaks,
+      matchRadiusPx()
+    );
+    return matchPeaksStatusMessage();
   }
 
   function snapshotRefinementInstrument() {
@@ -1333,6 +1417,12 @@
       detChiMisalign: document.getElementById("laue-refine-det-chi").checked
     };
     matchPeaks();
+    const matchMsg = matchPeaksStatusMessage();
+    const matchedCount = countMatchedPeaks(state.observedPeaks);
+    if (matchedCount < MIN_MATCHED_PEAKS_FOR_REFINE) {
+      refineResult.textContent = `${matchMsg} Need at least ${MIN_MATCHED_PEAKS_FOR_REFINE} matched peaks to refine from the current approximate orientation.`;
+      return;
+    }
     const before = snapshotRefinementInstrument();
     const result = LaueMath.refineOrientation(
       readCrystal(),
@@ -1356,10 +1446,10 @@
       updatePredictions();
       persistConfig();
       const beforeTxt = result.initialRms != null ? ` (was ${result.initialRms.toFixed(2)} px)` : "";
-      refineResult.textContent = `RMS pixel residual: ${result.rms.toFixed(2)} px${beforeTxt}`;
+      refineResult.textContent = `${matchMsg} RMS pixel residual: ${result.rms.toFixed(2)} px${beforeTxt}`;
       return;
     }
-    refineResult.textContent = "Assign index matches to observed peaks first (auto-detect + match).";
+    refineResult.textContent = `${matchMsg} Assign index matches to observed peaks first (auto-detect + match).`;
   }
 
   function undoRefinement() {
@@ -1415,6 +1505,13 @@
     else if (Number.isInteger(data.spaceGroupNumber)) {
       document.getElementById("laue-spacegroup").value = String(data.spaceGroupNumber);
     }
+    setCrystalMeta({
+      presetId: "",
+      structureModel: "",
+      chemicalFormula: data.chemicalFormula || ""
+    });
+    const presetSelect = document.getElementById("crystal-preset");
+    if (presetSelect) presetSelect.value = "";
     const status = document.getElementById("cif-status");
     if (status) {
       status.textContent = describeCif(data);
@@ -1462,6 +1559,19 @@
       const vp = viewportPoint(event);
       state.drag = { type: "zoom-rect", x0: vp.x, y0: vp.y, x1: vp.x, y1: vp.y };
       showZoomRect(vp.x, vp.y, vp.x, vp.y);
+      return;
+    }
+
+    if (state.mode === "pan-view" && event.button === 0) {
+      const vp = viewportPoint(event);
+      state.drag = {
+        type: "pan-view",
+        startVx: vp.x,
+        startVy: vp.y,
+        startCenterX: state.view.centerX ?? canvas.width / 2,
+        startCenterY: state.view.centerY ?? canvas.height / 2
+      };
+      if (canvasViewport) canvasViewport.classList.add("laue-dragging");
       return;
     }
 
@@ -1548,6 +1658,16 @@
       showZoomRect(state.drag.x0, state.drag.y0, state.drag.x1, state.drag.y1);
       return;
     }
+    if (state.drag && state.drag.type === "pan-view") {
+      const vp = viewportPoint(event);
+      const total = state.view.totalScale || computeFitScale() * state.view.zoom;
+      const dvx = vp.x - state.drag.startVx;
+      const dvy = vp.y - state.drag.startVy;
+      state.view.centerX = state.drag.startCenterX - dvx / total;
+      state.view.centerY = state.drag.startCenterY - dvy / total;
+      applyViewTransform();
+      return;
+    }
     if (!state.drag) return;
     const pos = clientToImage(event);
 
@@ -1622,7 +1742,7 @@
       return;
     }
     if (state.drag) {
-      if (state.drag.type === "move-peak") {
+      if (state.drag.type === "move-peak" || state.drag.type === "pan-view") {
         clearObservedPeakSelection();
         if (canvasViewport) canvasViewport.classList.remove("laue-dragging");
       }
@@ -1640,7 +1760,7 @@
   }
 
   function setMode(mode) {
-    if (state.drag?.type === "move-peak") {
+    if (state.drag?.type === "move-peak" || state.drag?.type === "pan-view") {
       clearObservedPeakSelection();
       if (canvasViewport) canvasViewport.classList.remove("laue-dragging");
     }
@@ -1651,11 +1771,13 @@
     });
     if (canvasViewport) {
       canvasViewport.classList.toggle("laue-zoom-area-mode", mode === "zoom-area");
+      canvasViewport.classList.toggle("laue-pan-view-mode", mode === "pan-view");
       canvasViewport.classList.toggle("laue-move-peak-mode", mode === "move-peak");
     }
     setStatus({
       view: "View mode — scroll wheel to zoom; right-click resets zoom",
       "zoom-area": "Drag a rectangle to zoom; right-click resets zoom",
+      "pan-view": "Drag to pan the image view",
       beam: "Drag beam center; drag orange handle to scale circle",
       "pan-orientation": "Drag to pan — the point under the cursor stays under the cursor",
       "rotate-pattern": "Drag to rotate predicted pattern about beam center",
@@ -1729,8 +1851,6 @@
       document.getElementById(id).addEventListener("change", () => { readOverlaySettings(); redraw(); persistConfig(); });
     });
 
-    document.getElementById("laue-zoom-in").addEventListener("click", () => setZoom(state.view.zoom * 1.25));
-    document.getElementById("laue-zoom-out").addEventListener("click", () => setZoom(state.view.zoom / 1.25));
     document.getElementById("laue-zoom-reset").addEventListener("click", () => resetViewToFit());
 
     if (canvasViewport) {
@@ -1824,11 +1944,13 @@
     document.querySelectorAll("#laue-crystal-form input, #laue-instrument-form input, #laue-instrument-form select")
       .forEach((el) => {
         el.addEventListener("input", () => {
+          if (el.closest("#laue-crystal-form")) clearCrystalPresetMeta();
           if (el.id === "laue-det-offset-x" || el.id === "laue-det-offset-y") onBeamCenterChanged();
           else updatePredictions();
           persistConfig();
         });
         el.addEventListener("change", () => {
+          if (el.closest("#laue-crystal-form")) clearCrystalPresetMeta();
           if (el.id === "laue-auto-flip-h" || el.id === "laue-auto-flip-v" || el.id === "laue-auto-rotate") {
             reprocessImage();
           } else if (el.id === "laue-det-offset-x" || el.id === "laue-det-offset-y") {
@@ -1848,7 +1970,11 @@
     });
 
     document.getElementById("laue-auto-detect-btn").addEventListener("click", runAutoDetect);
-    document.getElementById("laue-match-btn").addEventListener("click", () => { matchPeaks(); redraw(); });
+    document.getElementById("laue-match-btn").addEventListener("click", () => {
+      matchPeaks();
+      redraw();
+      setStatus(matchPeaksStatusMessage());
+    });
     document.getElementById("laue-refine-btn").addEventListener("click", runRefinement);
     document.getElementById("laue-refine-undo-btn").addEventListener("click", undoRefinement);
     document.getElementById("laue-ideal-btn").addEventListener("click", runIdealOrientation);
@@ -1904,9 +2030,14 @@
           alpha: document.getElementById("laue-alpha"),
           beta: document.getElementById("laue-beta"),
           gamma: document.getElementById("laue-gamma"),
-          spaceGroup: document.getElementById("laue-spacegroup"),
-          diamondBasis: document.getElementById("laue-diamond-basis")
+          spaceGroup: document.getElementById("laue-spacegroup")
         });
+        setCrystalMeta({
+          presetId: preset.id,
+          structureModel: preset.structureModel || "",
+          chemicalFormula: ""
+        });
+        presetSelect.value = preset.id;
         if (preset.id === "si-diamond" || preset.id === "ge-diamond") {
           const crystal = readCrystal();
           const signs = {
@@ -1930,7 +2061,31 @@
     }
   }
 
+  function initLaueNavAutoHide() {
+    const toolsScroll = document.querySelector(".laue-tools-scroll");
+    let hidden = false;
+
+    function updateNavHidden() {
+      const winY = window.scrollY || document.documentElement.scrollTop || 0;
+      const toolsY = toolsScroll ? toolsScroll.scrollTop : 0;
+      const shouldHide = winY > 40 || toolsY > 40;
+      if (shouldHide === hidden) return;
+      hidden = shouldHide;
+      document.body.classList.toggle("laue-nav-hidden", hidden);
+      if (state.displayData) {
+        requestAnimationFrame(() => applyViewTransform());
+      }
+    }
+
+    window.addEventListener("scroll", updateNavHidden, { passive: true });
+    if (toolsScroll) {
+      toolsScroll.addEventListener("scroll", updateNavHidden, { passive: true });
+    }
+    updateNavHidden();
+  }
+
   bindEvents();
+  initLaueNavAutoHide();
   ensureCurveEndpoints();
   drawCurveEditor();
   restoreConfig();

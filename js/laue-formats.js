@@ -106,6 +106,7 @@
 
   function readHs2Image(view, offset, width, height) {
     const intensities = new Float32Array(width * height);
+    let minVal = Infinity;
     let maxVal = 0;
     for (let y = 0; y < height; y += 1) {
       for (let x = 0; x < width; x += 1) {
@@ -113,22 +114,40 @@
         const flatIndex = srcRow + x * height;
         const val = view.getUint16(offset + flatIndex * 2, true);
         intensities[y * width + x] = val;
+        if (val < minVal) minVal = val;
         if (val > maxVal) maxVal = val;
       }
     }
-    return { intensities, maxVal };
+    return { intensities, minVal: Number.isFinite(minVal) ? minVal : 0, maxVal };
   }
 
   function readHs2(buffer) {
-    const layout = detectHs2Layout(buffer.byteLength);
-    if (!layout) throw new Error("Unrecognized .hs2 file size.");
+    const fileSize = buffer.byteLength;
+    const layout = detectHs2Layout(fileSize);
+    if (!layout) {
+      throw new Error(
+        `Unrecognized .hs2 file size (${fileSize} bytes). `
+        + "Supported image sizes: 512×512 or 256×256 (16-bit unsigned, little-endian)."
+      );
+    }
 
     const offset = hs2ImageOffset(buffer, layout.width, layout.height);
     if (offset < 0) throw new Error("Could not locate image data in .hs2 file.");
 
     const view = new DataView(buffer);
-    const { intensities, maxVal } = readHs2Image(view, offset, layout.width, layout.height);
+    const { intensities, minVal, maxVal } = readHs2Image(view, offset, layout.width, layout.height);
     const meta = offset > 0 ? parseHs2Header(buffer, offset) : {};
+    meta.hs2Diagnostics = {
+      fileSize,
+      width: layout.width,
+      height: layout.height,
+      offset,
+      dtype: "uint16",
+      endianness: "little",
+      order: "column-major, vertically flipped",
+      min: minVal,
+      max: maxVal
+    };
     return {
       width: layout.width,
       height: layout.height,
@@ -157,95 +176,198 @@
     return meta;
   }
 
-  async function readNxs(file) {
-    if (!global.h5wasm) {
-      await loadH5Wasm();
+  const NEXUS_PRIORITY_PATHS = [
+    "entry0/data/CameraDetector_data",
+    "entry/data/data",
+    "entry/instrument/detector/data",
+    "entry/instrument/detector_MR/data"
+  ];
+
+  function isNexusFilename(name) {
+    return /\.(nxs|nexus|h5|hdf5|nxs\.ngv)$/i.test(name);
+  }
+
+  function inferImageShape(shape) {
+    const dims = shape.map(Number);
+
+    if (dims.length === 2) {
+      return { height: dims[0], width: dims[1], frameOffset: 0 };
     }
-    await global.h5wasm.ready;
+
+    if (dims.length >= 3) {
+      const height = dims[dims.length - 2];
+      const width = dims[dims.length - 1];
+      return { height, width, frameOffset: 0 };
+    }
+
+    return null;
+  }
+
+  function scoreNexusDataset(path, shape) {
+    const name = path.split("/").pop().toLowerCase();
+    let score = 0;
+
+    if (shape.length >= 2) score += 10;
+    if (shape.length >= 3) score += 5;
+    if (/data|image|detector|counts|intensity/.test(name)) score += 20;
+    if (/raw|corrected|counts/.test(name)) score += 10;
+    if (path.includes("detector")) score += 10;
+    if (path.includes("instrument")) score += 5;
+    if (NEXUS_PRIORITY_PATHS.includes(path)) score += 50;
+
+    const height = shape[shape.length - 2];
+    const width = shape[shape.length - 1];
+    if (height >= 64 && width >= 64) score += 15;
+    if (height >= 256 && width >= 256) score += 10;
+
+    return score;
+  }
+
+  function collectNexusDatasets(node, path, candidates) {
+    let keys;
+    try {
+      keys = node.keys();
+    } catch (_) {
+      return;
+    }
+
+    for (const key of keys) {
+      const childPath = path ? `${path}/${key}` : key;
+      try {
+        const child = node.get(key);
+        if (!child) continue;
+
+        if (child.shape && child.shape.length >= 2) {
+          candidates.push({ path: childPath, shape: child.shape, node: child });
+        }
+
+        if (typeof child.keys === "function") {
+          collectNexusDatasets(child, childPath, candidates);
+        }
+      } catch (_) { /* skip unreadable group member */ }
+    }
+  }
+
+  function formatNexusShape(shape) {
+    return shape.map(Number).join("×");
+  }
+
+  function flattenDatasetValue(dataset) {
+    if (dataset instanceof Float32Array || dataset instanceof Float64Array
+      || dataset instanceof Int32Array || dataset instanceof Uint32Array
+      || dataset instanceof Uint16Array || dataset instanceof Int8Array
+      || dataset instanceof Uint8Array) {
+      return dataset;
+    }
+    if (Array.isArray(dataset)) {
+      return Float32Array.from(dataset.flat(Infinity));
+    }
+    if (dataset && dataset.data) {
+      return dataset.data;
+    }
+    return Float32Array.from(Object.values(dataset).flat(Infinity));
+  }
+
+  function extractFirstFrame(flat, shape, imageShape) {
+    const { height, width, frameOffset } = imageShape;
+    const frameSize = height * width;
+    const offset = frameOffset * frameSize;
+
+    if (flat.subarray) {
+      return flat.subarray(offset, offset + frameSize);
+    }
+    return flat.slice(offset, offset + frameSize);
+  }
+
+  function readDatasetFrame(node, shape, imageShape) {
+    let dataset;
+    try {
+      dataset = node.value;
+    } catch (err) {
+      const msg = err && err.message ? err.message : String(err);
+      if (/filter|compress|plugin|shuffle/i.test(msg)) {
+        throw new Error(
+          `Could not read NeXus dataset: compressed data may require h5wasm compression plugins. (${msg})`
+        );
+      }
+      throw err;
+    }
+
+    const flat = flattenDatasetValue(dataset);
+    const frame = extractFirstFrame(flat, shape, imageShape);
+    const intensities = new Float32Array(frame.length);
+    let maxVal = 0;
+    for (let i = 0; i < frame.length; i += 1) {
+      intensities[i] = frame[i] ?? 0;
+      if (intensities[i] > maxVal) maxVal = intensities[i];
+    }
+    return { intensities, maxVal };
+  }
+
+  async function readNxs(file) {
+    const h5 = await loadH5Wasm();
+    const { FS } = await h5.ready;
     const buf = await file.arrayBuffer();
-    const { FS } = global.h5wasm;
     const mountName = `/tmp_laue_${Date.now()}.nxs`;
     FS.writeFile(mountName, new Uint8Array(buf));
     try {
-      const f = new global.h5wasm.File(mountName, "r");
-      const paths = [
-        "entry0/data/CameraDetector_data",
-        "entry/data/data",
-        "entry/instrument/detector/data"
-      ];
-      let dataset = null;
-      let shape = null;
-      let path = null;
-      for (const p of paths) {
+      const f = new h5.File(mountName, "r");
+      const candidates = [];
+
+      for (const path of NEXUS_PRIORITY_PATHS) {
         try {
-          const node = f.get(p);
-          if (node && node.value != null) {
-            dataset = node.value;
-            shape = node.shape;
-            path = p;
-            break;
+          const node = f.get(path);
+          if (node && node.shape && node.shape.length >= 2) {
+            candidates.push({ path, shape: node.shape, node });
           }
-        } catch (_) { /* try next */ }
+        } catch (_) { /* try recursive discovery instead */ }
       }
-      if (!dataset) {
-        f.visit((name) => {
-          if (dataset) return;
-          try {
-            const node = f.get(name);
-            if (node && node.shape && node.shape.length >= 2 && node.value != null) {
-              const sample = node.value;
-              if (sample && (sample.length > 1 || sample.shape)) {
-                dataset = node.value;
-                shape = node.shape;
-                path = name;
-              }
-            }
-          } catch (_) { /* skip */ }
-        });
+
+      collectNexusDatasets(f, "", candidates);
+
+      const seen = new Set();
+      const unique = [];
+      for (const candidate of candidates) {
+        if (seen.has(candidate.path)) continue;
+        seen.add(candidate.path);
+        unique.push(candidate);
       }
+
+      let best = null;
+      let bestScore = -1;
+      for (const candidate of unique) {
+        const imageShape = inferImageShape(candidate.shape);
+        if (!imageShape || imageShape.height < 2 || imageShape.width < 2) continue;
+        const score = scoreNexusDataset(candidate.path, candidate.shape);
+        if (score > bestScore) {
+          bestScore = score;
+          best = { ...candidate, imageShape };
+        }
+      }
+
+      if (!best) {
+        const listing = unique
+          .slice(0, 20)
+          .map((c) => `${c.path} [${formatNexusShape(c.shape)}]`)
+          .join("; ");
+        const suffix = unique.length
+          ? ` Found ${unique.length} dataset(s): ${listing}${unique.length > 20 ? "…" : ""}.`
+          : " No multi-dimensional datasets were found.";
+        throw new Error(`No suitable detector dataset found in NeXus file.${suffix}`);
+      }
+
+      const { intensities, maxVal } = readDatasetFrame(best.node, best.shape, best.imageShape);
       f.close();
 
-      if (!dataset) throw new Error("No 2D dataset found in NeXus file.");
-
-      let flat;
-      if (dataset instanceof Float32Array || dataset instanceof Float64Array
-        || dataset instanceof Int32Array || dataset instanceof Uint16Array) {
-        flat = Float32Array.from(dataset);
-      } else if (Array.isArray(dataset)) {
-        flat = Float32Array.from(dataset.flat(Infinity));
-      } else if (dataset.data) {
-        flat = Float32Array.from(dataset.data);
-      } else {
-        flat = Float32Array.from(Object.values(dataset).flat(Infinity));
-      }
-
-      let width;
-      let height;
-      if (shape && shape.length >= 2) {
-        height = shape[0];
-        width = shape[1];
-        if (shape.length >= 3 && shape[2] === 1) {
-          /* keep height x width */
-        }
-      } else {
-        width = Math.round(Math.sqrt(flat.length));
-        height = Math.round(flat.length / width);
-      }
-
-      const n = width * height;
-      const intensities = new Float32Array(n);
-      let maxVal = 0;
-      for (let i = 0; i < n; i += 1) {
-        intensities[i] = flat[i] ?? 0;
-        if (intensities[i] > maxVal) maxVal = intensities[i];
-      }
-
       return {
-        width,
-        height,
+        width: best.imageShape.width,
+        height: best.imageShape.height,
         intensities,
         maxIntensity: maxVal,
-        meta: { nexusPath: path },
+        meta: {
+          nexusPath: best.path,
+          nexusShape: best.shape.map(Number)
+        },
         source: "nxs"
       };
     } finally {
@@ -254,16 +376,18 @@
   }
 
   async function loadH5Wasm() {
-    if (global.h5wasm) return;
-    return new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = "https://cdn.jsdelivr.net/npm/h5wasm@0.7.9/dist/hdf5.min.js";
-      script.onload = () => {
-        global.h5wasm.ready.then(resolve).catch(reject);
-      };
-      script.onerror = () => reject(new Error("Failed to load HDF5 reader for .nxs files."));
-      document.head.appendChild(script);
-    });
+    if (global.h5wasm) return global.h5wasm;
+
+    try {
+      const mod = await import("https://cdn.jsdelivr.net/npm/h5wasm@latest/dist/esm/hdf5_hl.js");
+      global.h5wasm = mod.default || mod;
+      await global.h5wasm.ready;
+      return global.h5wasm;
+    } catch (err) {
+      throw new Error(
+        `Failed to load HDF5 reader for NeXus files: ${err && err.message ? err.message : err}`
+      );
+    }
   }
 
   function imageDataFromImage(img) {
@@ -334,13 +458,13 @@
     if (name.endsWith(".hs2")) {
       return readHs2(await file.arrayBuffer());
     }
-    if (name.endsWith(".nxs")) {
+    if (isNexusFilename(name)) {
       return readNxs(file);
     }
     if (file.type.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|tif?f)$/i.test(name)) {
       return loadImageFile(file);
     }
-    throw new Error("Unsupported file type. Use PNG/JPEG, .hs2, or .nxs.");
+    throw new Error("Unsupported file type. Use PNG/JPEG, .hs2, or NeXus (.nxs, .h5, .hdf5, .nexus).");
   }
 
   /** PCHIP slopes (monotone cubic Hermite) — smoother, wider tone response than Catmull–Rom. */

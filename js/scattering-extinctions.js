@@ -298,23 +298,32 @@
     return dedupeRules(rules);
   }
 
-  function diamondRules() {
-    return [
-      {
-        id: "diamond-even",
-        label: "diamond: all-odd allowed; all-even require h + k + l = 4n",
-        test(h, k, l) {
-          // F-centering rule handles mixed parity elsewhere.
-          if (!sameParity(h, k, l)) return true;
+  function diamondBasisAllowed(h, k, l) {
+    const allOdd = mod(h, 2) === 1 && mod(k, 2) === 1 && mod(l, 2) === 1;
+    if (allOdd) return true;
 
-          // all odd are allowed in diamond
-          if (!isEven(h)) return true;
+    const allEven = mod(h, 2) === 0 && mod(k, 2) === 0 && mod(l, 2) === 0;
+    if (allEven) return mod(h + k + l, 4) === 0;
 
-          // all even require h+k+l = 4n
-          return mod(h + k + l, 4) === 0;
-        }
-      }
-    ];
+    // Mixed parity should already be excluded by F-centering.
+    return true;
+  }
+
+  function hasDiamondBasisExtinctions(crystal) {
+    if (!crystal) return false;
+
+    const sg = normalizeSymbol(crystal.spaceGroup || "");
+    const formula = String(crystal.chemicalFormula || "").toLowerCase();
+
+    return (
+      crystal.structureModel === "diamond" ||
+      crystal.presetId === "si-diamond" ||
+      crystal.presetId === "ge-diamond" ||
+      (
+        (sg === "fd3m" || sg === "fd-3m") &&
+        /^(si|ge)$/.test(formula.replace(/\s+/g, ""))
+      )
+    );
   }
 
   function dedupeRules(rules) {
@@ -349,10 +358,6 @@
       }
     }
 
-    if (context.applyDiamondBasis) {
-      rules.push(...diamondRules());
-    }
-
     return dedupeRules(rules);
   }
 
@@ -362,7 +367,6 @@
     if (opts.rhombohedralSetting === "obverse" || opts.rhombohedralSetting === "reverse") {
       context.rhombohedralSetting = opts.rhombohedralSetting;
     }
-    context.applyDiamondBasis = !!opts.applyDiamondBasis;
     context.applyScrewGlideRules = !!opts.applyScrewGlideRules;
     context.rules = buildExtinctionRules(context);
     return context;
@@ -373,7 +377,14 @@
     return context.rules.every((rule) => rule.test(h, k, l));
   }
 
-  function describeExtinctionRules(context) {
+  function isReflectionAllowedWithCrystal(h, k, l, crystal, context) {
+    if (context && !isReflectionAllowed(h, k, l, context)) return false;
+    if (hasDiamondBasisExtinctions(crystal) && !diamondBasisAllowed(h, k, l)) return false;
+    if (h === 0 && k === 0 && l === 0) return false;
+    return true;
+  }
+
+  function describeExtinctionRules(context, crystal) {
     const lines = [
       "Reflections must satisfy every rule below (International Tables standard setting):"
     ];
@@ -402,8 +413,8 @@
       lines.push(`Rhombohedral setting: ${context.rhombohedralSetting} (override with :H or :R in the symbol).`);
     }
 
-    if (context.applyDiamondBasis) {
-      lines.push("Diamond Si/Ge basis extinctions are enabled (structure-factor rule, not space-group symmetry).");
+    if (crystal && hasDiamondBasisExtinctions(crystal)) {
+      lines.push("Diamond Si/Ge basis extinctions are applied from the structure/preset (all-even require h + k + l = 4n).");
     }
 
     if (context.applyScrewGlideRules) {
@@ -417,5 +428,8 @@
 
   window.resolveExtinctionContext = resolveExtinctionContext;
   window.isReflectionAllowed = isReflectionAllowed;
+  window.isReflectionAllowedWithCrystal = isReflectionAllowedWithCrystal;
+  window.hasDiamondBasisExtinctions = hasDiamondBasisExtinctions;
+  window.diamondBasisAllowed = diamondBasisAllowed;
   window.describeExtinctionRules = describeExtinctionRules;
 })();
