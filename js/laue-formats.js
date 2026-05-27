@@ -798,6 +798,8 @@
 
   function radialNormalize(intensities, width, height, centerX, centerY, nBins) {
     const bins = Math.max(4, Math.round(nBins));
+    const sectors = 96;
+    const minCoverage = 0.55;
     const n = width * height;
     const out = new Float32Array(n);
     const maxR = Math.max(
@@ -810,19 +812,32 @@
     const sum = new Float64Array(bins);
     const count = new Float64Array(bins);
     const avg = new Float32Array(bins);
+    const sectorMask = Array.from({ length: bins }, () => new Uint8Array(sectors));
 
     for (let y = 0; y < height; y += 1) {
       for (let x = 0; x < width; x += 1) {
         const r = Math.hypot(x - centerX, y - centerY);
         const idx = y * width + x;
         const bin = Math.min(bins - 1, Math.floor((r / maxR) * bins));
+        const theta = Math.atan2(y - centerY, x - centerX);
+        const sector = Math.min(
+          sectors - 1,
+          Math.floor(((theta + Math.PI) / (Math.PI * 2)) * sectors)
+        );
         sum[bin] += intensities[idx];
         count[bin] += 1;
+        sectorMask[bin][sector] = 1;
       }
     }
 
     for (let b = 0; b < bins; b += 1) {
-      avg[b] = count[b] > 0 ? sum[b] / count[b] : 0;
+      let covered = 0;
+      for (let s = 0; s < sectors; s += 1) covered += sectorMask[b][s];
+      const coverage = covered / sectors;
+      avg[b] = count[b] > 0 && coverage >= minCoverage
+        ? sum[b] / count[b]
+        : NaN;
+      if (!Number.isFinite(avg[b])) count[b] = 0;
     }
     fillEmptyRadialBins(avg, count, bins);
 

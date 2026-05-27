@@ -90,9 +90,9 @@
       qMin: 0,
       qMax: 10,
       patternRotation: 0,
-      peakThreshold: 500,
-      peakMinRadius: 10,
-      peakMatchRadius: 25
+      peakThreshold: 100,
+      peakMinRadius: 5,
+      peakMatchRadius: 10
     },
     predictedPeaks: [],
     observedPeaks: [],
@@ -1361,7 +1361,7 @@
 
   function matchRadiusPx() {
     const radius = num("laue-match-radius");
-    return radius > 0 ? radius : 25;
+    return radius > 0 ? radius : 10;
   }
 
   function countMatchedPeaks(peaks) {
@@ -1403,8 +1403,13 @@
     if (btn) btn.disabled = !available;
   }
 
-  function runRefinement() {
+  function nextPaint() {
+    return new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+
+  async function runRefinement() {
     if (!state.displayData) return;
+    const refineBtn = document.getElementById("laue-refine-btn");
     const flags = {
       sampleOmega: document.getElementById("laue-refine-omega").checked,
       sampleChi: document.getElementById("laue-refine-chi").checked,
@@ -1423,15 +1428,34 @@
       return;
     }
     const before = snapshotRefinementInstrument();
-    const result = LaueMath.refineOrientation(
-      readCrystal(),
-      buildConfig(readInstrument()),
-      { width: state.displayData.width, height: state.displayData.height },
-      state.observedPeaks,
-      flags,
-      isAllowed,
-      30
-    );
+    if (refineBtn) refineBtn.disabled = true;
+    refineResult.textContent = `${matchMsg} Refining… starting from current fit.`;
+    await nextPaint();
+    let result;
+    try {
+      result = await LaueMath.refineOrientation(
+        readCrystal(),
+        buildConfig(readInstrument()),
+        { width: state.displayData.width, height: state.displayData.height },
+        state.observedPeaks,
+        flags,
+        isAllowed,
+        30,
+        {
+          onProgress: (progress) => {
+            const rmsText = progress.rms != null ? progress.rms.toFixed(2) : "—";
+            const bestText = progress.bestRms != null ? progress.bestRms.toFixed(2) : rmsText;
+            refineResult.textContent = (
+              `${matchMsg} Refining… iteration ${progress.iteration}/${progress.maxIterations}, ` +
+              `RMS ${rmsText} px, best ${bestText} px.`
+            );
+          },
+          yieldToBrowser: nextPaint
+        }
+      );
+    } finally {
+      if (refineBtn) refineBtn.disabled = false;
+    }
     if (result.rms != null) {
       if (!result.improved) {
         refineResult.textContent = result.initialRms != null
@@ -1479,12 +1503,11 @@
       { omega: inst.sampleSignOmega, chi: inst.sampleSignChi, phi: inst.sampleSignPhi }
     );
     idealResult.innerHTML = `
-      Beam misalignment (angle to +x): ${dev.beamMisalignmentDeg.toFixed(3)}°
-      (‖G‖·x̂ = ${dev.currentBeamDot.toFixed(4)}, 1 = on-beam)<br>
-      Out-of-plane tilt for horizontal HKL: ${dev.horizontalMisalignmentDeg.toFixed(3)}°
-      (0° = in plane ⊥ beam)<br>
-      In-plane azimuth vs lab +y: ${dev.inPlaneAzimuthDeg.toFixed(3)}°<br>
-      Suggested Ω correction: ${dev.suggestedOmegaCorrection.toFixed(3)}°`;
+      Direct-beam angular deviation: ${dev.beamMisalignmentDeg.toFixed(3)}°<br>
+      Rotate about vertical axis: ${dev.verticalAxisRotationDeg.toFixed(3)}°<br>
+      Rotate about horizontal axis: ${dev.horizontalAxisRotationDeg.toFixed(3)}°<br>
+      Rotate about beam normal: ${dev.beamNormalRotationDeg.toFixed(3)}°<br>
+      Horizontal HKL out-of-plane residual: ${dev.horizontalMisalignmentDeg.toFixed(3)}°`;
   }
 
   function parseHKL(text) {

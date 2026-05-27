@@ -316,6 +316,10 @@ h3 {
   margin-top: 2rem;
 }
 
+.laue-layout + .back-link-panel {
+  margin-top: 2rem;
+}
+
 .back-link-panel a {
   color: var(--accent);
   font-weight: 650;
@@ -1754,9 +1758,21 @@ main.laue-main .page-header {
   flex: 0 1 41%;
   max-width: 41%;
   min-width: 0;
-  max-height: calc(100vh - 7rem);
+  position: sticky;
+  top: 1rem;
+  align-self: flex-start;
+  height: calc(100vh - 2rem);
+  max-height: calc(100vh - 2rem);
   overflow-y: auto;
   margin: 0;
+  box-sizing: border-box;
+  transition: top 0.22s ease, height 0.22s ease, max-height 0.22s ease;
+}
+
+body.laue-page.laue-nav-hidden .laue-tools-scroll {
+  top: 0.5rem;
+  height: calc(100vh - 1rem);
+  max-height: calc(100vh - 1rem);
 }
 
 .laue-viewer-panel {
@@ -1963,6 +1979,93 @@ body.laue-page.laue-nav-hidden .laue-viewer-panel {
   width: 100%;
 }
 
+.sans-interest-results {
+  margin-top: 0.75rem;
+}
+
+.sans-interest-row + .sans-interest-row {
+  margin-top: 1rem;
+}
+
+.sans-interest-row.tool-result-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.sans-interest-note {
+  margin: 1rem 0 0;
+}
+
+.sans-metric-card .sans-metric-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.sans-metric-line {
+  align-items: baseline;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: 4.5rem 1fr;
+  line-height: 1.45;
+}
+
+.sans-metric-label {
+  color: var(--text);
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-align: right;
+}
+
+.sans-metric-value {
+  font-feature-settings: "tnum" 1;
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+}
+
+.sans-sample-width-grid {
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin-bottom: 0.5rem;
+}
+
+.sans-sample-width-column .tool-field {
+  margin-bottom: 0.65rem;
+}
+
+.sans-sample-width-options {
+  display: block;
+}
+
+.sans-sample-width-radio-grid {
+  display: grid;
+  gap: 0.45rem 1.25rem;
+  grid-template-columns: 1fr 1fr;
+}
+
+.sans-sample-width-radio-grid label {
+  align-items: center;
+  display: inline-flex;
+  font-size: 0.92rem;
+  font-weight: normal;
+  gap: 0.35rem;
+}
+
+.sans-sample-imaginary-line .sans-metric-value,
+.sans-sample-empty-line .sans-metric-value {
+  grid-column: 1 / -1;
+}
+
+.sans-sample-placeholder {
+  color: var(--muted);
+}
+
+.tool-result-card h3 sub {
+  font-size: 0.85em;
+  font-weight: inherit;
+}
+
 .laue-overlay-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -2142,8 +2245,10 @@ body.laue-page.laue-nav-hidden .laue-viewer-panel {
   }
 
   .laue-tools-scroll {
+    position: static;
     flex: 1 1 auto;
     max-width: none;
+    height: auto;
     max-height: none;
   }
 

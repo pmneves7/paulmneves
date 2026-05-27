@@ -178,10 +178,12 @@
     const dllFwhm = p.deltaLambdaOverLambda;
     const wx1 = p.pinhole1Mm / 1000;
     const wx2 = p.pinhole2Mm / 1000;
-    const L = Math.max(0, p.aperture1ToSampleM - p.aperture2ToSampleM);
+    const L = p.aperture1ToSampleM - p.aperture2ToSampleM;
     const l = p.sampleDistanceM;
     const xD = p.pixelWidthMm / 1000;
     const yD = p.pixelHeightMm / 1000;
+
+    if (!Number.isFinite(L) || L <= 0) return null;
 
     const sigmaXI_dll = (dllFwhm * q0) / FWHM_TO_SIGMA;
 
@@ -224,6 +226,9 @@
 
     const sigmaYDeg = (sigmaY * 180) / (Math.PI * q0);
     const sigmaZDeg = (sigmaZ * 180) / (Math.PI * q0);
+    const cosTheta = Math.cos(theta);
+    const sigmaXTwoThetaDeg = cosTheta > 0 ? (sigmaX * 180) / (Math.PI * k * cosTheta) : null;
+    const sigmaXTwoThetaDegFwhm = sigmaXTwoThetaDeg != null ? sigmaXTwoThetaDeg * FWHM_TO_SIGMA : null;
 
     return {
       q0,
@@ -237,6 +242,8 @@
       sigmaXFwhm: sigmaX * FWHM_TO_SIGMA,
       sigmaYFwhm: sigmaY * FWHM_TO_SIGMA,
       sigmaZFwhm: sigmaZ * FWHM_TO_SIGMA,
+      sigmaXTwoThetaDeg,
+      sigmaXTwoThetaDegFwhm,
       sigmaYDeg,
       sigmaZDeg,
       sigmaYDegFwhm: sigmaYDeg * FWHM_TO_SIGMA,

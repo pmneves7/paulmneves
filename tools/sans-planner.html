@@ -137,8 +137,8 @@
             <input type="number" id="sans-pinhole1" step="any" min="0" value="30" />
           </div>
           <div class="tool-field">
-            <label for="sans-pinhole2">Second pinhole diameter (mm)</label>
-            <input type="number" id="sans-pinhole2" step="any" min="0" value="30" />
+            <label for="sans-pinhole2">Second aperture or sample diameter (mm)</label>
+            <input type="number" id="sans-pinhole2" step="any" min="0" value="10" />
           </div>
           <div class="tool-field">
             <label for="sans-aperture1-sample">First aperture–sample distance (m)</label>
@@ -146,15 +146,15 @@
           </div>
           <div class="tool-field">
             <label for="sans-aperture2-sample">Second aperture–sample distance (m)</label>
-            <input type="number" id="sans-aperture2-sample" step="any" min="0" value="1" />
+            <input type="number" id="sans-aperture2-sample" step="any" min="0" value="0.5" />
           </div>
           <div class="tool-field">
             <label for="sans-pixel-width">Detector pixel width (mm)</label>
-            <input type="number" id="sans-pixel-width" step="any" min="0" value="1" />
+            <input type="number" id="sans-pixel-width" step="any" min="0" value="5" />
           </div>
           <div class="tool-field">
             <label for="sans-pixel-height">Detector pixel height (mm)</label>
-            <input type="number" id="sans-pixel-height" step="any" min="0" value="1" />
+            <input type="number" id="sans-pixel-height" step="any" min="0" value="5" />
           </div>
         </form>
       </section>
@@ -181,7 +181,9 @@
         <h2>3. Scattering vector of interest</h2>
         <p class="tool-note">
           Specify a momentum transfer to evaluate scattering angle, resolution components, and
-          q<sub>z</sub>. The point is marked on all plots above.
+          q<sub>z</sub>. The point is marked on all plots above. Real-space scales from
+          instrumental Q widths use ξ = 1/σ and ξ<sub>FWHM</sub> = 1/FWHM<sub>Q</sub>, with
+          σ and FWHM<sub>Q</sub> in Å⁻¹ and ξ in Å.
         </p>
         <div class="tool-grid">
           <div class="tool-field">
@@ -190,6 +192,61 @@
           </div>
         </div>
         <div id="sans-interest-results" class="tool-results-section" aria-live="polite"></div>
+      </section>
+
+      <section class="tool-section">
+        <h2>4. Calculate sample correlation length</h2>
+        <p class="tool-note">
+          Enter the observed peak width in each direction. Instrumental widths from section 3 are
+          subtracted in quadrature: σ<sub>obs</sub>² = σ<sub>sample</sub>² + σ<sub>inst</sub>².
+          Sample correlation lengths use ξ = 1/σ<sub>sample</sub> and
+          ξ<sub>FWHM</sub> = 1/FWHM<sub>sample</sub> (σ and FWHM in Å⁻¹; ξ in Å).
+        </p>
+        <div class="sans-sample-width-grid">
+          <div class="sans-sample-width-column">
+            <div class="tool-field">
+              <label for="sans-obs-q-width-value">Observed width along |Q|</label>
+              <input type="number" id="sans-obs-q-width-value" step="any" min="0" placeholder="e.g. 0.02" />
+            </div>
+            <div class="sans-sample-width-options" role="group" aria-label="|Q| width options">
+              <div class="sans-sample-width-radio-grid">
+                <label><input type="radio" name="sans-obs-q-unit" value="q" checked /> Å⁻¹</label>
+                <label><input type="radio" name="sans-obs-q-unit" value="angle" /> 2θ (deg)</label>
+                <label><input type="radio" name="sans-obs-q-width-type" value="sigma" checked /> σ</label>
+                <label><input type="radio" name="sans-obs-q-width-type" value="fwhm" /> FWHM</label>
+              </div>
+            </div>
+          </div>
+          <div class="sans-sample-width-column">
+            <div class="tool-field">
+              <label for="sans-obs-az-width-value">Observed azimuthal width (ψ)</label>
+              <input type="number" id="sans-obs-az-width-value" step="any" min="0" placeholder="e.g. 15" />
+            </div>
+            <div class="sans-sample-width-options" role="group" aria-label="Azimuthal width options">
+              <div class="sans-sample-width-radio-grid">
+                <label><input type="radio" name="sans-obs-az-unit" value="q" checked /> Å⁻¹</label>
+                <label><input type="radio" name="sans-obs-az-unit" value="angle" /> deg</label>
+                <label><input type="radio" name="sans-obs-az-width-type" value="sigma" checked /> σ</label>
+                <label><input type="radio" name="sans-obs-az-width-type" value="fwhm" /> FWHM</label>
+              </div>
+            </div>
+          </div>
+          <div class="sans-sample-width-column">
+            <div class="tool-field">
+              <label for="sans-obs-rock-width-value">Observed rocking width (ω)</label>
+              <input type="number" id="sans-obs-rock-width-value" step="any" min="0" placeholder="e.g. 0.2" />
+            </div>
+            <div class="sans-sample-width-options" role="group" aria-label="Rocking width options">
+              <div class="sans-sample-width-radio-grid">
+                <label><input type="radio" name="sans-obs-rock-unit" value="q" checked /> Å⁻¹</label>
+                <label><input type="radio" name="sans-obs-rock-unit" value="angle" /> deg</label>
+                <label><input type="radio" name="sans-obs-rock-width-type" value="sigma" checked /> σ</label>
+                <label><input type="radio" name="sans-obs-rock-width-type" value="fwhm" /> FWHM</label>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="sans-sample-correlation-results" class="tool-results-section" aria-live="polite"></div>
       </section>
 
       <section class="tool-section">

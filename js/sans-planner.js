@@ -14,13 +14,20 @@
     beamstopRadiusMm: 25,
     deltaLambdaOverLambda: 0.1,
     pinhole1Mm: 30,
-    pinhole2Mm: 30,
+    pinhole2Mm: 10,
     aperture1ToSampleM: 6,
-    aperture2ToSampleM: 1,
-    pixelWidthMm: 1,
-    pixelHeightMm: 1,
-    qInterest: 0.025
+    aperture2ToSampleM: 0.5,
+    pixelWidthMm: 5,
+    pixelHeightMm: 5,
+    qInterest: 0.025,
+    sampleWidth: {
+      q: { value: "", unit: "q", widthType: "sigma" },
+      az: { value: "", unit: "q", widthType: "sigma" },
+      rock: { value: "", unit: "q", widthType: "sigma" }
+    }
   };
+
+  const SAMPLE_WIDTH_KEYS = ["q", "az", "rock"];
 
   const FIELD_IDS = [
     "sans-lambda",
@@ -44,6 +51,7 @@
   const dRangeEl = document.getElementById("sans-d-range");
   const twoThetaRangeEl = document.getElementById("sans-2theta-range");
   const interestResultsEl = document.getElementById("sans-interest-results");
+  const sampleCorrelationResultsEl = document.getElementById("sans-sample-correlation-results");
   const resolutionNoteEl = document.getElementById("sans-resolution-note");
 
   const plotCanvases = {
@@ -128,6 +136,199 @@
         ${note ? `<span>${note}</span>` : ""}
       </div>
     `;
+  }
+
+  function renderMetricRow(label, value, unit) {
+    return `
+      <div class="sans-metric-line">
+        <span class="sans-metric-label">${label}:</span>
+        <span class="sans-metric-value">${formatNum(value)} ${unit}</span>
+      </div>
+    `;
+  }
+
+  function renderMetricCard(title, rows) {
+    return `
+      <div class="tool-result-card sans-metric-card">
+        <h3>${title}</h3>
+        <div class="sans-metric-lines">${rows.join("")}</div>
+      </div>
+    `;
+  }
+
+  function correlationLengthAngstrom(sigmaQ) {
+    if (!Number.isFinite(sigmaQ) || sigmaQ <= 0) return null;
+    return 1 / sigmaQ;
+  }
+
+  function renderResolutionWidthCard(title, sigmaQ, fwhmQ, sigmaDeg, fwhmDeg) {
+    const rows = [
+      renderMetricRow("σ", sigmaQ, "Å⁻¹"),
+      renderMetricRow("FWHM", fwhmQ, "Å⁻¹")
+    ];
+    if (sigmaDeg != null && fwhmDeg != null) {
+      rows.push(renderMetricRow("σ", sigmaDeg, "°"));
+      rows.push(renderMetricRow("FWHM", fwhmDeg, "°"));
+    }
+    return renderMetricCard(title, rows);
+  }
+
+  function renderCorrelationLengthCard(title, sigmaQ, fwhmQ) {
+    const xiSigma = correlationLengthAngstrom(sigmaQ);
+    const xiFwhm = correlationLengthAngstrom(fwhmQ);
+    return renderMetricCard(title, [
+      renderMetricRow("σ", xiSigma, "Å"),
+      renderMetricRow("FWHM", xiFwhm, "Å")
+    ]);
+  }
+
+  function readSampleWidthObserved() {
+    const readDir = (key) => {
+      const valueRaw = document.getElementById(`sans-obs-${key}-width-value`).value.trim();
+      const value = valueRaw === "" ? null : Number(valueRaw);
+      const unit = document.querySelector(`input[name="sans-obs-${key}-unit"]:checked`)?.value ?? "q";
+      const widthType = document.querySelector(`input[name="sans-obs-${key}-width-type"]:checked`)?.value ?? "sigma";
+      return { value, unit, widthType };
+    };
+    return {
+      q: readDir("q"),
+      az: readDir("az"),
+      rock: readDir("rock")
+    };
+  }
+
+  function writeSampleWidthToForm(sampleWidth) {
+    if (!sampleWidth) return;
+    SAMPLE_WIDTH_KEYS.forEach((key) => {
+      const cfg = sampleWidth[key];
+      if (!cfg) return;
+      const input = document.getElementById(`sans-obs-${key}-width-value`);
+      if (input && cfg.value != null) input.value = cfg.value;
+      const unitEl = document.querySelector(`input[name="sans-obs-${key}-unit"][value="${cfg.unit}"]`);
+      if (unitEl) unitEl.checked = true;
+      const typeEl = document.querySelector(`input[name="sans-obs-${key}-width-type"][value="${cfg.widthType}"]`);
+      if (typeEl) typeEl.checked = true;
+    });
+  }
+
+  function observedSigmaQ(width, options, direction, ctx) {
+    if (width == null || !Number.isFinite(width) || width <= 0) return null;
+    const sigmaWidth = options.widthType === "fwhm" ? width / M.FWHM_TO_SIGMA : width;
+    if (options.unit === "q") return sigmaWidth;
+    const degToRad = Math.PI / 180;
+    if (direction === "q") {
+      return (sigmaWidth * degToRad * ctx.k * Math.cos(ctx.theta));
+    }
+    return (sigmaWidth * degToRad * ctx.q0);
+  }
+
+  function sampleSigmaFromObserved(observedSigmaQ, instrumentSigma) {
+    if (observedSigmaQ == null || instrumentSigma == null) return { sigmaSample: null, imaginary: false, empty: true };
+    const variance = observedSigmaQ ** 2 - instrumentSigma ** 2;
+    if (variance <= 0) return { sigmaSample: null, imaginary: true, empty: false };
+    return { sigmaSample: Math.sqrt(variance), imaginary: false, empty: false };
+  }
+
+  function renderSampleCorrelationCard(title, result) {
+    if (result.empty) {
+      return renderMetricCard(title, [
+        `<div class="sans-metric-line sans-sample-empty-line"><span class="sans-metric-value sans-sample-placeholder">—</span></div>`
+      ]);
+    }
+    if (result.imaginary) {
+      return renderMetricCard(title, [
+        `<div class="sans-metric-line sans-sample-imaginary-line"><span class="sans-metric-value">Imaginary ξ</span></div>`
+      ]);
+    }
+    const sigmaFwhm = result.sigmaSample * M.FWHM_TO_SIGMA;
+    return renderCorrelationLengthCard(title, result.sigmaSample, sigmaFwhm);
+  }
+
+  function renderSampleCorrelationResults(results, note) {
+    const rows = [
+      `<div class="sans-interest-row tool-result-grid">
+        ${renderSampleCorrelationCard("Sample correlation length |Q|", results.q)}
+        ${renderSampleCorrelationCard("Sample correlation length azimuthal", results.az)}
+        ${renderSampleCorrelationCard("Sample correlation length rocking", results.rock)}
+      </div>`
+    ];
+    if (note) rows.push(`<p class="tool-note sans-interest-note">${note}</p>`);
+    return `<div class="sans-interest-results">${rows.join("")}</div>`;
+  }
+
+  function updateSampleCorrelation(interest, p) {
+    if (!sampleCorrelationResultsEl) return;
+    if (!interest) {
+      sampleCorrelationResultsEl.innerHTML =
+        "<p class=\"tool-note\">Set a valid |Q| of interest in section 3 to subtract instrumental resolution.</p>";
+      return;
+    }
+
+    const ctx = {
+      q0: interest.q0,
+      k: M.waveNumber(p.lambdaAngstrom),
+      theta: interest.theta
+    };
+    const observed = readSampleWidthObserved();
+    const instrument = {
+      q: interest.sigmaX,
+      az: interest.sigmaY,
+      rock: interest.sigmaZ
+    };
+
+    const results = {};
+    let anyImaginary = false;
+    let anyFilled = false;
+
+    SAMPLE_WIDTH_KEYS.forEach((key) => {
+      const obs = observed[key];
+      const sigmaObs = observedSigmaQ(obs.value, obs, key === "q" ? "q" : key, ctx);
+      const deconv = sampleSigmaFromObserved(sigmaObs, instrument[key]);
+      results[key] = deconv;
+      if (deconv.imaginary) anyImaginary = true;
+      if (!deconv.empty) anyFilled = true;
+    });
+
+    if (!anyFilled) {
+      sampleCorrelationResultsEl.innerHTML = "";
+      return;
+    }
+
+    let note = "";
+    if (anyImaginary) {
+      note = "If the calculated correlation length is imaginary, the resolution estimator does not match the instrument perfectly or the sample is predominantly resolution limited.";
+    }
+
+    sampleCorrelationResultsEl.innerHTML = renderSampleCorrelationResults(results, note);
+  }
+
+  function renderInterestResults(interest, interestNote) {
+    const rows = [
+      `<div class="sans-interest-row tool-result-grid">
+        ${renderResultCard("2θ", `${formatNum(interest.twoThetaDeg)}°`, "full scattering angle")}
+        ${renderResultCard("q<sub>z</sub>", `${formatNum(interest.qz)} Å⁻¹`, "longitudinal component")}
+      </div>`,
+      `<div class="sans-interest-row tool-result-grid">
+        ${renderResolutionWidthCard(
+          "σ along |Q|",
+          interest.sigmaX,
+          interest.sigmaXFwhm,
+          interest.sigmaXTwoThetaDeg,
+          interest.sigmaXTwoThetaDegFwhm
+        )}
+        ${renderResolutionWidthCard("σ azimuthal (ψ)", interest.sigmaY, interest.sigmaYFwhm, interest.sigmaYDeg, interest.sigmaYDegFwhm)}
+        ${renderResolutionWidthCard("σ rocking (ω)", interest.sigmaZ, interest.sigmaZFwhm, interest.sigmaZDeg, interest.sigmaZDegFwhm)}
+      </div>`,
+      `<div class="sans-interest-row tool-result-grid">
+        ${renderCorrelationLengthCard("Inverse instrument resolution |Q|", interest.sigmaX, interest.sigmaXFwhm)}
+        ${renderCorrelationLengthCard("Inverse instrument resolution azimuthal", interest.sigmaY, interest.sigmaYFwhm)}
+        ${renderCorrelationLengthCard("Inverse instrument resolution rocking", interest.sigmaZ, interest.sigmaZFwhm)}
+      </div>`
+    ];
+    if (interestNote) {
+      rows.push(`<p class="tool-note sans-interest-note">${interestNote}</p>`);
+    }
+    return `<div class="sans-interest-results">${rows.join("")}</div>`;
   }
 
   function prepareCanvas(canvas, minLogicalW = 840, aspect = 280 / 480) {
@@ -444,15 +645,15 @@
       throw new Error("Wavelength spread must be zero or greater.");
     }
     if (!Number.isFinite(p.pinhole1Mm) || p.pinhole1Mm <= 0 || !Number.isFinite(p.pinhole2Mm) || p.pinhole2Mm <= 0) {
-      throw new Error("Pinhole diameters must be positive.");
+      throw new Error("First pinhole and second aperture/sample diameters must be positive.");
     }
     if (!Number.isFinite(p.aperture1ToSampleM) || p.aperture1ToSampleM <= 0) {
       throw new Error("First aperture-to-sample distance must be positive.");
     }
-    if (!Number.isFinite(p.aperture2ToSampleM) || p.aperture2ToSampleM <= 0) {
-      throw new Error("Second aperture-to-sample distance must be positive.");
+    if (!Number.isFinite(p.aperture2ToSampleM) || p.aperture2ToSampleM < 0) {
+      throw new Error("Second aperture-to-sample distance must be zero or greater.");
     }
-    if (p.aperture2ToSampleM > p.aperture1ToSampleM) {
+    if (p.aperture2ToSampleM >= p.aperture1ToSampleM) {
       throw new Error("Second aperture must be closer to the sample than the first.");
     }
     if (!Number.isFinite(p.pixelWidthMm) || p.pixelWidthMm <= 0 || !Number.isFinite(p.pixelHeightMm) || p.pixelHeightMm <= 0) {
@@ -564,22 +765,14 @@
         "Resolution estimates follow Pedersen et al., J. Appl. Cryst. 23 (1990) and Harris et al., J. Appl. Cryst. 28 (1995).";
 
       if (interest) {
-        const cards = [
-          renderResultCard("2θ", `${formatNum(interest.twoThetaDeg)}°`, "full scattering angle"),
-          renderResultCard("q_z", `${formatNum(interest.qz)} Å⁻¹`, "longitudinal component"),
-          renderResultCard("σ_|Q| (FWHM)", `${formatNum(interest.sigmaXFwhm)} Å⁻¹`, `σ = ${formatNum(interest.sigmaX)} Å⁻¹`),
-          renderResultCard("σ_az (FWHM)", `${formatNum(interest.sigmaYFwhm)} Å⁻¹`, `${formatNum(interest.sigmaYDegFwhm)}°`),
-          renderResultCard("σ_rock (FWHM)", `${formatNum(interest.sigmaZFwhm)} Å⁻¹`, `${formatNum(interest.sigmaZDegFwhm)}°`)
-        ];
-        if (interestNote) {
-          cards.push(renderResultCard("Note", interestNote, ""));
-        }
-        interestResultsEl.innerHTML = `<div class="tool-result-grid">${cards.join("")}</div>`;
+        interestResultsEl.innerHTML = renderInterestResults(interest, interestNote || "");
       } else if (interestNote) {
         interestResultsEl.innerHTML = `<p class="tool-note">${interestNote}</p>`;
       } else {
         interestResultsEl.innerHTML = "";
       }
+
+      updateSampleCorrelation(interest, p);
 
       persistConfig();
     } catch (err) {
@@ -587,6 +780,7 @@
       dRangeEl.textContent = "";
       twoThetaRangeEl.textContent = "";
       interestResultsEl.innerHTML = "";
+      if (sampleCorrelationResultsEl) sampleCorrelationResultsEl.innerHTML = "";
       Object.values(plotCanvases).forEach((canvas) => {
         const prep = prepareCanvas(canvas);
         if (!prep) return;
@@ -612,12 +806,14 @@
       aperture2ToSampleM: p.aperture2ToSampleM,
       pixelWidthMm: p.pixelWidthMm,
       pixelHeightMm: p.pixelHeightMm,
-      qInterest: p.qInterest
+      qInterest: p.qInterest,
+      sampleWidth: readSampleWidthObserved()
     };
   }
 
   function loadConfigFromObject(obj) {
     writeParamsToForm({ ...DEFAULTS, ...obj });
+    writeSampleWidthToForm(obj.sampleWidth ?? DEFAULTS.sampleWidth);
     recalc();
   }
 
@@ -643,6 +839,17 @@
       if (!el) return;
       el.addEventListener("input", recalc);
       el.addEventListener("change", recalc);
+    });
+
+    SAMPLE_WIDTH_KEYS.forEach((key) => {
+      const input = document.getElementById(`sans-obs-${key}-width-value`);
+      if (input) {
+        input.addEventListener("input", recalc);
+        input.addEventListener("change", recalc);
+      }
+      document.querySelectorAll(`input[name="sans-obs-${key}-unit"], input[name="sans-obs-${key}-width-type"]`).forEach((el) => {
+        el.addEventListener("change", recalc);
+      });
     });
 
     document.getElementById("sans-save-config-btn").addEventListener("click", () => {
@@ -673,6 +880,7 @@
   }
 
   writeParamsToForm(DEFAULTS);
+  writeSampleWidthToForm(DEFAULTS.sampleWidth);
   bindEvents();
   restoreConfig();
 })();

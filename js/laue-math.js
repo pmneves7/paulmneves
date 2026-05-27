@@ -351,9 +351,6 @@
     if (kNorm < 1e-14) return null;
     const direction = normalize(kOut);
 
-    const towardDetector = config.laueMode === "backscatter" ? direction[0] < 0 : direction[0] > 0;
-    if (!towardDetector) return null;
-
     const n = detectorNormal(config.detOmega, config.detChi, config.laueMode);
     const basis = detectorBasis(n, config.detOmegaMisalign || 0, config.detChiMisalign || 0);
     const planePoint = scale(basis.normal, config.detDistance);
@@ -390,6 +387,18 @@
     const cy = beamCy + yLabRot * pxPerMmY;
 
     return { x: cx, y: cy, q: qMag, lambda, xLab: xLabRot, yLab: yLabRot };
+  }
+
+  function projectHKL(params, hkl, config, imageSize) {
+    if (imageSize) syncBeamFromOffsets(config, imageSize);
+    const ub = ubMatrix(
+      params,
+      config.sampleOmega,
+      config.sampleChi,
+      config.samplePhi,
+      config.sampleSigns
+    );
+    return projectReflection(reciprocalVector(hkl, ub), config, imageSize);
   }
 
   function computePredictedPeaks(params, config, imageSize, isAllowed) {
@@ -472,16 +481,13 @@
   const MISSING_REFLECTION_PENALTY_PX = 1000;
 
   function matchResidualStats(params, cfg, imageSize, obs, isAllowed) {
-    const predicted = computePredictedPeaks(params, cfg, imageSize, isAllowed);
-    const predMap = new Map(predicted.map((p) => [`${p.h},${p.k},${p.l}`, p]));
     const penaltySq = MISSING_REFLECTION_PENALTY_PX * MISSING_REFLECTION_PENALTY_PX;
     let sumSq = 0;
     let count = 0;
     let missing = 0;
 
     for (const obsPeak of obs) {
-      const key = `${obsPeak.matchedH},${obsPeak.matchedK},${obsPeak.matchedL}`;
-      const pred = predMap.get(key);
+      const pred = projectHKL(params, [obsPeak.matchedH, obsPeak.matchedK, obsPeak.matchedL], cfg, imageSize);
       if (!pred) {
         missing += 1;
         sumSq += penaltySq;
@@ -509,7 +515,8 @@
   /**
    * Least-squares refinement with scaled steps, bounds, line search, and LM damping.
    */
-  function refineOrientation(params, config, imageSize, observedPeaks, refineFlags, isAllowed, maxIter) {
+  async function refineOrientation(params, config, imageSize, observedPeaks, refineFlags, isAllowed, maxIter, options) {
+    const opts = options || {};
     const flags = refineFlags || { sampleOmega: true, sampleChi: true, samplePhi: true };
     const paramKeys = [
       "sampleOmega", "sampleChi", "samplePhi",
@@ -545,15 +552,13 @@
     for (let iter = 0; iter < (maxIter || 40); iter += 1) {
       iterations = iter + 1;
       syncBeamFromOffsets(cfg, imageSize);
-      const predicted = computePredictedPeaks(params, cfg, imageSize, isAllowed);
-      const predMap = new Map(predicted.map((p) => [`${p.h},${p.k},${p.l}`, p]));
 
       const residuals = [];
       const jacobian = [];
 
       for (const obsPeak of obs) {
-        const key = `${obsPeak.matchedH},${obsPeak.matchedK},${obsPeak.matchedL}`;
-        const pred = predMap.get(key);
+        const hkl = [obsPeak.matchedH, obsPeak.matchedK, obsPeak.matchedL];
+        const pred = projectHKL(params, hkl, cfg, imageSize);
         if (!pred) continue;
         residuals.push(pred.x - obsPeak.x, pred.y - obsPeak.y);
 
@@ -566,15 +571,13 @@
 
           cfg[pk] = saved + h;
           syncBeamFromOffsets(cfg, imageSize);
-          const pertPlus = computePredictedPeaks(params, cfg, imageSize, isAllowed);
+          const pp = projectHKL(params, hkl, cfg, imageSize);
           cfg[pk] = saved - h;
           syncBeamFromOffsets(cfg, imageSize);
-          const pertMinus = computePredictedPeaks(params, cfg, imageSize, isAllowed);
+          const pm = projectHKL(params, hkl, cfg, imageSize);
           cfg[pk] = saved;
           syncBeamFromOffsets(cfg, imageSize);
 
-          const pp = pertPlus.find((p) => p.h === obsPeak.matchedH && p.k === obsPeak.matchedK && p.l === obsPeak.matchedL);
-          const pm = pertMinus.find((p) => p.h === obsPeak.matchedH && p.k === obsPeak.matchedK && p.l === obsPeak.matchedL);
           if (pp && pm) {
             rowX.push((pp.x - pm.x) / (2 * h));
             rowY.push((pp.y - pm.y) / (2 * h));
@@ -593,6 +596,19 @@
 
       const iterStats = matchResidualStats(params, cfg, imageSize, obs, isAllowed);
       rms = iterStats.rms;
+      if (typeof opts.onProgress === "function") {
+        opts.onProgress({
+          iteration: iterations,
+          maxIterations: maxIter || 40,
+          rms,
+          bestRms,
+          missing: iterStats.missing,
+          matched: obs.length
+        });
+      }
+      if (typeof opts.yieldToBrowser === "function") {
+        await opts.yieldToBrowser();
+      }
 
       const nParams = paramKeys.length;
       const nRes = residuals.length;
@@ -699,7 +715,7 @@
     const refHorizInPlane = normalize([0, 1, 0]);
 
     const beamDot = dot(beamVec, beamDir);
-    const beamMisalignmentDeg = radToDeg(Math.acos(clamp(Math.abs(beamDot), 0, 1)));
+    const beamMisalignmentDeg = radToDeg(Math.acos(clamp(beamDot, -1, 1)));
 
     const horizOutOfPlane = Math.abs(dot(horizVec, beamDir));
     const horizontalMisalignmentDeg = radToDeg(Math.asin(clamp(horizOutOfPlane, 0, 1)));
@@ -719,18 +735,50 @@
       }
     }
 
-    const crossBeam = cross(beamDir, beamVec);
-    const omegaCorr = norm(crossBeam) < 1e-10
-      ? 0
-      : radToDeg(Math.atan2(crossBeam[2], crossBeam[1]));
+    const idealHoriz = horizNorm > 1e-10
+      ? normalize(horizProj)
+      : refHorizInPlane;
+    const idealNormal = normalize(cross(beamVec, idealHoriz));
+    const currentBasis = matrixFromColumns(beamVec, idealHoriz, idealNormal);
+    const targetBasis = matrixFromColumns(beamDir, refHorizInPlane, [0, 0, 1]);
+    const correction = mat3Mul(targetBasis, transpose3(currentBasis));
+    const rotations = decomposeBeamAlignmentRotation(correction);
 
     return {
       beamMisalignmentDeg,
       horizontalMisalignmentDeg,
       inPlaneAzimuthDeg,
-      suggestedOmegaCorrection: omegaCorr,
+      verticalAxisRotationDeg: rotations.vertical,
+      horizontalAxisRotationDeg: rotations.horizontal,
+      beamNormalRotationDeg: rotations.beamNormal,
       currentBeamDot: beamDot,
       currentHorizOutOfPlane: horizOutOfPlane
+    };
+  }
+
+  function transpose3(m) {
+    return [
+      [m[0][0], m[1][0], m[2][0]],
+      [m[0][1], m[1][1], m[2][1]],
+      [m[0][2], m[1][2], m[2][2]]
+    ];
+  }
+
+  function decomposeBeamAlignmentRotation(r) {
+    const beta = Math.asin(clamp(r[0][2], -1, 1));
+    const cb = Math.cos(beta);
+    let alpha = 0;
+    let gamma = 0;
+    if (Math.abs(cb) > 1e-8) {
+      alpha = Math.atan2(-r[0][1], r[0][0]);
+      gamma = Math.atan2(-r[1][2], r[2][2]);
+    } else {
+      alpha = Math.atan2(r[1][0], r[1][1]);
+    }
+    return {
+      vertical: radToDeg(alpha),
+      horizontal: radToDeg(beta),
+      beamNormal: radToDeg(gamma)
     };
   }
 
@@ -1025,6 +1073,7 @@
     detectorBasis,
     peakOnImage,
     projectReflection,
+    projectHKL,
     computePredictedPeaks,
     refineOrientation,
     idealOrientationDeviation,
