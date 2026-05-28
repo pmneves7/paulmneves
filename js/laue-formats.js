@@ -4,10 +4,7 @@
 (function (global) {
   "use strict";
 
-  const HS2_SIZES = [
-    { width: 512, height: 512 },
-    { width: 256, height: 256 }
-  ];
+  const HS2_SIZES = [512, 256];
 
   const COLORMAPS = {
     gray: (t) => [t, t, t],
@@ -67,44 +64,16 @@
     return [lerp(0.0, 0.99, u), lerp(0.13, 0.85, u), lerp(0.30, 0.15, u)];
   }
 
-  function detectHs2Layout(byteLength) {
-    for (const { width, height } of HS2_SIZES) {
-      const imageBytes = width * height * 2;
-      if (byteLength >= imageBytes) {
-        return { width, height, imageBytes };
-      }
+  function detectHs2Size(byteLength) {
+    for (const size of HS2_SIZES) {
+      if (byteLength >= size * size * 2) return size;
     }
     return null;
   }
 
-  function hs2ImageOffset(buffer, width, height) {
-    const imageBytes = width * height * 2;
-    const byteLength = buffer.byteLength;
-    if (byteLength < imageBytes) return -1;
-    if (byteLength === imageBytes) return 0;
-
-    const candidates = [0, byteLength - imageBytes];
-    const view = new DataView(buffer);
-    const n = width * height;
-    let bestOffset = 0;
-    let bestMax = -1;
-
-    for (const offset of candidates) {
-      if (offset < 0 || offset + imageBytes > byteLength) continue;
-      let maxVal = 0;
-      for (let i = 0; i < n; i += 1) {
-        const val = view.getUint16(offset + i * 2, true);
-        if (val > maxVal) maxVal = val;
-      }
-      if (maxVal > bestMax) {
-        bestMax = maxVal;
-        bestOffset = offset;
-      }
-    }
-    return bestOffset;
-  }
-
-  function readHs2Image(view, offset, width, height) {
+  function readHs2Image(view, size) {
+    const width = size;
+    const height = size;
     const intensities = new Float32Array(width * height);
     let minVal = Infinity;
     let maxVal = 0;
@@ -112,7 +81,7 @@
       for (let x = 0; x < width; x += 1) {
         const srcRow = height - 1 - y;
         const flatIndex = srcRow + x * height;
-        const val = view.getUint16(offset + flatIndex * 2, true);
+        const val = view.getUint16(flatIndex * 2, true);
         intensities[y * width + x] = val;
         if (val < minVal) minVal = val;
         if (val > maxVal) maxVal = val;
@@ -123,25 +92,22 @@
 
   function readHs2(buffer) {
     const fileSize = buffer.byteLength;
-    const layout = detectHs2Layout(fileSize);
-    if (!layout) {
+    const size = detectHs2Size(fileSize);
+    if (!size) {
       throw new Error(
         `Unrecognized .hs2 file size (${fileSize} bytes). `
-        + "Supported image sizes: 512×512 or 256×256 (16-bit unsigned, little-endian)."
+        + "Expected at least 256×256 unsigned 16-bit pixels."
       );
     }
 
-    const offset = hs2ImageOffset(buffer, layout.width, layout.height);
-    if (offset < 0) throw new Error("Could not locate image data in .hs2 file.");
-
     const view = new DataView(buffer);
-    const { intensities, minVal, maxVal } = readHs2Image(view, offset, layout.width, layout.height);
-    const meta = offset > 0 ? parseHs2Header(buffer, offset) : {};
+    const { intensities, minVal, maxVal } = readHs2Image(view, size);
+    const meta = {};
     meta.hs2Diagnostics = {
       fileSize,
-      width: layout.width,
-      height: layout.height,
-      offset,
+      width: size,
+      height: size,
+      offset: 0,
       dtype: "uint16",
       endianness: "little",
       order: "column-major, vertically flipped",
@@ -149,8 +115,8 @@
       max: maxVal
     };
     return {
-      width: layout.width,
-      height: layout.height,
+      width: size,
+      height: size,
       intensities,
       maxIntensity: maxVal,
       meta,
@@ -191,19 +157,28 @@
     const dims = shape.map(Number);
 
     if (dims.length === 2) {
-      return { height: dims[0], width: dims[1], frameOffset: 0 };
+      return { height: dims[0], width: dims[1], axes: [0, 1] };
     }
 
     if (dims.length >= 3) {
-      const height = dims[dims.length - 2];
-      const width = dims[dims.length - 1];
-      return { height, width, frameOffset: 0 };
+      let axes;
+      if (dims[0] >= 64 && dims[1] >= 64 && dims[dims.length - 1] <= 16) {
+        axes = [0, 1];
+      } else {
+        axes = dims
+          .map((size, axis) => ({ size, axis }))
+          .filter((d) => d.size > 1)
+          .slice(-2)
+          .map((d) => d.axis);
+      }
+      if (axes.length !== 2) return null;
+      return { height: dims[axes[0]], width: dims[axes[1]], axes };
     }
 
     return null;
   }
 
-  function scoreNexusDataset(path, shape) {
+  function scoreNexusDataset(path, shape, imageShape) {
     const name = path.split("/").pop().toLowerCase();
     let score = 0;
 
@@ -215,8 +190,8 @@
     if (path.includes("instrument")) score += 5;
     if (NEXUS_PRIORITY_PATHS.includes(path)) score += 50;
 
-    const height = shape[shape.length - 2];
-    const width = shape[shape.length - 1];
+    const height = imageShape ? imageShape.height : shape[shape.length - 2];
+    const width = imageShape ? imageShape.width : shape[shape.length - 1];
     if (height >= 64 && width >= 64) score += 15;
     if (height >= 256 && width >= 256) score += 10;
 
@@ -269,14 +244,27 @@
   }
 
   function extractFirstFrame(flat, shape, imageShape) {
-    const { height, width, frameOffset } = imageShape;
+    const dims = shape.map(Number);
+    const { height, width, axes } = imageShape;
     const frameSize = height * width;
-    const offset = frameOffset * frameSize;
-
-    if (flat.subarray) {
-      return flat.subarray(offset, offset + frameSize);
+    const out = new Float32Array(frameSize);
+    const strides = new Array(dims.length);
+    let stride = 1;
+    for (let i = dims.length - 1; i >= 0; i -= 1) {
+      strides[i] = stride;
+      stride *= dims[i];
     }
-    return flat.slice(offset, offset + frameSize);
+    const yAxis = axes ? axes[0] : dims.length - 2;
+    const xAxis = axes ? axes[1] : dims.length - 1;
+
+    let k = 0;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        out[k] = flat[y * strides[yAxis] + x * strides[xAxis]] ?? 0;
+        k += 1;
+      }
+    }
+    return out;
   }
 
   function readDatasetFrame(node, shape, imageShape) {
@@ -338,7 +326,7 @@
       for (const candidate of unique) {
         const imageShape = inferImageShape(candidate.shape);
         if (!imageShape || imageShape.height < 2 || imageShape.width < 2) continue;
-        const score = scoreNexusDataset(candidate.path, candidate.shape);
+        const score = scoreNexusDataset(candidate.path, candidate.shape, imageShape);
         if (score > bestScore) {
           bestScore = score;
           best = { ...candidate, imageShape };
@@ -366,7 +354,8 @@
         maxIntensity: maxVal,
         meta: {
           nexusPath: best.path,
-          nexusShape: best.shape.map(Number)
+          nexusShape: best.shape.map(Number),
+          nexusImageAxes: best.imageShape.axes
         },
         source: "nxs"
       };
@@ -656,12 +645,12 @@
         let sy = y;
         if (rot === 1) {
           sx = y;
-          sy = width - 1 - x;
+          sy = height - 1 - x;
         } else if (rot === 2) {
-          sx = outW - 1 - x;
-          sy = outH - 1 - y;
+          sx = width - 1 - x;
+          sy = height - 1 - y;
         } else if (rot === 3) {
-          sx = height - 1 - y;
+          sx = width - 1 - y;
           sy = x;
         }
         out[y * outW + x] = sampleAt(intensities, width, height, sx, sy, flipH, flipV);

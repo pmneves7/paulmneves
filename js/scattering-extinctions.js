@@ -177,6 +177,8 @@
   }
 
   const ZONES = {
+    h00: (h, k, l) => k === 0 && l === 0,
+    "0k0": (h, k, l) => h === 0 && l === 0,
     h0l: (h, k, l) => k === 0,
     "0kl": (h, k, l) => h === 0,
     hk0: (h, k, l) => l === 0,
@@ -185,25 +187,22 @@
 
   const ORTHO_GLIDE_RULES = {
     0: {
-      a: ["ortho-a-0kl", "a-glide ⊥ a: (0kl) require k = 2n", ZONES["0kl"], (h, k) => isEven(k)],
-      b: ["ortho-b-0kl", "b-glide ⊥ a: (0kl) require l = 2n", ZONES["0kl"], (h, k, l) => isEven(l)],
+      b: ["ortho-b-0kl", "b-glide ⊥ a: (0kl) require k = 2n", ZONES["0kl"], (h, k) => isEven(k)],
       c: ["ortho-c-0kl", "c-glide ⊥ a: (0kl) require l = 2n", ZONES["0kl"], (h, k, l) => isEven(l)],
       n: ["ortho-n-0kl", "n-glide ⊥ a: (0kl) require k + l = 2n", ZONES["0kl"], (h, k, l) => isEven(k + l)],
-      "21": ["ortho-21-0kl", "2₁ screw ⊥ a: (0kl) require k + l = 2n", ZONES["0kl"], (h, k, l) => isEven(k + l)]
+      "21": ["ortho-21-h00", "2₁ screw ∥ a: (h00) require h = 2n", ZONES.h00, (h) => isEven(h)]
     },
     1: {
       a: ["ortho-a-h0l", "a-glide ⊥ b: (h0l) require h = 2n", ZONES.h0l, (h) => isEven(h)],
-      b: ["ortho-b-h0l", "b-glide ⊥ b: (h0l) require l = 2n", ZONES.h0l, (h, k, l) => isEven(l)],
-      c: ["ortho-c-h0l", "c-glide ⊥ b: (h0l) require h = 2n", ZONES.h0l, (h) => isEven(h)],
+      c: ["ortho-c-h0l", "c-glide ⊥ b: (h0l) require l = 2n", ZONES.h0l, (h, k, l) => isEven(l)],
       n: ["ortho-n-h0l", "n-glide ⊥ b: (h0l) require h + l = 2n", ZONES.h0l, (h, k, l) => isEven(h + l)],
-      "21": ["ortho-21-h0l", "2₁ screw ⊥ b: (h0l) require h + l = 2n", ZONES.h0l, (h, k, l) => isEven(h + l)]
+      "21": ["ortho-21-0k0", "2₁ screw ∥ b: (0k0) require k = 2n", ZONES["0k0"], (h, k) => isEven(k)]
     },
     2: {
       a: ["ortho-a-hk0", "a-glide ⊥ c: (hk0) require h = 2n", ZONES.hk0, (h) => isEven(h)],
       b: ["ortho-b-hk0", "b-glide ⊥ c: (hk0) require k = 2n", ZONES.hk0, (h, k) => isEven(k)],
-      c: ["ortho-c-hk0", "c-glide ⊥ c: (hk0) require h = 2n", ZONES.hk0, (h) => isEven(h)],
       n: ["ortho-n-hk0", "n-glide ⊥ c: (hk0) require h + k = 2n", ZONES.hk0, (h, k) => isEven(h + k)],
-      "21": ["ortho-21-hk0", "2₁ screw ⊥ c: (hk0) require h + k = 2n", ZONES.hk0, (h, k) => isEven(h + k)]
+      "21": ["ortho-21-00l", "2₁ screw ∥ c: (00l) require l = 2n", ZONES["00l"], (h, k, l) => isEven(l)]
     }
   };
 
@@ -236,13 +235,16 @@
   function monoclinicRules(normalizedSymbol) {
     const rules = [];
     if (/21/.test(normalizedSymbol)) {
-      rules.push(zoneRule("mono-21-h0l", "2₁ screw ∥ b: (h0l) require l = 2n", ZONES.h0l, (h, k, l) => isEven(l)));
+      rules.push(zoneRule("mono-21-0k0", "2₁ screw ∥ b: (0k0) require k = 2n", ZONES["0k0"], (h, k) => isEven(k)));
     }
     if (/[^a-z]c/.test(normalizedSymbol) || /\/c/.test(normalizedSymbol)) {
       rules.push(zoneRule("mono-c-h0l", "c-glide: (h0l) require l = 2n", ZONES.h0l, (h, k, l) => isEven(l)));
     }
     if (/[^a-z]a/.test(normalizedSymbol) || /\/a/.test(normalizedSymbol)) {
       rules.push(zoneRule("mono-a-h0l", "a-glide: (h0l) require h = 2n", ZONES.h0l, (h) => isEven(h)));
+    }
+    if (/[^a-z]n/.test(normalizedSymbol) || /\/n/.test(normalizedSymbol)) {
+      rules.push(zoneRule("mono-n-h0l", "n-glide: (h0l) require h + l = 2n", ZONES.h0l, (h, k, l) => isEven(h + l)));
     }
     return dedupeRules(rules);
   }
@@ -286,15 +288,6 @@
     const cScrew = detectCAxisScrew(normalizedSymbol);
     if (cScrew) rules.push(cAxisScrewRule(cScrew));
 
-    if (/21/.test(normalizedSymbol)) {
-      rules.push(zoneRule("tet-21-hk0", "2₁ in ab plane: (hk0) require h + k = 2n", ZONES.hk0, (h, k) => isEven(h + k)));
-    }
-    if (/[^a-z]c/.test(normalizedSymbol) && /[46]/.test(normalizedSymbol)) {
-      rules.push(zoneRule("tet-c-hk0", "c-glide: (hk0) require h = 2n", ZONES.hk0, (h) => isEven(h)));
-    }
-    if (/[^a-z]n/.test(normalizedSymbol) && /[46]/.test(normalizedSymbol)) {
-      rules.push(zoneRule("tet-n-hk0", "n-glide: (hk0) require h + k = 2n", ZONES.hk0, (h, k) => isEven(h + k)));
-    }
     return dedupeRules(rules);
   }
 

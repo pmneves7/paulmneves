@@ -194,7 +194,7 @@
    * Rotate sample orientation so reflection hkl moves to (targetX, targetY) on the image.
    * Uses detector in-plane axes (2 DOF) with Gauss–Newton steps; stable vs Euler increments.
    *
-   * @param {object} detector - detOmega, detChi, laueMode, detOmegaMisalign, detChiMisalign
+   * @param {object} detector - detOmega, detChi, laueMode
    */
   function panSampleOrientationTrackPoint(
     params,
@@ -215,11 +215,7 @@
       detector.detChi,
       detector.laueMode
     );
-    const basis = detectorBasis(
-      n,
-      detector.detOmegaMisalign || 0,
-      detector.detChiMisalign || 0
-    );
+    const basis = detectorBasis(n);
 
     for (let iter = 0; iter < 12; iter += 1) {
       const m = uMatrix(angles.omega, angles.chi, angles.phi, signs);
@@ -258,6 +254,18 @@
     return angles;
   }
 
+  function rotateSampleOrientationAboutBeam(startAngles, signs, deltaDeg) {
+    const hint = { ...startAngles };
+    const m = uMatrix(startAngles.omega, startAngles.chi, startAngles.phi, signs);
+    const mNew = mat3Mul(rotAxis([1, 0, 0], degToRad(deltaDeg)), m);
+    const raw = sampleEulerFromUMatrix(mNew, signs);
+    return {
+      omega: wrapAngleNear(raw.omega, hint.omega),
+      chi: wrapAngleNear(raw.chi, hint.chi),
+      phi: wrapAngleNear(raw.phi, hint.phi)
+    };
+  }
+
   function ubMatrix(params, sampleOmega, sampleChi, samplePhi, signs) {
     return mat3Mul(uMatrix(sampleOmega, sampleChi, samplePhi, signs), bMatrix(params));
   }
@@ -287,33 +295,67 @@
   }
 
   /**
-   * Detector plane normal from spherical angles Ω (azimuth about z) and χ (polar from +z).
-   * ω=0, χ=90° → normal along +x (transmission, downstream detector).
-   * ω=180°, χ=90° → normal along −x (backscatter).
+   * Detector plane normal. χ is the tilt away from the beam-axis normal:
+   * transmission χ=0 → +x, backscatter χ=0 → −x. Ω is the azimuth of that tilt
+   * in the lab yz plane.
    */
   function detectorNormal(detOmega, detChi, laueMode) {
-    if (laueMode === "backscatter") {
-      detOmega = detOmega + 180;
-    }
     const o = degToRad(detOmega);
     const c = degToRad(detChi);
     const sinC = Math.sin(c);
+    const beamSign = laueMode === "backscatter" ? -1 : 1;
     return normalize([
+      beamSign * Math.cos(c),
+      sinC * Math.sin(o),
+      sinC * Math.cos(o)
+    ]);
+  }
+
+  function legacyDetectorNormal(detOmega, detChi, laueMode, detOmegaMisalign, detChiMisalign) {
+    let omega = detOmega;
+    if (laueMode === "backscatter") omega += 180;
+    const o = degToRad(omega);
+    const c = degToRad(detChi);
+    const sinC = Math.sin(c);
+    let n = normalize([
       sinC * Math.cos(o),
       sinC * Math.sin(o),
       Math.cos(c)
     ]);
+    if (Math.abs(detOmegaMisalign || 0) > 1e-9 || Math.abs(detChiMisalign || 0) > 1e-9) {
+      const mis = mat3Mul(rotX(degToRad(detChiMisalign || 0)), rotZ(degToRad(detOmegaMisalign || 0)));
+      n = normalize(mat3Vec(mis, n));
+    }
+    return n;
+  }
+
+  function detectorAnglesFromNormal(normal, laueMode) {
+    const n = normalize(normal);
+    const beamSign = laueMode === "backscatter" ? -1 : 1;
+    const chi = radToDeg(Math.acos(clamp(beamSign * n[0], -1, 1)));
+    if (Math.abs(Math.sin(degToRad(chi))) < 1e-8) {
+      return { detOmega: 0, detChi: chi };
+    }
+    const omega = radToDeg(Math.atan2(n[1], n[2]));
+    return { detOmega: omega, detChi: chi };
+  }
+
+  function migrateLegacyDetectorAngles(detector) {
+    const n = legacyDetectorNormal(
+      detector.detOmega || 0,
+      detector.detChi == null ? 90 : detector.detChi,
+      detector.laueMode || "backscatter",
+      detector.detOmegaMisalign || 0,
+      detector.detChiMisalign || 0
+    );
+    return detectorAnglesFromNormal(n, detector.laueMode || "backscatter");
   }
 
   /**
    * In-plane detector axes: u → image +x, v → image +y (down).
    */
-  function detectorBasis(normal, detOmegaMisalign, detChiMisalign) {
-    let n = normalize(normal);
-    if (Math.abs(detOmegaMisalign) > 1e-9 || Math.abs(detChiMisalign) > 1e-9) {
-      const mis = mat3Mul(rotX(degToRad(detChiMisalign)), rotZ(degToRad(detOmegaMisalign)));
-      n = mat3Vec(mis, n);
-    }
+  function detectorBasis(normal) {
+    const n = normalize(normal);
     let u = cross([0, 0, 1], n);
     if (norm(u) < 1e-6) u = cross([0, 1, 0], n);
     u = normalize(u);
@@ -351,8 +393,11 @@
     if (kNorm < 1e-14) return null;
     const direction = normalize(kOut);
 
+    const towardDetector = config.laueMode === "backscatter" ? direction[0] < 0 : direction[0] > 0;
+    if (!towardDetector) return null;
+
     const n = detectorNormal(config.detOmega, config.detChi, config.laueMode);
-    const basis = detectorBasis(n, config.detOmegaMisalign || 0, config.detChiMisalign || 0);
+    const basis = detectorBasis(n);
     const planePoint = scale(basis.normal, config.detDistance);
 
     const denom = dot(direction, basis.normal);
@@ -372,21 +417,10 @@
     const beamCx = config.beamX;
     const beamCy = config.beamY;
 
-    let xLabRot = xLab;
-    let yLabRot = yLab;
-    const rotDeg = config.patternRotation || 0;
-    if (Math.abs(rotDeg) > 1e-12) {
-      const rad = degToRad(rotDeg);
-      const cosR = Math.cos(rad);
-      const sinR = Math.sin(rad);
-      xLabRot = xLab * cosR - yLab * sinR;
-      yLabRot = xLab * sinR + yLab * cosR;
-    }
+    const cx = beamCx + xLab * pxPerMmX;
+    const cy = beamCy + yLab * pxPerMmY;
 
-    const cx = beamCx + xLabRot * pxPerMmX;
-    const cy = beamCy + yLabRot * pxPerMmY;
-
-    return { x: cx, y: cy, q: qMag, lambda, xLab: xLabRot, yLab: yLabRot };
+    return { x: cx, y: cy, q: qMag, lambda, xLab, yLab };
   }
 
   function projectHKL(params, hkl, config, imageSize) {
@@ -460,9 +494,10 @@
       case "detOffsetX":
       case "detOffsetY":
         return { eps: 0.25, stepMax: 8, min: -5000, max: 5000 };
-      case "detOmegaMisalign":
-      case "detChiMisalign":
-        return { eps: 0.05, stepMax: 1, min: -45, max: 45 };
+      case "detOmega":
+        return { eps: 0.05, stepMax: 1, min: -360, max: 360 };
+      case "detChi":
+        return { eps: 0.05, stepMax: 1, min: -90, max: 90 };
       default:
         return { eps: 0.05, stepMax: 1, min: -1e6, max: 1e6 };
     }
@@ -521,7 +556,7 @@
     const paramKeys = [
       "sampleOmega", "sampleChi", "samplePhi",
       "detDistance", "detOffsetX", "detOffsetY",
-      "detOmegaMisalign", "detChiMisalign"
+      "detOmega", "detChi"
     ].filter((key) => flags[key]);
 
     if (!paramKeys.length || !observedPeaks.length) {
@@ -1066,10 +1101,13 @@
     uMatrix,
     sampleEulerFromUMatrix,
     panSampleOrientationTrackPoint,
+    rotateSampleOrientationAboutBeam,
     ubMatrix,
     reciprocalVector,
     enumerateHKL,
     detectorNormal,
+    detectorAnglesFromNormal,
+    migrateLegacyDetectorAngles,
     detectorBasis,
     peakOnImage,
     projectReflection,

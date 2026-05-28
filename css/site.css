@@ -487,6 +487,66 @@ section {
   margin-bottom: 1rem;
 }
 
+.tool-collapsible {
+  border: 1px solid var(--accent-dark);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.tool-collapsible-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.2rem;
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 0;
+  padding: 0.65rem 0.85rem;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  background: var(--accent);
+  color: #fff;
+}
+
+.tool-collapsible-summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-collapsible-summary::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  margin-top: -0.15rem;
+  transition: transform 0.15s ease;
+}
+
+.tool-collapsible[open] > .tool-collapsible-summary::before {
+  transform: rotate(45deg);
+  margin-top: 0.1rem;
+}
+
+.tool-collapsible-summary:hover {
+  background: var(--accent-dark);
+}
+
+.tool-collapsible-body {
+  padding: 0 0.85rem 0.85rem;
+  border-top: 1px solid var(--border);
+}
+
+.tool-collapsible:not([open]) > .tool-collapsible-body {
+  display: none;
+}
+
+.tool-collapsible-body > .tool-note:first-child {
+  margin-top: 0.85rem;
+}
+
 .tool-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -1873,7 +1933,8 @@ body.laue-page.laue-nav-hidden .laue-viewer-panel {
 
 .laue-colorbar-label {
   font-size: 0.72rem;
-  color: var(--muted, #5a6270);
+  font-weight: 700;
+  color: #000;
   font-variant-numeric: tabular-nums;
   writing-mode: horizontal-tb;
 }
@@ -1900,7 +1961,28 @@ body.laue-page.laue-nav-hidden .laue-viewer-panel {
   margin-top: 0.75rem;
 }
 
-.laue-action-row + .tool-grid {
+.laue-action-row + .tool-grid,
+.laue-action-row + .laue-instrument-2col {
+  margin-top: 1rem;
+}
+
+#laue-instrument-form > .laue-instrument-2col:first-child {
+  margin-top: 0.85rem;
+}
+
+#laue-sample-param-fields > .tool-grid:first-child {
+  margin-top: 0.85rem;
+}
+
+#laue-peak-param-fields > .tool-grid:first-child {
+  margin-top: 0.85rem;
+}
+
+.laue-tools-scroll .laue-instrument-2col {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.laue-tools-scroll .laue-instrument-2col + .laue-instrument-2col {
   margin-top: 1rem;
 }
 
@@ -2223,6 +2305,50 @@ body.laue-page.laue-nav-hidden .laue-viewer-panel {
   margin: 0;
   height: 100%;
   overflow-y: auto;
+}
+
+.laue-tools-scroll .tool-results {
+  margin: 1.25rem 0 0;
+  padding: 1rem;
+}
+
+.laue-tools-scroll .tool-results h3 {
+  font-size: 1rem;
+  margin: 0 0 0.65rem;
+}
+
+.laue-tools-scroll .tool-table.laue-peaks-table {
+  width: 100%;
+  min-width: 0;
+  font-size: 0.8rem;
+  table-layout: fixed;
+}
+
+.laue-tools-scroll .laue-peaks-table th,
+.laue-tools-scroll .laue-peaks-table td {
+  padding: 0.35rem 0.3rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.laue-tools-scroll .laue-peaks-table th:nth-child(1),
+.laue-tools-scroll .laue-peaks-table td:nth-child(1) {
+  width: 30%;
+}
+
+.laue-tools-scroll .laue-peaks-table th:nth-child(2),
+.laue-tools-scroll .laue-peaks-table td:nth-child(2) {
+  width: 28%;
+}
+
+.laue-tools-scroll .laue-peaks-table th:nth-child(3),
+.laue-tools-scroll .laue-peaks-table td:nth-child(3) {
+  width: 21%;
+}
+
+.laue-tools-scroll .laue-peaks-table th:nth-child(4),
+.laue-tools-scroll .laue-peaks-table td:nth-child(4) {
+  width: 21%;
 }
 
 .laue-peaks-table tr.laue-peak-offscreen td {

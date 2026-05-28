@@ -2,6 +2,10 @@
   "use strict";
 
   const STORAGE_KEY = "laue-analysis-config-v1";
+  const IMAGE_DB_NAME = "laue-analysis-cache";
+  const IMAGE_DB_VERSION = 1;
+  const IMAGE_STORE_NAME = "image";
+  const IMAGE_CACHE_KEY = "last";
 
   const canvas = document.getElementById("laue-canvas");
   const overlayCanvas = document.getElementById("laue-overlay-canvas");
@@ -41,7 +45,7 @@
     },
     corrections: {
       gaussianBlur: false,
-      blurRadius: 1.5,
+      blurRadius: 0.5,
       radialNormalize: false,
       radialBins: 32
     },
@@ -70,9 +74,7 @@
       detOffsetX: 0,
       detOffsetY: 0,
       detOmega: 0,
-      detChi: 90,
-      detOmegaMisalign: 0,
-      detChiMisalign: 0,
+      detChi: 0,
       laueMode: "backscatter",
       autoFlipH: false,
       autoFlipV: false,
@@ -89,7 +91,6 @@
       maxHklSq: 200,
       qMin: 0,
       qMax: 10,
-      patternRotation: 0,
       peakThreshold: 100,
       peakMinRadius: 5,
       peakMatchRadius: 10
@@ -100,8 +101,11 @@
     view: { zoom: 1, fitScale: 1, centerX: null, centerY: null, tx: 0, ty: 0, totalScale: 1 },
     drag: null,
     curveDrag: null,
-    refinementUndo: null
+    refinementUndo: null,
+    lastLoadedFileName: ""
   };
+
+  let imagePersistTimer = null;
 
   const modeButtons = Array.from(document.querySelectorAll(".laue-mode-btn[data-mode]"));
 
@@ -157,8 +161,8 @@
     inst.detOffsetY = num("laue-det-offset-y");
     inst.detOmega = num("laue-det-omega");
     inst.detChi = num("laue-det-chi");
-    inst.detOmegaMisalign = num("laue-det-omega-mis");
-    inst.detChiMisalign = num("laue-det-chi-mis");
+    delete inst.detOmegaMisalign;
+    delete inst.detChiMisalign;
     inst.laueMode = document.getElementById("laue-laue-mode").value;
     inst.autoFlipH = document.getElementById("laue-auto-flip-h").checked;
     inst.autoFlipV = document.getElementById("laue-auto-flip-v").checked;
@@ -172,7 +176,7 @@
     inst.maxHklSq = num("laue-max-hkl-sq");
     inst.qMin = num("laue-q-min");
     inst.qMax = num("laue-q-max");
-    inst.patternRotation = num("laue-pattern-rotation");
+    delete inst.patternRotation;
     inst.peakThreshold = num("laue-peak-threshold");
     inst.peakMinRadius = num("laue-peak-min-radius");
     inst.peakMatchRadius = num("laue-match-radius");
@@ -198,15 +202,12 @@
       "laue-det-offset-y": inst.detOffsetY,
       "laue-det-omega": inst.detOmega,
       "laue-det-chi": inst.detChi,
-      "laue-det-omega-mis": inst.detOmegaMisalign,
-      "laue-det-chi-mis": inst.detChiMisalign,
       "laue-sample-omega": inst.sampleOmega,
       "laue-sample-chi": inst.sampleChi,
       "laue-sample-phi": inst.samplePhi,
       "laue-max-hkl-sq": inst.maxHklSq,
       "laue-q-min": inst.qMin,
       "laue-q-max": inst.qMax,
-      "laue-pattern-rotation": inst.patternRotation,
       "laue-peak-threshold": inst.peakThreshold,
       "laue-peak-min-radius": inst.peakMinRadius,
       "laue-match-radius": inst.peakMatchRadius
@@ -250,11 +251,57 @@
     return true;
   }
 
+  function migratePatternRotationIntoSampleAngles(inst) {
+    const rot = Number(inst && inst.patternRotation);
+    if (!Number.isFinite(rot) || Math.abs(rot) < 1e-12) return { ...inst, patternRotation: 0 };
+    const signs = {
+      omega: inst.sampleSignOmega || 1,
+      chi: inst.sampleSignChi || 1,
+      phi: inst.sampleSignPhi || 1
+    };
+    const angles = LaueMath.rotateSampleOrientationAboutBeam(
+      {
+        omega: Number(inst.sampleOmega) || 0,
+        chi: Number(inst.sampleChi) || 0,
+        phi: Number(inst.samplePhi) || 0
+      },
+      signs,
+      -rot
+    );
+    return {
+      ...inst,
+      sampleOmega: angles.omega,
+      sampleChi: angles.chi,
+      samplePhi: angles.phi,
+      patternRotation: 0
+    };
+  }
+
+  function migrateDetectorMisalignIntoAngles(inst) {
+    if (!inst || (inst.detOmegaMisalign == null && inst.detChiMisalign == null)) return { ...inst };
+    const angles = LaueMath.migrateLegacyDetectorAngles(inst);
+    const migrated = {
+      ...inst,
+      detOmega: angles.detOmega,
+      detChi: angles.detChi
+    };
+    delete migrated.detOmegaMisalign;
+    delete migrated.detChiMisalign;
+    return migrated;
+  }
+
+  function migrateInstrumentConfig(inst) {
+    return migratePatternRotationIntoSampleAngles(migrateDetectorMisalignIntoAngles(inst));
+  }
+
   function buildConfig(inst) {
     const cfg = {
       ...inst,
       sampleSigns: { omega: inst.sampleSignOmega, chi: inst.sampleSignChi, phi: inst.sampleSignPhi }
     };
+    delete cfg.patternRotation;
+    delete cfg.detOmegaMisalign;
+    delete cfg.detChiMisalign;
     if (state.displayData) {
       const beam = beamCenterPosition();
       cfg.beamX = beam.x;
@@ -409,7 +456,7 @@
     const c = corrections || state.corrections;
     document.getElementById("laue-correction-blur").checked = !!c.gaussianBlur;
     document.getElementById("laue-correction-radial").checked = !!c.radialNormalize;
-    document.getElementById("laue-blur-radius").value = c.blurRadius ?? 1.5;
+    document.getElementById("laue-blur-radius").value = c.blurRadius ?? 0.5;
     document.getElementById("laue-radial-bins").value = c.radialBins ?? 32;
   }
 
@@ -520,6 +567,22 @@
     setStatus(`Intensity limits set to ${formatIntensity(range.min)} – ${formatIntensity(range.max)}.`);
   }
 
+  function setIntensityLimitsToPercentiles() {
+    const source = state.displayData || state.transformedData;
+    if (!source) {
+      setStatus("Load an image first.");
+      return;
+    }
+    const range = LaueFormats.intensityPercentileRange(source.intensities, 0.01, 0.99);
+    document.getElementById("laue-vmin").value = range.min;
+    document.getElementById("laue-vmax").value = range.max;
+    state.display.vmin = range.min;
+    state.display.vmax = range.max;
+    reprocessImage({ rescaleIntensity: false });
+    persistConfig();
+    setStatus(`Intensity limits set to 1/99 percentiles: ${formatIntensity(range.min)} – ${formatIntensity(range.max)}.`);
+  }
+
   function reprocessImage(options) {
     if (!state.rawData) return;
     const data = {
@@ -555,7 +618,6 @@
     document.getElementById("laue-sample-omega").value = 0;
     document.getElementById("laue-sample-chi").value = 0;
     document.getElementById("laue-sample-phi").value = 0;
-    document.getElementById("laue-pattern-rotation").value = 0;
     updatePredictions();
     persistConfig();
     setStatus("Sample orientation reset to zero.");
@@ -736,23 +798,32 @@
     applyViewTransform();
   }
 
-  async function finishImageLoad(buildStatusMessage) {
-    state.rawIntensityRange = null;
-    state.instrument.beamX = null;
-    state.instrument.beamY = null;
-    const meta = state.rawData.meta || {};
-    if (meta.detDistanceMm) {
-      document.getElementById("laue-det-distance").value = meta.detDistanceMm;
+  async function finishImageLoad(buildStatusMessage, options = {}) {
+    const preserveSession = !!options.preserveSession;
+    if (!preserveSession) {
+      state.rawIntensityRange = null;
+      state.transform = { rotate90: 0, flipH: false, flipV: false };
+      state.instrument.beamX = null;
+      state.instrument.beamY = null;
+      const meta = state.rawData.meta || {};
+      if (meta.detDistanceMm) {
+        document.getElementById("laue-det-distance").value = meta.detDistanceMm;
+      }
     }
     reprocessImage();
-    applyIntensityRangeFromData();
-    reprocessImage();
-    resetViewToFit();
-    requestAnimationFrame(() => resetViewToFit());
+    if (!preserveSession) {
+      applyIntensityRangeFromData();
+      reprocessImage();
+      resetViewToFit();
+      requestAnimationFrame(() => resetViewToFit());
+    } else {
+      applyViewTransform();
+    }
     if (!state.displayData) {
       throw new Error("Image could not be displayed.");
     }
     setStatus(typeof buildStatusMessage === "function" ? buildStatusMessage() : buildStatusMessage);
+    schedulePersistImage();
   }
 
   async function loadFile(file) {
@@ -760,6 +831,7 @@
     setStatus("Loading…");
     try {
       state.rawData = await LaueFormats.loadLaueFile(file);
+      state.lastLoadedFileName = file.name || "upload";
       await finishImageLoad(
         () => {
           let msg = `Loaded ${file.name} (${state.displayData.width}×${state.displayData.height}, ${state.rawData.source})`;
@@ -780,29 +852,85 @@
     }
   }
 
-  async function loadExamplePng() {
-    showError("");
-    setStatus("Loading…");
-    const url = new URL("../files/laue/example_laue.png", window.location.href).href;
-    try {
-      try {
-        const resp = await fetch(url);
-        if (resp.ok) {
-          const blob = await resp.blob();
-          await loadFile(new File([blob], "example_laue.png", { type: blob.type || "image/png" }));
-          return;
-        }
-      } catch (_) {
-        /* fetch unavailable (e.g. file://) — fall back to Image loader */
+  function openImageCacheDb() {
+    return new Promise((resolve, reject) => {
+      if (!global.indexedDB) {
+        reject(new Error("IndexedDB unavailable"));
+        return;
       }
-      state.rawData = await LaueFormats.loadImageFromUrl(url);
-      await finishImageLoad(
-        () => `Loaded example (${state.displayData.width}×${state.displayData.height}, image)`
-      );
-    } catch (err) {
-      showError(err.message || "Could not load example image.");
-      setStatus("");
-    }
+      const req = indexedDB.open(IMAGE_DB_NAME, IMAGE_DB_VERSION);
+      req.onerror = () => reject(req.error);
+      req.onsuccess = () => resolve(req.result);
+      req.onupgradeneeded = () => {
+        if (!req.result.objectStoreNames.contains(IMAGE_STORE_NAME)) {
+          req.result.createObjectStore(IMAGE_STORE_NAME);
+        }
+      };
+    });
+  }
+
+  async function persistImageCache() {
+    if (!state.rawData) return;
+    const db = await openImageCacheDb();
+    const intensities = state.rawData.intensities.slice();
+    const record = {
+      fileName: state.lastLoadedFileName || "cached-image",
+      width: state.rawData.width,
+      height: state.rawData.height,
+      source: state.rawData.source,
+      meta: state.rawData.meta || {},
+      intensities: intensities.buffer
+    };
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(IMAGE_STORE_NAME, "readwrite");
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => reject(tx.error);
+      tx.objectStore(IMAGE_STORE_NAME).put(record, IMAGE_CACHE_KEY);
+    });
+  }
+
+  async function restoreCachedImage() {
+    if (!global.indexedDB) return false;
+    const db = await openImageCacheDb();
+    const record = await new Promise((resolve, reject) => {
+      const tx = db.transaction(IMAGE_STORE_NAME, "readonly");
+      const req = tx.objectStore(IMAGE_STORE_NAME).get(IMAGE_CACHE_KEY);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+      tx.oncomplete = () => {
+        db.close();
+      };
+    });
+    if (!record || !record.intensities || !record.width || !record.height) return false;
+
+    const pixelCount = record.width * record.height;
+    const intensities = new Float32Array(record.intensities);
+    if (intensities.length < pixelCount) return false;
+
+    showError("");
+    state.lastLoadedFileName = record.fileName || "cached-image";
+    state.rawData = {
+      width: record.width,
+      height: record.height,
+      intensities: pixelCount === intensities.length ? intensities : intensities.subarray(0, pixelCount),
+      source: record.source || "cache",
+      meta: record.meta || {}
+    };
+    await finishImageLoad(
+      () => `Restored ${state.lastLoadedFileName} (${state.rawData.width}×${state.rawData.height})`,
+      { preserveSession: true }
+    );
+    return true;
+  }
+
+  function schedulePersistImage() {
+    if (imagePersistTimer) window.clearTimeout(imagePersistTimer);
+    imagePersistTimer = window.setTimeout(() => {
+      persistImageCache().catch(() => { /* quota or private mode */ });
+    }, 400);
   }
 
   function setDetectorSizeFromImage() {
@@ -873,20 +1001,22 @@
     } catch (err) {
       setStatus(err.message);
     }
+    rematchObservedPeaksIfAny();
     redraw();
   }
 
   function renderPeaksTable() {
     if (!peaksTbody) return;
     const rows = state.predictedPeaks
+      .filter((p) => p.onImage)
       .sort((a, b) => a.hklSq - b.hklSq)
       .slice(0, 200)
       .map((p) => `
-        <tr class="${p.onImage ? "" : "laue-peak-offscreen"}">
-          <td>(${p.h}, ${p.k}, ${p.l})</td>
-          <td>${p.q.toFixed(4)}</td>
-          <td>${p.x.toFixed(1)}</td>
-          <td>${p.y.toFixed(1)}</td>
+        <tr>
+          <td>(${p.h},${p.k},${p.l})</td>
+          <td>${p.q.toFixed(3)}</td>
+          <td>${Math.round(p.x)}</td>
+          <td>${Math.round(p.y)}</td>
         </tr>`)
       .join("");
     peaksTbody.innerHTML = rows || '<tr><td colspan="4">No peaks in range.</td></tr>';
@@ -1021,6 +1151,7 @@
       setOverlayStroke(overlayCtx, overlay.predColor, predA);
       overlayCtx.lineWidth = overlay.predLineWidth ?? 2;
       for (const p of state.predictedPeaks) {
+        if (!p.onImage) continue;
         const pos = imageToViewport(p.x, p.y);
         overlayCtx.beginPath();
         overlayCtx.arc(pos.x, pos.y, overlay.predRadius, 0, Math.PI * 2);
@@ -1281,7 +1412,7 @@
       });
     }
     if (obj.instrument) {
-      writeInstrumentToForm(obj.instrument);
+      writeInstrumentToForm(migrateInstrumentConfig(obj.instrument));
       normalizeBeamStorage();
       state.refinementUndo = null;
       setRefinementUndoAvailable(false);
@@ -1318,6 +1449,7 @@
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(saveConfigToObject()));
     } catch (_) { /* quota */ }
+    schedulePersistImage();
   }
 
   function restoreConfig() {
@@ -1357,7 +1489,11 @@
     setStatus(`Detected ${state.observedPeaks.length} peaks.`);
   }
 
-  const MIN_MATCHED_PEAKS_FOR_REFINE = 6;
+  const REFINE_PARAM_KEYS = [
+    "sampleOmega", "sampleChi", "samplePhi",
+    "detDistance", "detOffsetX", "detOffsetY",
+    "detOmega", "detChi"
+  ];
 
   function matchRadiusPx() {
     const radius = num("laue-match-radius");
@@ -1366,6 +1502,15 @@
 
   function countMatchedPeaks(peaks) {
     return peaks.filter((p) => p.matchedH != null).length;
+  }
+
+  function countRefinementParameters(flags) {
+    return REFINE_PARAM_KEYS.filter((key) => flags[key]).length;
+  }
+
+  function minMatchedPeaksForRefinement(flags) {
+    const nParams = countRefinementParameters(flags);
+    return nParams > 0 ? Math.ceil(nParams / 2) : 0;
   }
 
   function matchPeaksStatusMessage() {
@@ -1378,10 +1523,14 @@
   function matchPeaks() {
     state.observedPeaks = LaueMath.matchObservedToPredicted(
       state.observedPeaks,
-      state.predictedPeaks,
+      state.predictedPeaks.filter((p) => p.onImage),
       matchRadiusPx()
     );
     return matchPeaksStatusMessage();
+  }
+
+  function rematchObservedPeaksIfAny() {
+    if (state.observedPeaks.length) matchPeaks();
   }
 
   function snapshotRefinementInstrument() {
@@ -1393,8 +1542,8 @@
       detDistance: inst.detDistance,
       detOffsetX: inst.detOffsetX,
       detOffsetY: inst.detOffsetY,
-      detOmegaMisalign: inst.detOmegaMisalign,
-      detChiMisalign: inst.detChiMisalign
+      detOmega: inst.detOmega,
+      detChi: inst.detChi
     };
   }
 
@@ -1417,14 +1566,20 @@
       detDistance: document.getElementById("laue-refine-distance").checked,
       detOffsetX: document.getElementById("laue-refine-offset-x").checked,
       detOffsetY: document.getElementById("laue-refine-offset-y").checked,
-      detOmegaMisalign: document.getElementById("laue-refine-det-omega").checked,
-      detChiMisalign: document.getElementById("laue-refine-det-chi").checked
+      detOmega: document.getElementById("laue-refine-det-omega").checked,
+      detChi: document.getElementById("laue-refine-det-chi").checked
     };
     matchPeaks();
     const matchMsg = matchPeaksStatusMessage();
     const matchedCount = countMatchedPeaks(state.observedPeaks);
-    if (matchedCount < MIN_MATCHED_PEAKS_FOR_REFINE) {
-      refineResult.textContent = `${matchMsg} Need at least ${MIN_MATCHED_PEAKS_FOR_REFINE} matched peaks to refine from the current approximate orientation.`;
+    const selectedParamCount = countRefinementParameters(flags);
+    const minMatched = minMatchedPeaksForRefinement(flags);
+    if (!selectedParamCount) {
+      refineResult.textContent = `${matchMsg} Select at least one parameter to refine.`;
+      return;
+    }
+    if (matchedCount < minMatched) {
+      refineResult.textContent = `${matchMsg} Need at least ${minMatched} matched peak${minMatched === 1 ? "" : "s"} for ${selectedParamCount} selected parameter${selectedParamCount === 1 ? "" : "s"}.`;
       return;
     }
     const before = snapshotRefinementInstrument();
@@ -1472,7 +1627,7 @@
       refineResult.textContent = `${matchMsg} RMS pixel residual: ${result.rms.toFixed(2)} px${beforeTxt}`;
       return;
     }
-    refineResult.textContent = `${matchMsg} Assign index matches to observed peaks first (auto-detect + match).`;
+    refineResult.textContent = `${matchMsg} Assign index matches to observed peaks first (add or auto-detect peaks).`;
   }
 
   function undoRefinement() {
@@ -1546,6 +1701,7 @@
   function findNearestPredictedPeak(x, y) {
     let best = null;
     for (const p of state.predictedPeaks) {
+      if (!p.onImage) continue;
       const d = Math.hypot(p.x - x, p.y - y);
       if (!best || d < best.d) best = { peak: p, d };
     }
@@ -1721,9 +1877,7 @@
         {
           detOmega: inst.detOmega,
           detChi: inst.detChi,
-          laueMode: inst.laueMode,
-          detOmegaMisalign: inst.detOmegaMisalign,
-          detChiMisalign: inst.detChiMisalign
+          laueMode: inst.laueMode
         },
         state.drag.hkl,
         pos.x - state.drag.offsetX,
@@ -1737,9 +1891,20 @@
       updatePredictions();
     } else if (state.drag.type === "rotate-pattern") {
       const angle = Math.atan2(pos.y - state.drag.cy, pos.x - state.drag.cx);
-      const delta = (angle - state.drag.startAngle) * 180 / Math.PI;
+      const delta = Math.atan2(
+        Math.sin(angle - state.drag.startAngle),
+        Math.cos(angle - state.drag.startAngle)
+      ) * 180 / Math.PI;
       state.drag.startAngle = angle;
-      document.getElementById("laue-pattern-rotation").value = num("laue-pattern-rotation") + delta;
+      const inst = readInstrument();
+      const angles = LaueMath.rotateSampleOrientationAboutBeam(
+        { omega: inst.sampleOmega, chi: inst.sampleChi, phi: inst.samplePhi },
+        { omega: inst.sampleSignOmega, chi: inst.sampleSignChi, phi: inst.sampleSignPhi },
+        -delta
+      );
+      document.getElementById("laue-sample-omega").value = angles.omega;
+      document.getElementById("laue-sample-chi").value = angles.chi;
+      document.getElementById("laue-sample-phi").value = angles.phi;
       updatePredictions();
     } else if (state.drag.type === "move-peak") {
       const peak = state.observedPeaks[state.drag.index];
@@ -1763,11 +1928,13 @@
       return;
     }
     if (state.drag) {
-      if (state.drag.type === "move-peak" || state.drag.type === "pan-view") {
+      const wasMovePeak = state.drag.type === "move-peak";
+      if (wasMovePeak || state.drag.type === "pan-view") {
         clearObservedPeakSelection();
         if (canvasViewport) canvasViewport.classList.remove("laue-dragging");
       }
       state.drag = null;
+      if (wasMovePeak) rematchObservedPeaksIfAny();
       redraw();
       persistConfig();
     }
@@ -1801,7 +1968,7 @@
       "pan-view": "Drag to pan the image view",
       beam: "Drag beam center; drag orange handle to scale circle",
       "pan-orientation": "Drag to pan — the point under the cursor stays under the cursor",
-      "rotate-pattern": "Drag to rotate predicted pattern about beam center",
+      "rotate-pattern": "Drag to rotate sample orientation about the direct beam",
       "add-peak": "Click to add observed peak",
       "move-peak": "Click and drag detected peaks to reposition them",
       "remove-peak": "Click to remove nearest observed peak"
@@ -1830,22 +1997,19 @@
       }
     });
 
-    document.getElementById("laue-example-btn").addEventListener("click", () => {
-      loadExamplePng();
-    });
-
     ["laue-rotate-cw", "laue-flip-h", "laue-flip-v"].forEach((id) => {
       document.getElementById(id).addEventListener("click", () => {
         if (id === "laue-rotate-cw") state.transform.rotate90 = (state.transform.rotate90 + 1) % 4;
         if (id === "laue-flip-h") state.transform.flipH = !state.transform.flipH;
         if (id === "laue-flip-v") state.transform.flipV = !state.transform.flipV;
-        reprocessImage();
+        reprocessImage({ rescaleIntensity: false });
         persistConfig();
       });
     });
 
     document.getElementById("laue-det-size-from-image").addEventListener("click", setDetectorSizeFromImage);
     document.getElementById("laue-intensity-autoscale").addEventListener("click", setIntensityLimitsToDataRange);
+    document.getElementById("laue-intensity-percentile").addEventListener("click", setIntensityLimitsToPercentiles);
 
     document.getElementById("laue-colormap").addEventListener("change", () => reprocessImage());
     document.getElementById("laue-vmin").addEventListener("input", () => reprocessImage({ rescaleIntensity: false }));
@@ -1853,7 +2017,16 @@
     document.getElementById("laue-reverse-colormap").addEventListener("change", () => reprocessImage());
     document.getElementById("laue-invert-intensity").addEventListener("change", () => reprocessImage());
 
-    ["laue-correction-blur", "laue-correction-radial", "laue-blur-radius", "laue-radial-bins"].forEach((id) => {
+    ["laue-correction-blur", "laue-blur-radius"].forEach((id) => {
+      const el = document.getElementById(id);
+      const onBlurChange = () => {
+        reprocessImage({ rescaleIntensity: false });
+        persistConfig();
+      };
+      el.addEventListener("input", onBlurChange);
+      el.addEventListener("change", onBlurChange);
+    });
+    ["laue-correction-radial", "laue-radial-bins"].forEach((id) => {
       document.getElementById(id).addEventListener("input", () => { reprocessImage(); persistConfig(); });
       document.getElementById(id).addEventListener("change", () => { reprocessImage(); persistConfig(); });
     });
@@ -1893,6 +2066,19 @@
 
       canvasViewport.addEventListener("contextmenu", onCanvasContextMenu);
     }
+
+    document.getElementById("laue-clear-unindexed-peaks-btn").addEventListener("click", () => {
+      const before = state.observedPeaks.length;
+      state.observedPeaks = state.observedPeaks.filter((p) => p.matchedH != null);
+      const removed = before - state.observedPeaks.length;
+      redraw();
+      setStatus(
+        removed
+          ? `Removed ${removed} un-indexed peak${removed === 1 ? "" : "s"} (${state.observedPeaks.length} remaining).`
+          : "No un-indexed peaks to remove."
+      );
+      persistConfig();
+    });
 
     document.getElementById("laue-clear-peaks-btn").addEventListener("click", () => {
       state.observedPeaks = [];
@@ -1962,21 +2148,34 @@
       btn.addEventListener("click", () => setMode(btn.dataset.mode));
     });
 
-    document.querySelectorAll("#laue-crystal-form input, #laue-instrument-form input, #laue-instrument-form select")
+    document.querySelectorAll(
+      "#laue-crystal-form input, #laue-crystal-form select, " +
+        "#laue-instrument-form input, #laue-instrument-form select, " +
+        "#laue-sample-param-fields input, #laue-sample-param-fields select, " +
+        "#laue-peak-param-fields input"
+    )
       .forEach((el) => {
         el.addEventListener("input", () => {
           if (el.closest("#laue-crystal-form")) clearCrystalPresetMeta();
           if (el.id === "laue-det-offset-x" || el.id === "laue-det-offset-y") onBeamCenterChanged();
-          else updatePredictions();
+          else if (el.id === "laue-match-radius") {
+            rematchObservedPeaksIfAny();
+            redraw();
+          } else if (el.id !== "laue-peak-threshold" && el.id !== "laue-peak-min-radius") {
+            updatePredictions();
+          }
           persistConfig();
         });
         el.addEventListener("change", () => {
           if (el.closest("#laue-crystal-form")) clearCrystalPresetMeta();
           if (el.id === "laue-auto-flip-h" || el.id === "laue-auto-flip-v" || el.id === "laue-auto-rotate") {
-            reprocessImage();
+            reprocessImage({ rescaleIntensity: false });
           } else if (el.id === "laue-det-offset-x" || el.id === "laue-det-offset-y") {
             onBeamCenterChanged();
-          } else {
+          } else if (el.id === "laue-match-radius") {
+            rematchObservedPeaksIfAny();
+            redraw();
+          } else if (el.id !== "laue-peak-threshold" && el.id !== "laue-peak-min-radius") {
             updatePredictions();
           }
           persistConfig();
@@ -1991,11 +2190,6 @@
     });
 
     document.getElementById("laue-auto-detect-btn").addEventListener("click", runAutoDetect);
-    document.getElementById("laue-match-btn").addEventListener("click", () => {
-      matchPeaks();
-      redraw();
-      setStatus(matchPeaksStatusMessage());
-    });
     document.getElementById("laue-refine-btn").addEventListener("click", runRefinement);
     document.getElementById("laue-refine-undo-btn").addEventListener("click", undoRefinement);
     document.getElementById("laue-ideal-btn").addEventListener("click", runIdealOrientation);
@@ -2082,6 +2276,81 @@
     }
   }
 
+  function initLaueViewerSnap() {
+    const stackedMq = window.matchMedia("(max-width: 1100px)");
+    const reducedMotionMq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const workspace = document.querySelector(".laue-layout");
+    const toolsPanel = document.querySelector(".laue-tools-scroll");
+    const viewer = document.querySelector(".laue-viewer-panel");
+    const backLink = document.querySelector(".laue-layout + .back-link-panel");
+    if (!workspace || !viewer) return;
+
+    let snapLock = false;
+    let scrollTimer = null;
+    const CENTER_BAND_RATIO = 0.075;
+    const MAX_CENTER_BAND = 88;
+    const EDGE_GUARD = 120;
+
+    function pageScrollY() {
+      return window.scrollY || document.documentElement.scrollTop || 0;
+    }
+
+    function maxPageScrollY() {
+      return Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    }
+
+    function scrollingNearPageEnd(targetY) {
+      if (!backLink) return false;
+      return targetY > maxPageScrollY() - EDGE_GUARD ||
+        backLink.getBoundingClientRect().top < window.innerHeight * 0.68;
+    }
+
+    function getSnapRect() {
+      if (stackedMq.matches) return viewer.getBoundingClientRect();
+
+      const rects = [toolsPanel, viewer]
+        .filter(Boolean)
+        .map((el) => el.getBoundingClientRect());
+      if (!rects.length) return workspace.getBoundingClientRect();
+
+      const top = Math.min(...rects.map((r) => r.top));
+      const bottom = Math.max(...rects.map((r) => r.bottom));
+      return { top, height: bottom - top };
+    }
+
+    function snapViewerIfNear() {
+      if (snapLock || reducedMotionMq.matches) return;
+
+      const vh = window.innerHeight;
+      const mid = vh * 0.5;
+      const band = Math.min(MAX_CENTER_BAND, vh * CENTER_BAND_RATIO);
+      const r = getSnapRect();
+      const center = r.top + r.height / 2;
+      if (Math.abs(center - mid) > band) return;
+
+      const currentY = pageScrollY();
+      const targetY = Math.max(0, Math.min(maxPageScrollY(), currentY + center - mid));
+      if (Math.abs(targetY - currentY) < 2) return;
+      if (currentY < EDGE_GUARD || targetY < EDGE_GUARD || scrollingNearPageEnd(targetY)) return;
+
+      snapLock = true;
+      window.scrollTo({ top: targetY, behavior: "smooth" });
+      window.setTimeout(() => {
+        snapLock = false;
+      }, 400);
+    }
+
+    function scheduleSnapCheck() {
+      if (scrollTimer) window.clearTimeout(scrollTimer);
+      scrollTimer = window.setTimeout(snapViewerIfNear, 120);
+    }
+
+    window.addEventListener("scroll", scheduleSnapCheck, { passive: true });
+    if ("onscrollend" in window) {
+      window.addEventListener("scrollend", snapViewerIfNear, { passive: true });
+    }
+  }
+
   function initLaueNavAutoHide() {
     const toolsScroll = document.querySelector(".laue-tools-scroll");
     let hidden = false;
@@ -2105,10 +2374,21 @@
     updateNavHidden();
   }
 
-  bindEvents();
-  initLaueNavAutoHide();
-  ensureCurveEndpoints();
-  drawCurveEditor();
-  restoreConfig();
-  setMode("view");
+  async function bootstrap() {
+    bindEvents();
+    initLaueViewerSnap();
+    initLaueNavAutoHide();
+    ensureCurveEndpoints();
+    drawCurveEditor();
+    restoreConfig();
+    try {
+      if (await restoreCachedImage()) {
+        rematchObservedPeaksIfAny();
+        redraw();
+      }
+    } catch (_) { /* ignore cache read errors */ }
+    setMode("view");
+  }
+
+  bootstrap();
 })();
