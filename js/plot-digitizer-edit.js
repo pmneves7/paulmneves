@@ -59,7 +59,7 @@
       stretchYPercent: 100,
       lensK: 0,
       moireStrength: 0,
-      moireMethod: "bilateral",
+      moireMethod: "adaptive",
       lensCenter: null,
       corners: null,
       crop: null,
@@ -548,369 +548,150 @@
     return clamp(strength, 0, 100) / 100;
   }
 
-  function blendMoireLayers(src, filtered, strength) {
-    const t = moireBlendAmount(strength);
-    if (t <= 0) return cloneCanvas(src);
+  function boxBlurPlane(src, w, h, radius, horizontal) {
+    if (radius <= 0) return new Float32Array(src);
+    const dst = new Float32Array(src.length);
+    const span = radius * 2 + 1;
 
-    const w = src.width;
-    const h = src.height;
-    const srcData = src.getContext("2d").getImageData(0, 0, w, h);
-    const filtData = filtered.getContext("2d").getImageData(0, 0, w, h);
-    const out = src.getContext("2d").createImageData(w, h);
-    const s = srcData.data;
-    const f = filtData.data;
-    const d = out.data;
-    const keep = 1 - t;
-
-    for (let i = 0; i < s.length; i += 4) {
-      d[i] = Math.round(s[i] * keep + f[i] * t);
-      d[i + 1] = Math.round(s[i + 1] * keep + f[i + 1] * t);
-      d[i + 2] = Math.round(s[i + 2] * keep + f[i + 2] * t);
-      d[i + 3] = s[i + 3];
-    }
-
-    const c = document.createElement("canvas");
-    c.width = w;
-    c.height = h;
-    c.getContext("2d").putImageData(out, 0, 0);
-    return c;
-  }
-
-  function bilateralFilterCanvas(src) {
-    const w = src.width;
-    const h = src.height;
-    const srcData = src.getContext("2d").getImageData(0, 0, w, h);
-    const s = srcData.data;
-    const out = src.getContext("2d").createImageData(w, h);
-    const d = out.data;
-
-    const sigmaSpace = 2.5;
-    const sigmaRange = 28;
-    const radius = Math.min(6, Math.ceil(sigmaSpace * 2));
-    const spaceDenom = 2 * sigmaSpace * sigmaSpace;
-    const rangeDenom = 2 * sigmaRange * sigmaRange;
-
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const ci = (y * w + x) * 4;
-        const cR = s[ci];
-        const cG = s[ci + 1];
-        const cB = s[ci + 2];
-        let wR = 0;
-        let wG = 0;
-        let wB = 0;
-        let wSum = 0;
-
-        for (let dy = -radius; dy <= radius; dy++) {
-          const yy = clamp(y + dy, 0, h - 1);
-          for (let dx = -radius; dx <= radius; dx++) {
-            const xx = clamp(x + dx, 0, w - 1);
-            const ni = (yy * w + xx) * 4;
-            const spatial = Math.exp(-(dx * dx + dy * dy) / spaceDenom);
-            const dr = s[ni] - cR;
-            const dg = s[ni + 1] - cG;
-            const db = s[ni + 2] - cB;
-            const range = Math.exp(-(dr * dr + dg * dg + db * db) / rangeDenom);
-            const ww = spatial * range;
-            wR += s[ni] * ww;
-            wG += s[ni + 1] * ww;
-            wB += s[ni + 2] * ww;
-            wSum += ww;
-          }
-        }
-
-        if (wSum <= 1e-8) {
-          d[ci] = cR;
-          d[ci + 1] = cG;
-          d[ci + 2] = cB;
-        } else {
-          d[ci] = Math.round(wR / wSum);
-          d[ci + 1] = Math.round(wG / wSum);
-          d[ci + 2] = Math.round(wB / wSum);
-        }
-        d[ci + 3] = s[ci + 3];
-      }
-    }
-
-    const c = document.createElement("canvas");
-    c.width = w;
-    c.height = h;
-    c.getContext("2d").putImageData(out, 0, 0);
-    return c;
-  }
-
-  function downscaleCanvas(src, dstW, dstH) {
-    const c = document.createElement("canvas");
-    c.width = dstW;
-    c.height = dstH;
-    const cx = c.getContext("2d");
-    cx.imageSmoothingEnabled = true;
-    cx.drawImage(src, 0, 0, src.width, src.height, 0, 0, dstW, dstH);
-    return c;
-  }
-
-  function upscaleCanvas(src, dstW, dstH) {
-    const c = document.createElement("canvas");
-    c.width = dstW;
-    c.height = dstH;
-    const cx = c.getContext("2d");
-    cx.imageSmoothingEnabled = true;
-    cx.drawImage(src, 0, 0, src.width, src.height, 0, 0, dstW, dstH);
-    return c;
-  }
-
-  function moireWorkingSize(srcW, srcH, maxDim) {
-    const scale = Math.min(1, maxDim / Math.max(srcW, srcH));
-    return {
-      scale,
-      w: Math.max(8, Math.round(srcW * scale)),
-      h: Math.max(8, Math.round(srcH * scale))
-    };
-  }
-
-  function nextPow2(n) {
-    let p = 1;
-    while (p < n) p <<= 1;
-    return p;
-  }
-
-  function fft1d(re, im, inverse) {
-    const n = re.length;
-    for (let i = 0, j = 0; i < n; i++) {
-      if (i < j) {
-        const tr = re[i]; re[i] = re[j]; re[j] = tr;
-        const ti = im[i]; im[i] = im[j]; im[j] = ti;
-      }
-      let bit = n >> 1;
-      for (; j & bit; bit >>= 1) j ^= bit;
-      j ^= bit;
-    }
-    for (let len = 2; len <= n; len <<= 1) {
-      const ang = (inverse ? 2 : -2) * Math.PI / len;
-      const wlenRe = Math.cos(ang);
-      const wlenIm = Math.sin(ang);
-      for (let i = 0; i < n; i += len) {
-        let wr = 1;
-        let wi = 0;
-        for (let j = 0; j < len / 2; j++) {
-          const u = i + j;
-          const v = i + j + len / 2;
-          const tr = wr * re[v] - wi * im[v];
-          const ti = wr * im[v] + wi * re[v];
-          re[v] = re[u] - tr;
-          im[v] = im[u] - ti;
-          re[u] += tr;
-          im[u] += ti;
-          const nwr = wr * wlenRe - wi * wlenIm;
-          wi = wr * wlenIm + wi * wlenRe;
-          wr = nwr;
-        }
-      }
-    }
-    if (inverse) {
-      for (let i = 0; i < n; i++) {
-        re[i] /= n;
-        im[i] /= n;
-      }
-    }
-  }
-
-  function fft2d(re, im, w, h, inverse) {
-    const rowRe = new Float64Array(w);
-    const rowIm = new Float64Array(w);
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        rowRe[x] = re[y * w + x];
-        rowIm[x] = im[y * w + x];
-      }
-      fft1d(rowRe, rowIm, inverse);
-      for (let x = 0; x < w; x++) {
-        re[y * w + x] = rowRe[x];
-        im[y * w + x] = rowIm[x];
-      }
-    }
-    const colRe = new Float64Array(h);
-    const colIm = new Float64Array(h);
-    for (let x = 0; x < w; x++) {
+    if (horizontal) {
       for (let y = 0; y < h; y++) {
-        colRe[y] = re[y * w + x];
-        colIm[y] = im[y * w + x];
-      }
-      fft1d(colRe, colIm, inverse);
-      for (let y = 0; y < h; y++) {
-        re[y * w + x] = colRe[y];
-        im[y * w + x] = colIm[y];
-      }
-    }
-  }
-
-  function applyFftNotchMask(re, im, w, h, strength) {
-    const t = moireBlendAmount(strength);
-    const cx = w / 2;
-    const cy = h / 2;
-    const excludeR = Math.max(4, Math.min(w, h) * 0.045);
-    const mag = new Float64Array(w * h);
-    let sum = 0;
-    let sumSq = 0;
-    let count = 0;
-
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const sx = (x + Math.floor(w / 2)) % w;
-        const sy = (y + Math.floor(h / 2)) % h;
-        const m = Math.hypot(re[y * w + x], im[y * w + x]);
-        mag[sy * w + sx] = m;
-        if (Math.hypot(sx - cx, sy - cy) > excludeR) {
-          sum += m;
-          sumSq += m * m;
-          count++;
+        const row = y * w;
+        let sum = src[row] * (radius + 1);
+        for (let x = 1; x <= radius; x++) sum += src[row + Math.min(x, w - 1)];
+        for (let x = 0; x < w; x++) {
+          dst[row + x] = sum / span;
+          const addX = Math.min(x + radius + 1, w - 1);
+          const subX = Math.max(x - radius, 0);
+          sum += src[row + addX] - src[row + subX];
         }
       }
-    }
-
-    const mean = sum / Math.max(count, 1);
-    const variance = Math.max(sumSq / Math.max(count, 1) - mean * mean, 1e-6);
-    const std = Math.sqrt(variance);
-    const threshold = mean + std * (1.4 + t * 2.2);
-    const peaks = [];
-    const rad = 3;
-
-    for (let sy = rad; sy < h - rad; sy++) {
-      for (let sx = rad; sx < w - rad; sx++) {
-        if (Math.hypot(sx - cx, sy - cy) <= excludeR) continue;
-        const idx = sy * w + sx;
-        const v = mag[idx];
-        if (v < threshold) continue;
-        let isMax = true;
-        for (let dy = -rad; dy <= rad && isMax; dy++) {
-          for (let dx = -rad; dx <= rad; dx++) {
-            if (dx === 0 && dy === 0) continue;
-            if (mag[(sy + dy) * w + (sx + dx)] > v) {
-              isMax = false;
-              break;
-            }
-          }
-        }
-        if (isMax) peaks.push({ sx, sy, v });
-      }
-    }
-
-    peaks.sort((a, b) => b.v - a.v);
-    const selected = peaks.slice(0, Math.min(14, Math.floor(4 + t * 10)));
-    const notchSigma = 2 + t * 5;
-    const minFactor = 1 - t * 0.9;
-
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const sx = (x + Math.floor(w / 2)) % w;
-        const sy = (y + Math.floor(h / 2)) % h;
-        let factor = 1;
-        selected.forEach((pk) => {
-          const d2 = (sx - pk.sx) ** 2 + (sy - pk.sy) ** 2;
-          const g = Math.exp(-d2 / (2 * notchSigma * notchSigma));
-          factor *= 1 - g * (1 - minFactor);
-        });
-        const i = y * w + x;
-        re[i] *= factor;
-        im[i] *= factor;
-      }
-    }
-  }
-
-  function fftMoireCanvas(src, strength) {
-    const t = moireBlendAmount(strength);
-    if (t <= 0) return cloneCanvas(src);
-
-    const srcW = src.width;
-    const srcH = src.height;
-    const { w: sw, h: sh } = moireWorkingSize(srcW, srcH, 512);
-    const pw = nextPow2(sw);
-    const ph = nextPow2(sh);
-
-    const small = document.createElement("canvas");
-    small.width = pw;
-    small.height = ph;
-    const sctx = small.getContext("2d");
-    sctx.imageSmoothingEnabled = true;
-    sctx.drawImage(src, 0, 0, srcW, srcH, 0, 0, pw, ph);
-    const gray = sctx.getImageData(0, 0, pw, ph).data;
-
-    const n = pw * ph;
-    const re = new Float64Array(n);
-    const im = new Float64Array(n);
-    for (let i = 0; i < n; i++) {
-      const j = i * 4;
-      re[i] = gray[j] * 0.299 + gray[j + 1] * 0.587 + gray[j + 2] * 0.114;
-    }
-
-    fft2d(re, im, pw, ph, false);
-    applyFftNotchMask(re, im, pw, ph, strength);
-    fft2d(re, im, pw, ph, true);
-
-    const filteredSmall = document.createElement("canvas");
-    filteredSmall.width = pw;
-    filteredSmall.height = ph;
-    const fData = filteredSmall.getContext("2d").createImageData(pw, ph);
-    for (let i = 0; i < n; i++) {
-      let yVal = re[i];
-      if (!Number.isFinite(yVal)) yVal = 0;
-      yVal = clamp(Math.round(yVal), 0, 255);
-      const j = i * 4;
-      fData.data[j] = yVal;
-      fData.data[j + 1] = yVal;
-      fData.data[j + 2] = yVal;
-      fData.data[j + 3] = 255;
-    }
-    filteredSmall.getContext("2d").putImageData(fData, 0, 0);
-
-    const filteredFull = upscaleCanvas(filteredSmall, srcW, srcH);
-    const srcData = src.getContext("2d").getImageData(0, 0, srcW, srcH);
-    const filtData = filteredFull.getContext("2d").getImageData(0, 0, srcW, srcH);
-    const ratioFiltered = document.createElement("canvas");
-    ratioFiltered.width = srcW;
-    ratioFiltered.height = srcH;
-    const out = ratioFiltered.getContext("2d").createImageData(srcW, srcH);
-    const s = srcData.data;
-    const f = filtData.data;
-    const d = out.data;
-
-    for (let i = 0; i < s.length; i += 4) {
-      const fy = f[i] * 0.299 + f[i + 1] * 0.587 + f[i + 2] * 0.114;
-      const sy = s[i] * 0.299 + s[i + 1] * 0.587 + s[i + 2] * 0.114;
-      let ratio = 1;
-      if (sy > 4 && fy > 1) ratio = fy / sy;
-      ratio = clamp(ratio, 0.35, 2.5);
-      d[i] = clamp(Math.round(s[i] * ratio), 0, 255);
-      d[i + 1] = clamp(Math.round(s[i + 1] * ratio), 0, 255);
-      d[i + 2] = clamp(Math.round(s[i + 2] * ratio), 0, 255);
-      d[i + 3] = s[i + 3];
-    }
-    ratioFiltered.getContext("2d").putImageData(out, 0, 0);
-    return blendMoireLayers(src, ratioFiltered, strength);
-  }
-
-  function bilateralMoireCanvas(src, strength) {
-    const t = moireBlendAmount(strength);
-    if (t <= 0) return cloneCanvas(src);
-
-    const srcW = src.width;
-    const srcH = src.height;
-    const { w: sw, h: sh, scale } = moireWorkingSize(srcW, srcH, 640);
-    let filtered;
-    if (scale < 1) {
-      const small = downscaleCanvas(src, sw, sh);
-      filtered = upscaleCanvas(bilateralFilterCanvas(small), srcW, srcH);
     } else {
-      filtered = bilateralFilterCanvas(src);
+      for (let x = 0; x < w; x++) {
+        let sum = src[x] * (radius + 1);
+        for (let y = 1; y <= radius; y++) sum += src[Math.min(y, h - 1) * w + x];
+        for (let y = 0; y < h; y++) {
+          dst[y * w + x] = sum / span;
+          const addY = Math.min(y + radius + 1, h - 1);
+          const subY = Math.max(y - radius, 0);
+          sum += src[addY * w + x] - src[subY * w + x];
+        }
+      }
     }
-    return blendMoireLayers(src, filtered, strength);
+
+    return dst;
+  }
+
+  function blurPlane(src, w, h, radius, passes) {
+    let data = src;
+    for (let i = 0; i < passes; i++) {
+      data = boxBlurPlane(data, w, h, radius, true);
+      data = boxBlurPlane(data, w, h, radius, false);
+    }
+    return data;
+  }
+
+  function samplePlaneBilinear(plane, w, h, x, y) {
+    const x0 = clamp(Math.floor(x), 0, w - 1);
+    const y0 = clamp(Math.floor(y), 0, h - 1);
+    const x1 = Math.min(x0 + 1, w - 1);
+    const y1 = Math.min(y0 + 1, h - 1);
+    const tx = clamp(x - x0, 0, 1);
+    const ty = clamp(y - y0, 0, 1);
+    const a = plane[y0 * w + x0] * (1 - tx) + plane[y0 * w + x1] * tx;
+    const b = plane[y1 * w + x0] * (1 - tx) + plane[y1 * w + x1] * tx;
+    return a * (1 - ty) + b * ty;
+  }
+
+  function fastMoireCanvas(src, strength) {
+    const t = moireBlendAmount(strength);
+    if (t <= 0) return src;
+
+    const w = src.width;
+    const h = src.height;
+    const srcData = src.getContext("2d").getImageData(0, 0, w, h);
+    const s = srcData.data;
+    const out = src.getContext("2d").createImageData(w, h);
+    const d = out.data;
+    const n = w * h;
+    const yPlane = new Float32Array(n);
+    const chromaScale = t < 0.45 ? 2 : 4;
+    const cw = Math.ceil(w / chromaScale);
+    const ch = Math.ceil(h / chromaScale);
+    const cbSmall = new Float32Array(cw * ch);
+    const crSmall = new Float32Array(cw * ch);
+    const counts = new Uint16Array(cw * ch);
+
+    for (let p = 0; p < n; p++) {
+      const i = p * 4;
+      const r = s[i];
+      const g = s[i + 1];
+      const b = s[i + 2];
+      const y = r * 0.299 + g * 0.587 + b * 0.114;
+      const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+      const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+      const x = p % w;
+      const cy = Math.floor(p / w / chromaScale);
+      const cx = Math.floor(x / chromaScale);
+      const ci = cy * cw + cx;
+      yPlane[p] = y;
+      cbSmall[ci] += cb;
+      crSmall[ci] += cr;
+      counts[ci]++;
+    }
+
+    for (let i = 0; i < cbSmall.length; i++) {
+      const count = Math.max(counts[i], 1);
+      cbSmall[i] /= count;
+      crSmall[i] /= count;
+    }
+
+    const chromaRadius = Math.max(1, Math.round(1 + t * 5));
+    const smoothCb = blurPlane(cbSmall, cw, ch, chromaRadius, 2);
+    const smoothCr = blurPlane(crSmall, cw, ch, chromaRadius, 2);
+    const lumaRadius = Math.max(1, Math.round(1 + t * 3));
+    const smoothY = blurPlane(yPlane, w, h, lumaRadius, 2);
+    const chromaMix = 1 - Math.pow(1 - t, 1.8);
+    const maxLumaMix = 0.18 + t * 0.76;
+    const edgeLimit = 12 + t * 48;
+
+    for (let yy = 0; yy < h; yy++) {
+      const yPrev = Math.max(yy - 1, 0);
+      const yNext = Math.min(yy + 1, h - 1);
+      for (let xx = 0; xx < w; xx++) {
+        const xPrev = Math.max(xx - 1, 0);
+        const xNext = Math.min(xx + 1, w - 1);
+        const p = yy * w + xx;
+        const i = p * 4;
+        const chromaX = xx / chromaScale;
+        const chromaY = yy / chromaScale;
+        const origCb = 128 - 0.168736 * s[i] - 0.331264 * s[i + 1] + 0.5 * s[i + 2];
+        const origCr = 128 + 0.5 * s[i] - 0.418688 * s[i + 1] - 0.081312 * s[i + 2];
+        const cb = origCb * (1 - chromaMix) + samplePlaneBilinear(smoothCb, cw, ch, chromaX, chromaY) * chromaMix;
+        const cr = origCr * (1 - chromaMix) + samplePlaneBilinear(smoothCr, cw, ch, chromaX, chromaY) * chromaMix;
+        const gx = Math.abs(smoothY[yy * w + xNext] - smoothY[yy * w + xPrev]);
+        const gy = Math.abs(smoothY[yNext * w + xx] - smoothY[yPrev * w + xx]);
+        const flatness = clamp(1 - (gx + gy) / edgeLimit, 0, 1);
+        const lumaMix = maxLumaMix * flatness;
+        const y = yPlane[p] * (1 - lumaMix) + smoothY[p] * lumaMix;
+
+        d[i] = clamp(Math.round(y + 1.402 * (cr - 128)), 0, 255);
+        d[i + 1] = clamp(Math.round(y - 0.344136 * (cb - 128) - 0.714136 * (cr - 128)), 0, 255);
+        d[i + 2] = clamp(Math.round(y + 1.772 * (cb - 128)), 0, 255);
+        d[i + 3] = s[i + 3];
+      }
+    }
+
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    c.getContext("2d").putImageData(out, 0, 0);
+    return c;
   }
 
   function applyMoireReduction(src, edit) {
     const strength = edit.moireStrength || 0;
     if (strength <= 0) return src;
-    if (edit.moireMethod === "fft") return fftMoireCanvas(src, strength);
-    return bilateralMoireCanvas(src, strength);
+    return fastMoireCanvas(src, strength);
   }
 
   function warpLensCanvas(src, edit) {
@@ -1477,13 +1258,15 @@
 
   function syncMoireMethodFromInputs(state) {
     const selected = document.querySelector('input[name="dig-edit-moire-method"]:checked');
-    if (selected && (selected.value === "bilateral" || selected.value === "fft")) {
+    if (selected && selected.value === "adaptive") {
       state.edit.moireMethod = selected.value;
+    } else {
+      state.edit.moireMethod = "adaptive";
     }
   }
 
   function syncMoireMethodToInputs(state) {
-    const method = state.edit.moireMethod || "bilateral";
+    const method = state.edit.moireMethod || "adaptive";
     document.querySelectorAll('input[name="dig-edit-moire-method"]').forEach((el) => {
       el.checked = el.value === method;
     });

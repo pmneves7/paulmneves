@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    name="description"
+    content="Visualize crystal unit cells from CIF files with editable atoms, bonds, and display settings."
+  />
+  <title>Crystal unit cell viewer | Paul M. Neves</title>
+  <link rel="canonical" href="https://paulmneves.com/tools/crystal-viewer.html" />
+  <link rel="icon" type="image/png" href="../media/favicon.png" />
+  <link rel="stylesheet" href="../css/site.css" />
+</head>
+<body class="laue-page crystal-viewer-page">
+  <header>
+    <nav aria-label="Main navigation">
+      <a class="site-title" href="../index.html">Paul M. Neves</a>
+      <div class="nav-links">
+        <a href="../index.html#biography">Biography</a>
+        <a href="../research.html">Research</a>
+        <a href="../publications.html">Publications</a>
+        <a href="../news.html">News</a>
+        <a href="../gallery.html">Gallery</a>
+        <a href="../tools.html">Tools</a>
+        <a href="../index.html#contact">Contact</a>
+      </div>
+    </nav>
+  </header>
+
+  <main class="laue-main">
+    <header class="page-header">
+      <h1>Crystal unit cell viewer</h1>
+      <p class="lead">
+        Import CIF files, edit unit-cell and atom-site data, then tune atom, bond, and scene
+        properties for a VESTA-like crystal visualization.
+      </p>
+      <p class="tool-disclaimer">
+        <strong>Disclaimer:</strong> These tools are experimental and may still have bugs/errors.
+        If you spot one, please <a href="../index.html#contact">tell me</a>!
+      </p>
+    </header>
+
+    <div class="laue-layout crystal-layout">
+      <div class="laue-tools-scroll tool-panel tool-panel-wide crystal-settings-panel" id="crystal-settings-panel">
+        <div class="crystal-panel-header">
+          <h2>Settings</h2>
+          <button type="button" class="laue-mode-btn" id="settings-collapse" aria-expanded="true" aria-controls="crystal-settings-panel">Collapse</button>
+        </div>
+        <section class="tool-section">
+          <details class="tool-collapsible" open>
+            <summary class="tool-collapsible-summary">1. Crystal importer</summary>
+            <div class="tool-collapsible-body">
+              <p class="tool-note">
+                Load a CIF file to populate the lattice parameters, space group, and fractional atom positions.
+              </p>
+              <div class="tool-cif-controls">
+                <input type="file" id="cif-file" accept=".cif,chemical/x-cif,text/plain" hidden />
+                <div class="tool-field tool-cif-preset">
+                  <label for="crystal-preset">Standard crystal</label>
+                  <select id="crystal-preset">
+                    <option value="">Custom / manual entry</option>
+                  </select>
+                </div>
+                <button type="button" id="cif-load-button" class="button secondary">Load CIF file…</button>
+                <p id="cif-status" class="tool-cif-status" role="status" aria-live="polite"></p>
+              </div>
+
+              <form id="crystal-cell-form" class="tool-grid crystal-form-grid" onsubmit="return false">
+                <div class="tool-field">
+                  <label for="crystal-a">a (Å)</label>
+                  <input type="number" id="crystal-a" step="any" min="0" value="5.431" />
+                </div>
+                <div class="tool-field">
+                  <label for="crystal-b">b (Å)</label>
+                  <input type="number" id="crystal-b" step="any" min="0" value="5.431" />
+                </div>
+                <div class="tool-field">
+                  <label for="crystal-c">c (Å)</label>
+                  <input type="number" id="crystal-c" step="any" min="0" value="5.431" />
+                </div>
+                <div class="tool-field">
+                  <label for="crystal-alpha">α (°)</label>
+                  <input type="number" id="crystal-alpha" step="any" min="0" max="180" value="90" />
+                </div>
+                <div class="tool-field">
+                  <label for="crystal-beta">β (°)</label>
+                  <input type="number" id="crystal-beta" step="any" min="0" max="180" value="90" />
+                </div>
+                <div class="tool-field">
+                  <label for="crystal-gamma">γ (°)</label>
+                  <input type="number" id="crystal-gamma" step="any" min="0" max="180" value="90" />
+                </div>
+                <div class="tool-field crystal-wide-field">
+                  <label for="crystal-spacegroup">Space group</label>
+                  <input type="text" id="crystal-spacegroup" value="Fd-3m" placeholder="symbol or IT number" />
+                </div>
+              </form>
+
+              <div class="crystal-table-header">
+                <h3 class="laue-subheading">Atomic positions</h3>
+                <button type="button" class="button secondary" id="crystal-add-atom">Add atom</button>
+              </div>
+              <details class="crystal-nested-collapsible">
+                <summary class="crystal-nested-summary">Atom list</summary>
+                <div class="tool-table-wrap crystal-table-wrap">
+                  <table class="tool-table crystal-edit-table" aria-label="Editable atom positions">
+                    <thead>
+                      <tr>
+                        <th>Label</th>
+                        <th>Element</th>
+                        <th>x</th>
+                        <th>y</th>
+                        <th>z</th>
+                        <th>Occ.</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody id="crystal-atom-table"></tbody>
+                  </table>
+                </div>
+              </details>
+            </div>
+          </details>
+        </section>
+
+        <section class="tool-section">
+          <details class="tool-collapsible" open>
+            <summary class="tool-collapsible-summary">2. Atom display</summary>
+            <div class="tool-collapsible-body">
+              <div class="tool-grid crystal-radius-controls">
+                <div class="tool-field">
+                  <label for="radius-mode">Display radii</label>
+                  <select id="radius-mode">
+                    <option value="atomic" selected>Atomic radii</option>
+                    <option value="ionic">Ionic radii</option>
+                    <option value="vdw">van der Waals radii</option>
+                  </select>
+                </div>
+                <div class="tool-field">
+                  <label for="radius-scale">Radius scale</label>
+                  <input type="number" id="radius-scale" step="any" min="0" value="1" />
+                </div>
+              </div>
+              <div id="crystal-atom-style-list" class="crystal-style-list"></div>
+            </div>
+          </details>
+        </section>
+
+        <section class="tool-section">
+          <details class="tool-collapsible" open>
+            <summary class="tool-collapsible-summary">3. Bonds</summary>
+            <div class="tool-collapsible-body">
+              <div class="tool-grid crystal-form-grid">
+                <div class="tool-field">
+                  <label for="bond-atom-a">Atom or element 1</label>
+                  <select id="bond-atom-a"></select>
+                </div>
+                <div class="tool-field">
+                  <label for="bond-atom-b">Atom or element 2</label>
+                  <select id="bond-atom-b"></select>
+                </div>
+                <div class="tool-field">
+                  <label for="bond-cutoff">Cutoff (Å)</label>
+                  <input type="number" id="bond-cutoff" step="any" min="0" value="2.6" />
+                </div>
+                <div class="tool-field">
+                  <label for="bond-thickness">Thickness (Å)</label>
+                  <input type="number" id="bond-thickness" step="any" min="0.01" value="0.15" />
+                </div>
+                <div class="tool-field">
+                  <label for="bond-style">Visual style</label>
+                  <select id="bond-style">
+                    <option value="split">Split atom colors</option>
+                    <option value="single">Single color</option>
+                  </select>
+                </div>
+                <div class="tool-field">
+                  <label for="bond-color">Bond color</label>
+                  <input type="color" id="bond-color" value="#6b7280" />
+                </div>
+              </div>
+              <div class="laue-action-row">
+                <button type="button" class="button secondary" id="bond-add">Add bond rule</button>
+                <button type="button" class="button secondary" id="bond-clear">Clear bonds</button>
+              </div>
+              <div id="bond-rule-list" class="crystal-rule-list"></div>
+            </div>
+          </details>
+        </section>
+
+        <section class="tool-section">
+          <details class="tool-collapsible" open>
+            <summary class="tool-collapsible-summary">4. General properties</summary>
+            <div class="tool-collapsible-body">
+              <h3 class="laue-subheading">Cell boundaries</h3>
+              <div class="tool-grid crystal-form-grid crystal-boundary-grid">
+                <div class="tool-field">
+                  <label for="range-a-min">a min</label>
+                  <input type="number" id="range-a-min" step="any" value="0" />
+                </div>
+                <div class="tool-field">
+                  <label for="range-b-min">b min</label>
+                  <input type="number" id="range-b-min" step="any" value="0" />
+                </div>
+                <div class="tool-field">
+                  <label for="range-c-min">c min</label>
+                  <input type="number" id="range-c-min" step="any" value="0" />
+                </div>
+                <div class="tool-field">
+                  <label for="range-a-max">a max</label>
+                  <input type="number" id="range-a-max" step="any" value="1" />
+                </div>
+                <div class="tool-field">
+                  <label for="range-b-max">b max</label>
+                  <input type="number" id="range-b-max" step="any" value="1" />
+                </div>
+                <div class="tool-field">
+                  <label for="range-c-max">c max</label>
+                  <input type="number" id="range-c-max" step="any" value="1" />
+                </div>
+              </div>
+
+              <h3 class="laue-subheading">Outlines and axes</h3>
+              <div class="laue-check-row">
+                <label><input type="checkbox" id="show-cell-outline" checked /> Show unit cell outline</label>
+                <label><input type="checkbox" id="show-all-outlines" /> Show all outlines</label>
+                <label><input type="checkbox" id="show-lattice-vectors" checked /> Show lattice compass</label>
+                <label><input type="checkbox" id="show-vector-labels" checked /> Show labels</label>
+              </div>
+              <div class="tool-grid crystal-form-grid">
+                <div class="tool-field">
+                  <label for="cell-line-thickness">Outline thickness</label>
+                  <input type="number" id="cell-line-thickness" step="any" min="0.5" value="2" />
+                </div>
+                <div class="tool-field">
+                  <label for="cell-line-color">Outline color</label>
+                  <input type="color" id="cell-line-color" value="#111827" />
+                </div>
+                <div class="tool-field">
+                  <label for="projection-mode">View projection</label>
+                  <select id="projection-mode">
+                    <option value="orthographic">Orthographic</option>
+                    <option value="perspective">Perspective</option>
+                  </select>
+                </div>
+                <div class="tool-field">
+                  <label for="background-color">Background</label>
+                  <input type="color" id="background-color" value="#ffffff" />
+                </div>
+              </div>
+
+              <h3 class="laue-subheading">Lighting and materials</h3>
+              <div class="tool-grid crystal-form-grid">
+                <div class="tool-field">
+                  <label for="light-intensity">Light intensity</label>
+                  <input type="range" id="light-intensity" min="0" max="2" step="0.05" value="1" />
+                </div>
+                <div class="tool-field">
+                  <label for="light-color">Light color</label>
+                  <input type="color" id="light-color" value="#ffffff" />
+                </div>
+                <div class="tool-field">
+                  <label for="light-azimuth">Light azimuth (°)</label>
+                  <input type="number" id="light-azimuth" step="any" value="-35" />
+                </div>
+                <div class="tool-field">
+                  <label for="light-elevation">Light elevation (°)</label>
+                  <input type="number" id="light-elevation" step="any" value="45" />
+                </div>
+                <div class="tool-field">
+                  <label for="material-roughness">Roughness</label>
+                  <input type="range" id="material-roughness" min="0" max="1" step="0.05" value="0.35" />
+                </div>
+                <div class="tool-field">
+                  <label for="material-specular">Specular</label>
+                  <input type="range" id="material-specular" min="0" max="1" step="0.05" value="0.45" />
+                </div>
+              </div>
+            </div>
+          </details>
+        </section>
+      </div>
+
+      <button type="button" class="crystal-panel-restore" id="settings-restore" hidden aria-controls="crystal-settings-panel">Settings</button>
+      <div class="crystal-panel-splitter" id="crystal-panel-splitter" role="separator" aria-orientation="vertical" aria-label="Resize settings and viewer panels" tabindex="0"></div>
+
+      <aside class="laue-viewer-panel crystal-viewer-panel" aria-label="Crystal viewer">
+        <div class="crystal-view-controls">
+          <div class="crystal-control-group" role="toolbar" aria-label="Look along crystal directions">
+            <button type="button" class="laue-mode-btn" data-look="a">a</button>
+            <button type="button" class="laue-mode-btn" data-look="b">b</button>
+            <button type="button" class="laue-mode-btn" data-look="c">c</button>
+            <button type="button" class="laue-mode-btn" data-look="astar">a*</button>
+            <button type="button" class="laue-mode-btn" data-look="bstar">b*</button>
+            <button type="button" class="laue-mode-btn" data-look="cstar">c*</button>
+          </div>
+          <div class="crystal-control-group">
+            <label for="view-step-degrees">Step</label>
+            <input type="number" id="view-step-degrees" step="any" min="0" value="10" />
+            <button type="button" class="laue-mode-btn" data-rotate-axis="x" data-rotate-sign="-1">X−</button>
+            <button type="button" class="laue-mode-btn" data-rotate-axis="x" data-rotate-sign="1">X+</button>
+            <button type="button" class="laue-mode-btn" data-rotate-axis="y" data-rotate-sign="-1">Y−</button>
+            <button type="button" class="laue-mode-btn" data-rotate-axis="y" data-rotate-sign="1">Y+</button>
+            <button type="button" class="laue-mode-btn" data-rotate-axis="z" data-rotate-sign="-1">Z−</button>
+            <button type="button" class="laue-mode-btn" data-rotate-axis="z" data-rotate-sign="1">Z+</button>
+          </div>
+          <div class="crystal-control-group" role="toolbar" aria-label="Interaction tools">
+            <button type="button" class="laue-mode-btn active" data-tool="rotate">Rotate</button>
+            <button type="button" class="laue-mode-btn" data-tool="pan">Pan</button>
+            <button type="button" class="laue-mode-btn" data-tool="zoom">Zoom</button>
+            <button type="button" class="laue-mode-btn laue-mode-action" id="view-reset">Reset</button>
+          </div>
+        </div>
+        <div class="crystal-canvas-wrap">
+          <canvas id="crystal-canvas" aria-label="Crystal unit cell rendering"></canvas>
+        </div>
+        <div class="crystal-console-splitter" id="crystal-console-splitter" role="separator" aria-orientation="horizontal" aria-label="Resize viewer and console" tabindex="0"></div>
+        <div class="crystal-console" aria-live="polite">
+          <div class="crystal-console-header">
+            <h2>Console</h2>
+            <button type="button" class="laue-mode-btn" id="console-collapse" aria-expanded="true" aria-controls="crystal-console-output">Collapse</button>
+          </div>
+          <pre id="crystal-console-output"></pre>
+        </div>
+        <button type="button" class="crystal-console-restore laue-mode-btn" id="console-restore" hidden aria-controls="crystal-console-output">Show console</button>
+      </aside>
+    </div>
+
+    <p class="back-link-panel"><a href="../tools.html">← Back to tools</a></p>
+  </main>
+
+  <footer>
+    © <span id="year"></span> Paul M. Neves. All rights reserved.
+  </footer>
+
+  <script src="../js/site.js"></script>
+  <script src="../js/cif-parser.js"></script>
+  <script src="../js/crystal-presets.js"></script>
+  <script src="../js/crystal-viewer.js"></script>
+</body>
+</html>
