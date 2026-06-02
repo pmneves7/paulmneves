@@ -8,6 +8,10 @@
   let scene = null;
   let camera = null;
   let root = null;
+  let yaw = 0;
+  let pitch = 0;
+  let zoom = 1;
+  let drag = null;
 
   function setStatus(message) {
     if (status) status.textContent = message;
@@ -91,10 +95,16 @@
     });
 
     camera = new THREE.PerspectiveCamera(40, 1, 0.01, 100);
-    camera.position.set(3, 2.2, 4);
-    camera.lookAt(0, 0, 0);
+    updateCamera();
     resize();
     animate();
+  }
+
+  function updateCamera() {
+    if (!camera) return;
+    const distance = 5.4 / Math.max(0.25, zoom);
+    camera.position.set(0, 0, distance);
+    camera.lookAt(0, 0, 0);
   }
 
   function resize() {
@@ -107,8 +117,38 @@
 
   function animate() {
     requestAnimationFrame(animate);
-    if (root) root.rotation.y += 0.004;
+    if (root) {
+      if (!drag) yaw += 0.004;
+      root.rotation.set(pitch, yaw, 0);
+    }
+    updateCamera();
     if (renderer && scene && camera) renderer.render(scene, camera);
+  }
+
+  function bindInteraction() {
+    canvas.addEventListener("pointerdown", (event) => {
+      canvas.setPointerCapture(event.pointerId);
+      drag = {
+        x: event.clientX,
+        y: event.clientY,
+        yaw,
+        pitch
+      };
+    });
+    canvas.addEventListener("pointermove", (event) => {
+      if (!drag) return;
+      yaw = drag.yaw + (event.clientX - drag.x) * 0.01;
+      pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, drag.pitch + (event.clientY - drag.y) * 0.01));
+    });
+    ["pointerup", "pointercancel", "pointerleave"].forEach((type) => {
+      canvas.addEventListener(type, () => {
+        drag = null;
+      });
+    });
+    canvas.addEventListener("wheel", (event) => {
+      event.preventDefault();
+      zoom = Math.max(0.25, Math.min(8, zoom * Math.exp(-event.deltaY / 600)));
+    }, { passive: false });
   }
 
   function downloadGlb() {
@@ -138,5 +178,6 @@
   document.getElementById("share-download-glb")?.addEventListener("click", downloadGlb);
   document.getElementById("share-enter-vr")?.addEventListener("click", () => enterXr("vr"));
   document.getElementById("share-enter-ar")?.addEventListener("click", () => enterXr("ar"));
+  bindInteraction();
   window.addEventListener("resize", resize);
 })();

@@ -1157,8 +1157,8 @@
   }
 
   function lightVector() {
-    const az = degToRad(num("light-azimuth", -35));
-    const el = degToRad(num("light-elevation", 45));
+    const az = degToRad(num("light-azimuth", 140));
+    const el = degToRad(num("light-elevation", 30));
     return normalize({
       x: Math.cos(el) * Math.cos(az),
       y: Math.cos(el) * Math.sin(az),
@@ -1357,6 +1357,10 @@
     camera.position.copy(target).addScaledVector(forward, distance);
     camera.up.copy(up);
     camera.lookAt(target);
+    threeState.cameraTarget = target;
+    threeState.cameraRight = right;
+    threeState.cameraUp = up;
+    threeState.cameraForward = forward;
     camera.near = 0.01;
     camera.far = 100;
     camera.updateProjectionMatrix();
@@ -1383,7 +1387,18 @@
     threeState.root.add(ambient);
     const light = lightVector();
     const directional = new THREE.DirectionalLight(threeColor(text("light-color", "#ffffff")), num("light-intensity", 1.6));
-    directional.position.set(light.x * 5, light.y * 5, light.z * 5);
+    const target = threeState.cameraTarget || new THREE.Vector3();
+    const right = threeState.cameraRight || new THREE.Vector3(1, 0, 0);
+    const up = threeState.cameraUp || new THREE.Vector3(0, 1, 0);
+    const forward = threeState.cameraForward || new THREE.Vector3(0, 0, 1);
+    const cameraRelativeLight = new THREE.Vector3()
+      .addScaledVector(right, light.x)
+      .addScaledVector(up, light.z)
+      .addScaledVector(forward, light.y)
+      .normalize();
+    directional.position.copy(target).addScaledVector(cameraRelativeLight, 5);
+    directional.target.position.copy(target);
+    threeState.root.add(directional.target);
     threeState.root.add(directional);
   }
 

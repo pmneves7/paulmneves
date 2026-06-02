@@ -2966,10 +2966,16 @@ body.laue-page.laue-nav-hidden .crystal-panel-restore {
 }
 
 #shared-crystal-canvas {
+  cursor: grab;
   display: block;
   flex: 1 1 auto;
   min-height: 0;
+  touch-action: none;
   width: 100%;
+}
+
+#shared-crystal-canvas:active {
+  cursor: grabbing;
 }
 
 @media (max-width: 1100px) {
