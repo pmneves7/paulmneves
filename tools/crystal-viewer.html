@@ -56,6 +56,7 @@
               </p>
               <div class="tool-cif-controls">
                 <input type="file" id="cif-file" accept=".cif,chemical/x-cif,text/plain" hidden />
+                <input type="file" id="crystal-config-file" accept="application/json,.json" hidden />
                 <div class="tool-field tool-cif-preset">
                   <label for="crystal-preset">Standard crystal</label>
                   <select id="crystal-preset">
@@ -64,6 +65,8 @@
                 </div>
                 <button type="button" id="cif-load-button" class="button secondary">Load CIF file…</button>
                 <button type="button" id="cif-export-button" class="button secondary">Export CIF</button>
+                <button type="button" id="crystal-config-save-button" class="button secondary">Save config…</button>
+                <button type="button" id="crystal-config-load-button" class="button secondary">Load config…</button>
                 <p id="cif-status" class="tool-cif-status" role="status" aria-live="polite"></p>
               </div>
 
@@ -117,6 +120,7 @@
                         <th>y</th>
                         <th>z</th>
                         <th>Occ.</th>
+                        <th>Wyckoff</th>
                         <th></th>
                       </tr>
                     </thead>
@@ -417,6 +421,8 @@
   <script src="../js/cif-parser.js"></script>
   <script src="../js/crystal-presets.js"></script>
   <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+  <script src="../js/space-groups-data.js"></script>
+  <script src="../js/spacegroup-engine.js"></script>
   <script src="../js/crystal-model.js"></script>
   <script src="../js/crystal-xr.js"></script>
   <script src="../js/crystal-viewer.js"></script>

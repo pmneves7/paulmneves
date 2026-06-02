@@ -48,6 +48,7 @@
   };
 
   const STORAGE_KEY = "crystalViewerState.v1";
+  const CONFIG_VERSION = 1;
 
   const RADIUS_DATA = {
     atomic: {
@@ -470,7 +471,15 @@
       fractX: wrapFraction(Number(atom.fractX) || 0),
       fractY: wrapFraction(Number(atom.fractY) || 0),
       fractZ: wrapFraction(Number(atom.fractZ) || 0),
-      occupancy: atom.occupancy == null ? 1 : Number(atom.occupancy) || 1
+      occupancy: atom.occupancy == null ? 1 : Number(atom.occupancy) || 1,
+      wyckoff: atom.wyckoff || atom.wyckoffSymbol || "",
+      wyckoffPositions: Array.isArray(atom.wyckoffPositions) ?
+        atom.wyckoffPositions.map((position) => ({
+          fractX: wrapFraction(Number(position.fractX) || 0),
+          fractY: wrapFraction(Number(position.fractY) || 0),
+          fractZ: wrapFraction(Number(position.fractZ) || 0)
+        })) :
+        undefined
     };
   }
 
@@ -478,13 +487,62 @@
     return /^p\s*1$/i.test(String(value || "").trim()) || String(value || "").trim() === "1";
   }
 
-  function shouldApplyStoredSymmetry() {
-    return !isP1SpaceGroup(text("crystal-spacegroup", "")) && Array.isArray(state.symmetryOperations) && state.symmetryOperations.length;
+  function resolvedSpaceGroup() {
+    if (!window.SpaceGroupEngine || typeof window.SpaceGroupEngine.lookupSpaceGroup !== "function") return null;
+    return window.SpaceGroupEngine.lookupSpaceGroup(text("crystal-spacegroup", ""));
+  }
+
+  function resolvedSymmetry() {
+    const spaceGroup = text("crystal-spacegroup", "");
+    if (isP1SpaceGroup(spaceGroup)) return { operations: [], source: "none", group: null };
+    if (Array.isArray(state.symmetryOperations) && state.symmetryOperations.length) {
+      return { operations: state.symmetryOperations, source: "cif", group: resolvedSpaceGroup() };
+    }
+    const group = resolvedSpaceGroup();
+    return {
+      operations: group ? group.operations : [],
+      source: group ? "engine" : "none",
+      group
+    };
+  }
+
+  function shouldApplySymmetry() {
+    return resolvedSymmetry().operations.length > 0;
+  }
+
+  function shouldApplyWyckoffPositions() {
+    return !isP1SpaceGroup(text("crystal-spacegroup", "")) &&
+      state.atoms.some((atom) => Array.isArray(atom.wyckoffPositions) && atom.wyckoffPositions.length);
+  }
+
+  function expandAtomsByWyckoff(atoms) {
+    const expanded = [];
+    atoms.forEach((atom) => {
+      if (!Array.isArray(atom.wyckoffPositions) || !atom.wyckoffPositions.length) {
+        expanded.push(atom);
+        return;
+      }
+      atom.wyckoffPositions.forEach((position, index) => {
+        expanded.push({
+          ...atom,
+          label: `${atom.label}_${index + 1}`,
+          fractX: position.fractX,
+          fractY: position.fractY,
+          fractZ: position.fractZ,
+          sourceLabel: atom.label
+        });
+      });
+    });
+    return expanded;
   }
 
   function generatedAtomSites() {
-    if (!shouldApplyStoredSymmetry()) return state.atoms.map((atom, index) => normalizeAtom(atom, index));
-    return expandAtomsBySymmetry(state.atoms, state.symmetryOperations).atoms.map((atom, index) => normalizeAtom(atom, index));
+    const symmetry = resolvedSymmetry();
+    if (symmetry.operations.length) {
+      return expandAtomsBySymmetry(state.atoms, symmetry.operations).atoms.map((atom, index) => normalizeAtom(atom, index));
+    }
+    if (shouldApplyWyckoffPositions()) return expandAtomsByWyckoff(state.atoms).map((atom, index) => normalizeAtom(atom, index));
+    return state.atoms.map((atom, index) => normalizeAtom(atom, index));
   }
 
   function atomRowsForTable() {
@@ -492,8 +550,11 @@
   }
 
   function promoteGeneratedAtomsToEditable() {
-    if (!shouldApplyStoredSymmetry()) return;
-    state.atoms = generatedAtomSites();
+    if (!shouldApplySymmetry() && !shouldApplyWyckoffPositions()) return;
+    state.atoms = generatedAtomSites().map((atom) => ({
+      ...atom,
+      wyckoffPositions: undefined
+    }));
     state.symmetryOperations = [];
     resetStyles();
     refreshControls();
@@ -522,7 +583,8 @@
       "Atomic positions:",
       ...atoms.map((atom) => {
         const occ = atom.occupancy == null ? 1 : atom.occupancy;
-        return `  ${atom.label.padEnd(12)} ${sanitizeElement(atom.element).padEnd(3)} x=${Number(atom.fractX).toFixed(5)} y=${Number(atom.fractY).toFixed(5)} z=${Number(atom.fractZ).toFixed(5)} occ=${Number(occ).toFixed(3)}`;
+        const wyckoff = atom.wyckoff ? ` wyckoff=${atom.wyckoff}` : "";
+        return `  ${atom.label.padEnd(12)} ${sanitizeElement(atom.element).padEnd(3)} x=${Number(atom.fractX).toFixed(5)} y=${Number(atom.fractY).toFixed(5)} z=${Number(atom.fractZ).toFixed(5)} occ=${Number(occ).toFixed(3)}${wyckoff}`;
       })
     ];
   }
@@ -570,6 +632,8 @@
       atom[field] = Number.isFinite(parsed) ? parsed : atom[field];
     } else if (field === "element") {
       atom[field] = sanitizeElement(value);
+    } else if (field === "wyckoff") {
+      atom[field] = value.trim();
     } else {
       const oldLabel = atom.label;
       atom[field] = value.trim() || `Atom${index + 1}`;
@@ -596,7 +660,8 @@
         ["fractX", atom.fractX, "number"],
         ["fractY", atom.fractY, "number"],
         ["fractZ", atom.fractZ, "number"],
-        ["occupancy", atom.occupancy, "number"]
+        ["occupancy", atom.occupancy, "number"],
+        ["wyckoff", atom.wyckoff || "", "text"]
       ].forEach(([field, value, type]) => {
         const cell = document.createElement("td");
         const input = document.createElement("input");
@@ -1637,6 +1702,10 @@
     return `${(state.lastImportName || "crystal").replace(/\.cif$/i, "").replace(/[^A-Za-z0-9_-]+/g, "-") || "crystal"}.glb`;
   }
 
+  function configFilename() {
+    return `${(state.lastImportName || "crystal-viewer-config").replace(/\.(cif|json)$/i, "").replace(/[^A-Za-z0-9_-]+/g, "-") || "crystal-viewer-config"}.crystal-viewer.json`;
+  }
+
   function serializableViewerState() {
     return {
       controls: readControlState(),
@@ -1653,9 +1722,25 @@
     };
   }
 
+  function configFilePayload() {
+    return {
+      format: "paulmneves.crystal-viewer",
+      version: CONFIG_VERSION,
+      savedAt: new Date().toISOString(),
+      state: serializableViewerState()
+    };
+  }
+
+  function unwrapConfigFilePayload(payload) {
+    if (!payload || typeof payload !== "object") return null;
+    if (payload.format === "paulmneves.crystal-viewer" && payload.state) return payload.state;
+    return payload;
+  }
+
   function currentShareRecipe() {
     ensureStyles();
     const saved = serializableViewerState();
+    const shareSymmetry = resolvedSpaceGroup() ? [] : saved.symmetryOperations;
     return {
       controls: saved.controls,
       atoms: saved.atoms,
@@ -1664,11 +1749,8 @@
       elementStyles: saved.elementStyles,
       atomOverrides: saved.atomOverrides,
       bondRules: saved.bondRules,
-      symmetryOperations: saved.symmetryOperations,
-      lastImportName: saved.lastImportName,
-      view: {
-        rotation: ensureRotationMatrix()
-      }
+      symmetryOperations: shareSymmetry,
+      lastImportName: saved.lastImportName
     };
   }
 
@@ -1685,13 +1767,69 @@
     }
   }
 
+  function saveConfigFile() {
+    try {
+      const blob = new Blob([`${JSON.stringify(configFilePayload(), null, 2)}\n`], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = configFilename();
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      logLine(`Saved viewer config to ${link.download}.`);
+    } catch (error) {
+      logLine(`Config export failed: ${error.message || error}`);
+    }
+  }
+
+  async function loadConfigFile(file) {
+    if (!file) return;
+    try {
+      const payload = JSON.parse(await file.text());
+      const saved = unwrapConfigFilePayload(payload);
+      if (!applySerializedViewerState(saved)) throw new Error("This does not look like a crystal viewer config file.");
+      const status = $("cif-status");
+      if (status) {
+        status.textContent = `Loaded config ${file.name}.`;
+        status.classList.remove("tool-cif-status-error");
+      }
+      refreshControls();
+      renderConsole();
+      render();
+      logLine(`Loaded viewer config from ${file.name}.`);
+    } catch (error) {
+      setCifError(error.message || "Could not load this config file.");
+    }
+  }
+
   function shareViewerUrl(xrMode) {
     if (!window.CrystalModel || typeof window.CrystalModel.recipeToShareToken !== "function") return "";
     const token = window.CrystalModel.recipeToShareToken(currentShareRecipe());
-    const params = new URLSearchParams();
-    params.set("data", token);
-    if (xrMode === "ar" || xrMode === "vr") params.set("xr", xrMode);
-    return new URL(`crystal-viewer-share.html#${params.toString()}`, window.location.href).href;
+    const xr = xrMode === "ar" || xrMode === "vr" ? `&xr=${xrMode}` : "";
+    return new URL(`crystal-viewer-share.html#${token}${xr}`, window.location.href).href;
+  }
+
+  function iosQuickLookAvailable() {
+    return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  }
+
+  function openIosArQuickLook() {
+    if (!window.CrystalModel || typeof window.CrystalModel.openUsdzQuickLook !== "function") {
+      logLine("iOS AR export is unavailable because the model exporter did not load.");
+      return false;
+    }
+    try {
+      const filename = `${(state.lastImportName || "crystal").replace(/\.cif$/i, "").replace(/[^A-Za-z0-9_-]+/g, "-") || "crystal"}.usdz`;
+      window.CrystalModel.openUsdzQuickLook(currentPortableScene(), filename);
+      logLine("Opening iOS AR Quick Look…");
+      return true;
+    } catch (error) {
+      logLine(`iOS AR failed: ${error.message || error}`);
+      return false;
+    }
   }
 
   async function copyShareLink() {
@@ -1709,6 +1847,7 @@
   }
 
   async function startXrSession(mode) {
+    if (mode === "ar" && iosQuickLookAvailable() && openIosArQuickLook()) return;
     const canvas = $("crystal-canvas");
     if (window.CrystalXr && typeof window.CrystalXr.startWebXr === "function" && canvas) {
       render();
@@ -1751,6 +1890,10 @@
   function drawCompass(ctx, vectors, rotate, canvas, dpr) {
     if (!checked("show-lattice-vectors")) return;
     const origin = { x: 55 * dpr, y: canvas.height - 58 * dpr };
+    const stemWidth = Math.max(1, num("lattice-arrow-stem-thickness", 0.08) * 28 * dpr);
+    const headWidth = Math.max(3, num("lattice-arrow-head-width", 0.25) * 26 * dpr);
+    const headLength = Math.max(4, num("lattice-arrow-head-length", 0.4) * 26 * dpr);
+    const fontSize = Math.max(6, num("lattice-label-font-size", 32) * 0.38);
     const labels = [
       ["a", vectors.a, "#dc2626"],
       ["b", vectors.b, "#16a34a"],
@@ -1760,13 +1903,17 @@
     labels.forEach(([label, vector, color]) => {
       const r = rotate(mul(vector, 42 * dpr / maxLen));
       const end = { x: origin.x + r.x, y: origin.y - r.y };
-      drawLine(ctx, origin, end, { color, width: 2.5 * dpr });
+      drawLine(ctx, origin, end, { color, width: stemWidth });
+      const angle = Math.atan2(end.y - origin.y, end.x - origin.x);
       ctx.fillStyle = color;
       ctx.beginPath();
-      ctx.arc(end.x, end.y, 3.5 * dpr, 0, Math.PI * 2);
+      ctx.moveTo(end.x, end.y);
+      ctx.lineTo(end.x - headLength * Math.cos(angle) + headWidth * 0.5 * Math.sin(angle), end.y - headLength * Math.sin(angle) - headWidth * 0.5 * Math.cos(angle));
+      ctx.lineTo(end.x - headLength * Math.cos(angle) - headWidth * 0.5 * Math.sin(angle), end.y - headLength * Math.sin(angle) + headWidth * 0.5 * Math.cos(angle));
+      ctx.closePath();
       ctx.fill();
       if (checked("show-vector-labels")) {
-        ctx.font = `${12 * dpr}px system-ui, sans-serif`;
+        ctx.font = `${fontSize * dpr}px system-ui, sans-serif`;
         ctx.fillText(label, end.x + 5 * dpr, end.y - 5 * dpr);
       }
     });
@@ -1902,10 +2049,12 @@
     else if (data.spaceGroupNumber != null) $("crystal-spacegroup").value = String(data.spaceGroupNumber);
     const asymmetricAtoms = Array.isArray(data.atoms) ? data.atoms : [];
     state.symmetryOperations = Array.isArray(data.symmetryOperations) ? data.symmetryOperations.slice() : [];
-    let symmetryExpansion = { atoms: asymmetricAtoms, expanded: false, operationCount: state.symmetryOperations.length };
+    let symmetryExpansion = { atoms: asymmetricAtoms, expanded: false, operationCount: 0 };
+    let symmetry = resolvedSymmetry();
     if (asymmetricAtoms.length) {
       state.atoms = asymmetricAtoms.map(normalizeAtom);
-      symmetryExpansion = expandAtomsBySymmetry(state.atoms, state.symmetryOperations);
+      symmetry = resolvedSymmetry();
+      symmetryExpansion = expandAtomsBySymmetry(state.atoms, symmetry.operations);
       state.lastImportName = name;
       resetStyles();
     }
@@ -1923,7 +2072,8 @@
       `Lattice: a=${num("crystal-a", 0)} Å, b=${num("crystal-b", 0)} Å, c=${num("crystal-c", 0)} Å; α=${num("crystal-alpha", 0)}°, β=${num("crystal-beta", 0)}°, γ=${num("crystal-gamma", 0)}°`,
       `Unit cell volume: ${volume.toFixed(4)} Å^3`,
       `Asymmetric atom sites: ${asymmetricAtoms.length}`,
-      symmetryExpansion.operationCount ? `Symmetry operations: ${symmetryExpansion.operationCount}` : "Symmetry operations: none found",
+      symmetry.group ? `Resolved space group: ${symmetry.group.hermannMauguin} (No. ${symmetry.group.id})` : "Resolved space group: not found",
+      symmetryExpansion.operationCount ? `Symmetry operations: ${symmetryExpansion.operationCount} (${symmetry.source === "cif" ? "CIF" : "built-in space-group table"})` : "Symmetry operations: none found",
       `Generated unit-cell sites: ${renderedAtoms.length}${renderedAtoms.length ? ` (${formatElementCounts(renderedAtoms)})` : ""}`,
       ...formatAtomList(state.atoms)
     ];
@@ -1932,19 +2082,126 @@
     render();
   }
 
+  function translatedPositions(basis, translations) {
+    return basis.flatMap((base) =>
+      translations.map((shift) => ({
+        fractX: wrapFraction(base[0] + shift[0]),
+        fractY: wrapFraction(base[1] + shift[1]),
+        fractZ: wrapFraction(base[2] + shift[2])
+      }))
+    );
+  }
+
+  function directPositions(points) {
+    return points.map(([fractX, fractY, fractZ]) => ({
+      fractX: wrapFraction(fractX),
+      fractY: wrapFraction(fractY),
+      fractZ: wrapFraction(fractZ)
+    }));
+  }
+
+  const FACE_CENTER_TRANSLATIONS = [
+    [0, 0, 0],
+    [0, 0.5, 0.5],
+    [0.5, 0, 0.5],
+    [0.5, 0.5, 0]
+  ];
+
+  const RHOMBOHEDRAL_HEX_TRANSLATIONS = [
+    [0, 0, 0],
+    [2 / 3, 1 / 3, 1 / 3],
+    [1 / 3, 2 / 3, 2 / 3]
+  ];
+
+  function presetWyckoffAtom(label, element, fract, wyckoff, positions) {
+    return {
+      label,
+      element,
+      fractX: fract[0],
+      fractY: fract[1],
+      fractZ: fract[2],
+      occupancy: 1,
+      wyckoff,
+      wyckoffPositions: positions
+    };
+  }
+
   function atomsForPreset(preset) {
     if (!preset) return null;
     if (preset.structureModel === "diamond") {
       const element = preset.id && preset.id.startsWith("ge-") ? "Ge" : "Si";
       return [
-        { label: `${element}1`, element, fractX: 0, fractY: 0, fractZ: 0, occupancy: 1 },
-        { label: `${element}2`, element, fractX: 0.25, fractY: 0.25, fractZ: 0.25, occupancy: 1 }
+        presetWyckoffAtom(
+          `${element}1`,
+          element,
+          [0, 0, 0],
+          "8a",
+          translatedPositions([[0, 0, 0], [0.25, 0.25, 0.25]], FACE_CENTER_TRANSLATIONS)
+        )
       ];
     }
     const elementMatch = String(preset.name || "").match(/[A-Z][a-z]?/);
     if (elementMatch && ["al-", "cu-"].some((prefix) => preset.id && preset.id.startsWith(prefix))) {
       const element = sanitizeElement(elementMatch[0]);
-      return [{ label: `${element}1`, element, fractX: 0, fractY: 0, fractZ: 0, occupancy: 1 }];
+      return [
+        presetWyckoffAtom(
+          `${element}1`,
+          element,
+          [0, 0, 0],
+          "4a",
+          translatedPositions([[0, 0, 0]], FACE_CENTER_TRANSLATIONS)
+        )
+      ];
+    }
+    const heusler = {
+      co2mnga: ["Co", "Mn", "Ga"],
+      co2mnsi: ["Co", "Mn", "Si"],
+      ni2mnga: ["Ni", "Mn", "Ga"],
+      cu2mnal: ["Cu", "Mn", "Al"]
+    }[preset.id];
+    if (heusler) {
+      const [x, y, z] = heusler;
+      return [
+        presetWyckoffAtom(`${x}1`, x, [0.25, 0.25, 0.25], "8c", translatedPositions([[0.25, 0.25, 0.25], [0.75, 0.75, 0.75]], FACE_CENTER_TRANSLATIONS)),
+        presetWyckoffAtom(`${y}1`, y, [0, 0, 0], "4a", translatedPositions([[0, 0, 0]], FACE_CENTER_TRANSLATIONS)),
+        presetWyckoffAtom(`${z}1`, z, [0.5, 0.5, 0.5], "4b", translatedPositions([[0.5, 0.5, 0.5]], FACE_CENTER_TRANSLATIONS))
+      ];
+    }
+    if (preset.id === "graphite") {
+      return [
+        presetWyckoffAtom(
+          "C1",
+          "C",
+          [1 / 3, 2 / 3, 0.25],
+          "4f",
+          directPositions([
+            [1 / 3, 2 / 3, 0.25],
+            [2 / 3, 1 / 3, 0.75],
+            [2 / 3, 1 / 3, 0.25],
+            [1 / 3, 2 / 3, 0.75]
+          ])
+        )
+      ];
+    }
+    if (preset.id === "sapphire") {
+      const alZ = 0.3522;
+      const oX = 0.306;
+      return [
+        presetWyckoffAtom(
+          "Al1",
+          "Al",
+          [0, 0, alZ],
+          "12c",
+          translatedPositions([[0, 0, alZ], [0, 0, -alZ], [0, 0, 0.5 + alZ], [0, 0, 0.5 - alZ]], RHOMBOHEDRAL_HEX_TRANSLATIONS)
+        ),
+        presetWyckoffAtom(
+          "O1",
+          "O",
+          [oX, 0, 0.25],
+          "18e",
+          translatedPositions([[oX, 0, 0.25], [0, oX, 0.25], [-oX, -oX, 0.25], [-oX, 0, 0.75], [0, -oX, 0.75], [oX, oX, 0.75]], RHOMBOHEDRAL_HEX_TRANSLATIONS)
+        )
+      ];
     }
     return null;
   }
@@ -1966,7 +2223,7 @@
       state.symmetryOperations = [];
       state.lastImportName = preset.name || "";
       resetStyles();
-      logLine(`Loaded preset ${preset.name} with ${presetAtoms.length} atom site${presetAtoms.length === 1 ? "" : "s"}.`);
+      logLine(`Loaded preset ${preset.name} with ${presetAtoms.length} symmetry-distinct Wyckoff site${presetAtoms.length === 1 ? "" : "s"} and ${generatedAtomSites().length} generated site${generatedAtomSites().length === 1 ? "" : "s"}.`);
     } else {
       logLine(`Loaded preset ${preset.name}. Add atom positions manually or load a CIF for atom sites.`);
     }
@@ -2003,9 +2260,10 @@
       `_cell_angle_gamma ${cifNumber(params.gamma)}`,
       `_symmetry_space_group_name_H-M '${params.spaceGroup || "P 1"}'`
     ];
-    if (state.symmetryOperations.length && !isP1SpaceGroup(params.spaceGroup)) {
+    const symmetry = resolvedSymmetry();
+    if (symmetry.operations.length && !isP1SpaceGroup(params.spaceGroup)) {
       lines.push("loop_", "_space_group_symop_operation_xyz");
-      state.symmetryOperations.forEach((operation) => lines.push(`'${operation}'`));
+      symmetry.operations.forEach((operation) => lines.push(`'${operation}'`));
     }
     lines.push(
       "loop_",
@@ -2014,10 +2272,11 @@
       "_atom_site_fract_x",
       "_atom_site_fract_y",
       "_atom_site_fract_z",
+      "_atom_site_wyckoff_symbol",
       "_atom_site_occupancy"
     );
     atoms.forEach((atom) => {
-      lines.push(`${atom.label} ${sanitizeElement(atom.element)} ${cifNumber(atom.fractX)} ${cifNumber(atom.fractY)} ${cifNumber(atom.fractZ)} ${cifNumber(atom.occupancy)}`);
+      lines.push(`${atom.label} ${sanitizeElement(atom.element)} ${cifNumber(atom.fractX)} ${cifNumber(atom.fractY)} ${cifNumber(atom.fractZ)} ${atom.wyckoff || "?"} ${cifNumber(atom.occupancy)}`);
     });
     const blob = new Blob([`${lines.join("\n")}\n`], { type: "chemical/x-cif" });
     const url = URL.createObjectURL(blob);
@@ -2133,6 +2392,9 @@
     const loadButton = $("cif-load-button");
     const fileInput = $("cif-file");
     const exportButton = $("cif-export-button");
+    const saveConfigButton = $("crystal-config-save-button");
+    const loadConfigButton = $("crystal-config-load-button");
+    const configFileInput = $("crystal-config-file");
     const presetSelect = $("crystal-preset");
     const radiusModeSelect = $("radius-mode");
     const colorSchemeSelect = $("color-scheme");
@@ -2167,6 +2429,15 @@
       });
     }
     if (exportButton) exportButton.addEventListener("click", exportCurrentCif);
+    if (saveConfigButton) saveConfigButton.addEventListener("click", saveConfigFile);
+    if (loadConfigButton && configFileInput) {
+      loadConfigButton.addEventListener("click", () => configFileInput.click());
+      configFileInput.addEventListener("change", () => {
+        const file = configFileInput.files && configFileInput.files[0];
+        configFileInput.value = "";
+        loadConfigFile(file);
+      });
+    }
     const downloadGlbButton = $("download-glb");
     const copyShareButton = $("copy-share-link");
     const enterVrButton = $("enter-vr");
@@ -2228,7 +2499,7 @@
     });
 
     document.querySelectorAll("input, select").forEach((el) => {
-      if (el.closest("#crystal-atom-table") || el.closest("#crystal-atom-style-list") || el.id === "cif-file") return;
+      if (el.closest("#crystal-atom-table") || el.closest("#crystal-atom-style-list") || ["cif-file", "crystal-config-file"].includes(el.id)) return;
       if (["show-generated-atoms", "crystal-spacegroup"].includes(el.id)) return;
       el.addEventListener("input", render);
       el.addEventListener("change", render);

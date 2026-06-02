@@ -29,10 +29,18 @@
   }
 
   function parseShareLocation() {
-    const params = new URLSearchParams(window.location.hash.slice(1));
+    const raw = window.location.hash.slice(1);
+    if (!raw || raw.startsWith("data=")) {
+      const params = new URLSearchParams(raw);
+      return {
+        token: params.get("data") || "",
+        xr: params.get("xr") || ""
+      };
+    }
+    const xrMatch = raw.match(/&xr=(ar|vr)$/);
     return {
-      token: params.get("data") || "",
-      xr: params.get("xr") || ""
+      token: xrMatch ? raw.slice(0, xrMatch.index) : raw,
+      xr: xrMatch ? xrMatch[1] : ""
     };
   }
 
@@ -87,9 +95,8 @@
 
   function lightDirection() {
     const settings = (sceneData && sceneData.lighting) || DEFAULT_LIGHTING;
-    const rotation = sceneData && sceneData.view && sceneData.view.rotation;
     if (window.CrystalModel && typeof window.CrystalModel.cameraRelativeLightDirection === "function") {
-      const dir = window.CrystalModel.cameraRelativeLightDirection(settings, rotation);
+      const dir = window.CrystalModel.cameraRelativeLightDirection(settings);
       return new THREE.Vector3(dir[0], dir[1], dir[2]);
     }
     return new THREE.Vector3(0, 0, 1);
@@ -235,7 +242,24 @@
     }
   }
 
+  function iosQuickLookAvailable() {
+    return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  }
+
+  function openIosAr() {
+    if (!sceneData || !window.CrystalModel || typeof window.CrystalModel.openUsdzQuickLook !== "function") {
+      setStatus("iOS AR export is unavailable.");
+      return false;
+    }
+    const filename = `${(sceneData.name || "crystal").replace(/[^A-Za-z0-9_-]+/g, "-")}.usdz`;
+    window.CrystalModel.openUsdzQuickLook(sceneData, filename);
+    setStatus("Opening iOS AR Quick Look…");
+    return true;
+  }
+
   async function enterXr(mode) {
+    if (mode === "ar" && iosQuickLookAvailable() && openIosAr()) return;
     if (!renderer || !scene || !camera) {
       setStatus("3D view is not ready for XR.");
       return;

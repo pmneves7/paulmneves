@@ -3097,7 +3097,9 @@ body.laue-page.laue-nav-hidden .crystal-panel-restore {
   margin-bottom: 0;
 }
 
-.text-tool-grow-input {
+.tool-field textarea.text-tool-grow-input {
+  field-sizing: content;
+  max-height: none;
   min-height: 12rem;
   overflow: hidden;
   resize: none;

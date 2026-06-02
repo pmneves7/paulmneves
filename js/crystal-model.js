@@ -80,7 +80,7 @@
   function cameraRelativeLightDirection(lighting, viewRotation) {
     const matrix = Array.isArray(viewRotation) && viewRotation.length === 9 ?
       viewRotation :
-      defaultViewRotationMatrix();
+      [1, 0, 0, 0, 1, 0, 0, 0, 1];
     const settings = lighting || {};
     const light = lightDirectionFromAngles(settings.azimuth, settings.elevation);
     const right = [matrix[0], matrix[1], matrix[2]];
@@ -267,7 +267,16 @@
       compactNumber(atom.fractZ, 5)
     ];
     const occupancy = atom.occupancy == null ? 1 : Number(atom.occupancy);
-    if (occupancy !== 1) row.push(compactNumber(occupancy, 4));
+    const hasWyckoffData = atom.wyckoff || (Array.isArray(atom.wyckoffPositions) && atom.wyckoffPositions.length);
+    if (occupancy !== 1 || hasWyckoffData) row.push(occupancy === 1 ? "" : compactNumber(occupancy, 4));
+    if (hasWyckoffData) {
+      row.push(atom.wyckoff || "");
+      row.push((atom.wyckoffPositions || []).map((point) => [
+        compactNumber(point.fractX, 5),
+        compactNumber(point.fractY, 5),
+        compactNumber(point.fractZ, 5)
+      ]));
+    }
     return row;
   }
 
@@ -279,7 +288,15 @@
       fractX: Number(atom[2]) || 0,
       fractY: Number(atom[3]) || 0,
       fractZ: Number(atom[4]) || 0,
-      occupancy: atom[5] == null ? 1 : Number(atom[5]) || 1
+      occupancy: atom[5] == null || atom[5] === "" ? 1 : Number(atom[5]) || 1,
+      wyckoff: atom[6] || "",
+      wyckoffPositions: Array.isArray(atom[7]) ?
+        atom[7].map((point) => ({
+          fractX: Number(point[0]) || 0,
+          fractY: Number(point[1]) || 0,
+          fractZ: Number(point[2]) || 0
+        })) :
+        undefined
     };
   }
 
@@ -311,13 +328,16 @@
   function compactElementStyle(style) {
     const row = [compactColor(style.color, "#999999")];
     if (style.radius != null) row.push(compactNumber(style.radius, 5));
+    else if (style.visible === false) row.push("");
+    if (style.visible === false) row.push(0);
     return row;
   }
 
   function expandElementStyle(row) {
     return {
       color: expandColor(row[0], "#999999"),
-      radius: row[1] == null ? undefined : Number(row[1]) || 0
+      radius: row[1] == null || row[1] === "" ? undefined : Number(row[1]) || 0,
+      visible: row[2] == null ? true : !!row[2]
     };
   }
 
@@ -338,6 +358,8 @@
     const row = [label];
     if (override.color) row.push(compactColor(override.color));
     if (override.radius != null) row.push(compactNumber(override.radius, 5));
+    else if (override.visible != null) row.push("");
+    if (override.visible != null) row.push(override.visible ? 1 : 0);
     return row.length > 1 ? row : null;
   }
 
@@ -348,14 +370,15 @@
       const label = row[0];
       const override = {};
       if (row[1]) override.color = expandColor(row[1]);
-      if (row[2] != null) override.radius = Number(row[2]) || 0;
+      if (row[2] != null && row[2] !== "") override.radius = Number(row[2]) || 0;
+      if (row[3] != null) override.visible = !!row[3];
       if (Object.keys(override).length) out[label] = override;
       return out;
     }, {});
   }
 
   function compactRecipe(recipe) {
-    const body = { v: 4 };
+    const body = {};
     const name = (recipe.lastImportName || recipe.name || "").replace(/\.cif$/i, "");
     if (name && name !== "crystal") body.n = name;
     const controls = compactControls(recipe.controls);
@@ -384,15 +407,16 @@
 
   function expandRecipe(compact) {
     if (!compact) return compact;
-    if (compact.v === 4 || compact.v === 3) {
+    if (compact.v === 4 || compact.v === 3 || compact.at || compact.c || compact.n || compact.sy || compact.br) {
+      const legacyV3 = compact.v === 3;
       return {
         lastImportName: compact.n || "crystal",
-        controls: compact.v === 4 ? expandControls(compact.c) : (compact.c || {}),
+        controls: legacyV3 ? (compact.c || {}) : expandControls(compact.c),
         radiusMode: compact.rm || "atomic",
         colorScheme: compact.cs || "jmol",
-        elementStyles: compact.v === 4 ? expandElementStyles(compact.es) : (compact.es || {}),
-        atomOverrides: compact.v === 4 ? expandAtomOverrides(compact.ao) : (compact.ao || {}),
-        bondRules: (compact.br || []).map((rule) => compact.v === 4 ? expandBondRule(rule) : rule),
+        elementStyles: legacyV3 ? (compact.es || {}) : expandElementStyles(compact.es),
+        atomOverrides: legacyV3 ? (compact.ao || {}) : expandAtomOverrides(compact.ao),
+        bondRules: (compact.br || []).map((rule) => legacyV3 ? rule : expandBondRule(rule)),
         symmetryOperations: compact.sy || [],
         atoms: (compact.at || []).map(expandAtom),
         view: {
@@ -410,11 +434,20 @@
   }
 
   function recipeToShareToken(recipe) {
-    return `v4.${base64UrlFromText(JSON.stringify(compactRecipe(recipe)))}`;
+    return base64UrlFromText(JSON.stringify(compactRecipe(recipe)));
   }
 
   function sceneFromShareToken(token) {
     const clean = String(token || "").replace(/^#/, "").replace(/^data=/, "");
+    try {
+      const parsed = JSON.parse(textFromBase64Url(clean));
+      if (parsed && (parsed.at || parsed.c || parsed.n || parsed.sy || parsed.br)) {
+        return recipeToScene(expandRecipe(parsed));
+      }
+      return expandScene(parsed);
+    } catch (error) {
+      // Legacy prefixed links are handled below.
+    }
     if (clean.startsWith("v4.") || clean.startsWith("v3.")) {
       return recipeToScene(expandRecipe(JSON.parse(textFromBase64Url(clean.slice(3)))));
     }
@@ -488,6 +521,15 @@
     return /^p\s*1$/i.test(String(value || "").trim()) || String(value || "").trim() === "1";
   }
 
+  function resolvedSymmetryOperations(spaceGroup, explicitOperations) {
+    if (isP1SpaceGroup(spaceGroup)) return [];
+    if (Array.isArray(explicitOperations) && explicitOperations.length) return explicitOperations;
+    if (global.SpaceGroupEngine && typeof global.SpaceGroupEngine.operationsForSpaceGroup === "function") {
+      return global.SpaceGroupEngine.operationsForSpaceGroup(spaceGroup);
+    }
+    return [];
+  }
+
   function symmetryKey(atom) {
     const scale = 100000;
     return [
@@ -507,31 +549,55 @@
       fractX: wrapFraction(Number(atom.fractX) || 0),
       fractY: wrapFraction(Number(atom.fractY) || 0),
       fractZ: wrapFraction(Number(atom.fractZ) || 0),
-      occupancy: atom.occupancy == null ? 1 : Number(atom.occupancy) || 1
+      occupancy: atom.occupancy == null ? 1 : Number(atom.occupancy) || 1,
+      wyckoff: atom.wyckoff || "",
+      wyckoffPositions: Array.isArray(atom.wyckoffPositions) ?
+        atom.wyckoffPositions.map((position) => ({
+          fractX: wrapFraction(Number(position.fractX) || 0),
+          fractY: wrapFraction(Number(position.fractY) || 0),
+          fractZ: wrapFraction(Number(position.fractZ) || 0)
+        })) :
+        undefined
     }));
-    const operations = Array.isArray(recipe.symmetryOperations) ? recipe.symmetryOperations : [];
-    if (!operations.length || isP1SpaceGroup(textControl(controls, "crystal-spacegroup", ""))) return atoms;
-    const seen = new Set();
-    const expanded = [];
-    atoms.forEach((atom) => {
-      operations.forEach((operation) => {
-        const coords = applySymmetryOperation(operation, atom);
-        if (!coords) return;
-        const expandedAtom = {
-          ...atom,
-          fractX: coords.fractX,
-          fractY: coords.fractY,
-          fractZ: coords.fractZ,
-          sourceLabel: atom.label
-        };
-        const key = symmetryKey(expandedAtom);
-        if (seen.has(key)) return;
-        seen.add(key);
-        expandedAtom.label = `${atom.label}_${expanded.length + 1}`;
-        expanded.push(expandedAtom);
+    const spaceGroup = textControl(controls, "crystal-spacegroup", "");
+    const operations = resolvedSymmetryOperations(spaceGroup, recipe.symmetryOperations);
+    if (operations.length) {
+      const seen = new Set();
+      const expanded = [];
+      atoms.forEach((atom) => {
+        operations.forEach((operation) => {
+          const coords = applySymmetryOperation(operation, atom);
+          if (!coords) return;
+          const expandedAtom = {
+            ...atom,
+            fractX: coords.fractX,
+            fractY: coords.fractY,
+            fractZ: coords.fractZ,
+            sourceLabel: atom.label
+          };
+          const key = symmetryKey(expandedAtom);
+          if (seen.has(key)) return;
+          seen.add(key);
+          expandedAtom.label = `${atom.label}_${expanded.length + 1}`;
+          expanded.push(expandedAtom);
+        });
       });
-    });
-    return expanded.length > atoms.length ? expanded : atoms;
+      return expanded.length > atoms.length ? expanded : atoms;
+    }
+    if (!isP1SpaceGroup(spaceGroup) && atoms.some((atom) => Array.isArray(atom.wyckoffPositions) && atom.wyckoffPositions.length)) {
+      return atoms.flatMap((atom) => {
+        if (!Array.isArray(atom.wyckoffPositions) || !atom.wyckoffPositions.length) return [atom];
+        return atom.wyckoffPositions.map((position, index) => ({
+          ...atom,
+          label: `${atom.label}_${index + 1}`,
+          fractX: position.fractX,
+          fractY: position.fractY,
+          fractZ: position.fractZ,
+          sourceLabel: atom.label
+        }));
+      });
+    }
+    return atoms;
   }
 
   function latticeVectorsFromControls(controls) {
@@ -1073,6 +1139,162 @@
     return new Blob([out], { type: "model/gltf-binary" });
   }
 
+  function usdName(value, fallback) {
+    const clean = String(value || fallback || "item").replace(/[^A-Za-z0-9_]+/g, "_");
+    return /^[A-Za-z_]/.test(clean) ? clean : `_${clean}`;
+  }
+
+  function usdNumber(value) {
+    const number = Number(value) || 0;
+    return Number(number.toFixed(6)).toString();
+  }
+
+  function usdVec(values) {
+    return `(${usdNumber(values[0])}, ${usdNumber(values[1])}, ${usdNumber(values[2])})`;
+  }
+
+  function createUsda(scene) {
+    const { groups, material } = sceneToSolidGroups(scene);
+    if (!groups.length) throw new Error("Nothing to export.");
+    const lines = [
+      "#usda 1.0",
+      "(",
+      "    defaultPrim = \"Crystal\"",
+      "    metersPerUnit = 1",
+      "    upAxis = \"Y\"",
+      ")",
+      "",
+      "def Xform \"Crystal\"",
+      "{"
+    ];
+    groups.forEach((group, index) => {
+      const matName = `Mat_${index}`;
+      const meshName = `Mesh_${index}`;
+      lines.push(
+        `    def Material "${matName}"`,
+        "    {",
+        "        token outputs:surface.connect = <PreviewSurface.outputs:surface>",
+        "        def Shader \"PreviewSurface\"",
+        "        {",
+        "            uniform token info:id = \"UsdPreviewSurface\"",
+        `            color3f inputs:diffuseColor = ${usdVec(group.color)}`,
+        `            float inputs:roughness = ${usdNumber(material.roughness)}`,
+        `            float inputs:metallic = ${usdNumber(material.metallic)}`,
+        "            token outputs:surface",
+        "        }",
+        "    }",
+        "",
+        `    def Mesh "${meshName}" (`,
+        "        prepend apiSchemas = [\"MaterialBindingAPI\"]",
+        "    )",
+        "    {",
+        `        rel material:binding = </Crystal/${matName}>`,
+        "        uniform token subdivisionScheme = \"none\"",
+        `        int[] faceVertexCounts = [${new Array(group.indices.length / 3).fill(3).join(",")}]`,
+        `        int[] faceVertexIndices = [${group.indices.join(",")}]`,
+        `        point3f[] points = [${Array.from({ length: group.positions.length / 3 }, (_, i) => usdVec(group.positions.slice(i * 3, i * 3 + 3))).join(",")}]`,
+        `        normal3f[] normals = [${Array.from({ length: group.normals.length / 3 }, (_, i) => usdVec(group.normals.slice(i * 3, i * 3 + 3))).join(",")}]`,
+        "        uniform token normals:interpolation = \"vertex\"",
+        "    }",
+        ""
+      );
+    });
+    lines.push("}");
+    return `${lines.join("\n")}\n`;
+  }
+
+  const CRC_TABLE = (() => {
+    const table = [];
+    for (let i = 0; i < 256; i += 1) {
+      let c = i;
+      for (let j = 0; j < 8; j += 1) {
+        c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      }
+      table.push(c >>> 0);
+    }
+    return table;
+  })();
+
+  function crc32(bytes) {
+    let crc = 0xffffffff;
+    bytes.forEach((byte) => {
+      crc = CRC_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+    });
+    return (crc ^ 0xffffffff) >>> 0;
+  }
+
+  function writeUint16(bytes, value) {
+    bytes.push(value & 0xff, (value >>> 8) & 0xff);
+  }
+
+  function writeUint32(bytes, value) {
+    bytes.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff);
+  }
+
+  function pushBytes(out, bytes) {
+    bytes.forEach((byte) => out.push(byte));
+  }
+
+  function createStoredZip(files) {
+    const out = [];
+    const central = [];
+    files.forEach((file) => {
+      const nameBytes = encoder.encode(file.name);
+      const data = file.bytes;
+      const crc = crc32(data);
+      const offset = out.length;
+      writeUint32(out, 0x04034b50);
+      writeUint16(out, 20);
+      writeUint16(out, 0);
+      writeUint16(out, 0);
+      writeUint16(out, 0);
+      writeUint16(out, 0);
+      writeUint32(out, crc);
+      writeUint32(out, data.length);
+      writeUint32(out, data.length);
+      writeUint16(out, nameBytes.length);
+      writeUint16(out, 0);
+      pushBytes(out, nameBytes);
+      pushBytes(out, data);
+
+      writeUint32(central, 0x02014b50);
+      writeUint16(central, 20);
+      writeUint16(central, 20);
+      writeUint16(central, 0);
+      writeUint16(central, 0);
+      writeUint16(central, 0);
+      writeUint16(central, 0);
+      writeUint32(central, crc);
+      writeUint32(central, data.length);
+      writeUint32(central, data.length);
+      writeUint16(central, nameBytes.length);
+      writeUint16(central, 0);
+      writeUint16(central, 0);
+      writeUint16(central, 0);
+      writeUint16(central, 0);
+      writeUint32(central, 0);
+      writeUint32(central, offset);
+      pushBytes(central, nameBytes);
+    });
+    const centralOffset = out.length;
+    out.push(...central);
+    writeUint32(out, 0x06054b50);
+    writeUint16(out, 0);
+    writeUint16(out, 0);
+    writeUint16(out, files.length);
+    writeUint16(out, files.length);
+    writeUint32(out, central.length);
+    writeUint32(out, centralOffset);
+    writeUint16(out, 0);
+    return new Uint8Array(out);
+  }
+
+  function createUsdz(scene) {
+    const name = `${usdName(scene && scene.name, "crystal")}.usda`;
+    const bytes = encoder.encode(createUsda(scene));
+    return new Blob([createStoredZip([{ name, bytes }])], { type: "model/vnd.usdz+zip" });
+  }
+
   function downloadGlb(scene, filename) {
     let url = "";
     try {
@@ -1084,18 +1306,51 @@
       link.click();
       link.remove();
     } finally {
-      if (url) URL.revokeObjectURL(url);
+      if (url) window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
+  }
+
+  function downloadUsdz(scene, filename) {
+    let url = "";
+    try {
+      url = URL.createObjectURL(createUsdz(scene));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename || "crystal.usdz";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } finally {
+      if (url) window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+  }
+
+  function openUsdzQuickLook(scene, filename) {
+    const url = URL.createObjectURL(createUsdz(scene));
+    const link = document.createElement("a");
+    link.rel = "ar";
+    link.href = url;
+    link.download = filename || "crystal.usdz";
+    const img = document.createElement("img");
+    img.alt = "";
+    img.src = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+    link.appendChild(img);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 60000);
   }
 
   global.CrystalModel = {
     cameraRelativeLightDirection,
     createGlb,
+    createUsdz,
     defaultViewRotationMatrix,
     downloadGlb,
+    downloadUsdz,
+    openUsdzQuickLook,
     recipeToScene,
     recipeToShareToken,
-    sceneFromShareToken,
-    sceneToShareToken
+    sceneFromShareToken
   };
 })(typeof window !== "undefined" ? window : globalThis);

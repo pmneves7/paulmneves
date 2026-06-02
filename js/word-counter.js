@@ -17,6 +17,8 @@
 
   const growInputs = Array.from(document.querySelectorAll(".text-tool-grow-input"));
   const TOP_WORDS = 10;
+  const supportsFieldSizing = typeof CSS !== "undefined" &&
+    CSS.supports("field-sizing", "content");
 
   function setActiveTab(tabName) {
     tabButtons.forEach((btn) => {
@@ -27,11 +29,29 @@
     tabPanes.forEach((pane) => {
       pane.hidden = pane.dataset.tabPane !== tabName;
     });
+    if (tabName === "counter") {
+      requestAnimationFrame(() => autoGrow(counterInput));
+    }
   }
 
   function autoGrow(textarea) {
+    if (!textarea) return;
+    if (supportsFieldSizing) {
+      textarea.style.height = "";
+      return;
+    }
     textarea.style.height = "auto";
-    textarea.style.height = `${textarea.scrollHeight}px`;
+    const minHeight = parseFloat(getComputedStyle(textarea).minHeight) || 0;
+    textarea.style.height = `${Math.max(textarea.scrollHeight, minHeight)}px`;
+  }
+
+  function bindAutoGrow(textarea) {
+    const refresh = () => autoGrow(textarea);
+    textarea.addEventListener("input", refresh);
+    textarea.addEventListener("paste", () => {
+      requestAnimationFrame(refresh);
+    });
+    refresh();
   }
 
   function countWords(text) {
@@ -168,12 +188,15 @@
     btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
   });
 
-  growInputs.forEach((textarea) => {
-    textarea.addEventListener("input", () => autoGrow(textarea));
-    autoGrow(textarea);
-  });
+  growInputs.forEach(bindAutoGrow);
 
-  counterInput.addEventListener("input", updateCounter);
+  counterInput.addEventListener("input", () => {
+    autoGrow(counterInput);
+    updateCounter();
+  });
+  window.addEventListener("resize", () => {
+    growInputs.forEach(autoGrow);
+  });
   diffOld.addEventListener("input", updateDiff);
   diffNew.addEventListener("input", updateDiff);
 
