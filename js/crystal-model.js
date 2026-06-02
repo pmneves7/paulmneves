@@ -958,7 +958,7 @@
   function exportColor(color, options) {
     if (!options || options.colorProfile !== "powerpoint") return color;
     const hsl = rgbToHsl(color);
-    const rgb = hslToRgb([hsl[0], Math.min(1, hsl[1] * 1.3 + 0.06), Math.max(0, hsl[2] * 0.78)]);
+    const rgb = hslToRgb([hsl[0], Math.min(1, hsl[1] * 1.35 + 0.05), Math.max(0, hsl[2] * 0.42)]);
     return [rgb[0], rgb[1], rgb[2], color[3] == null ? 1 : color[3]];
   }
 
@@ -967,8 +967,8 @@
     const light = normalizeVec([-0.35, 0.55, 0.76]);
     const n = normalizeVec(normal);
     const diffuse = Math.max(0, n[0] * light[0] + n[1] * light[1] + n[2] * light[2]);
-    const lowerFill = Math.max(0, -n[1]) * 0.18;
-    const shade = Math.min(1, 0.46 + diffuse * 0.52 + lowerFill);
+    const lowerFill = Math.max(0, -n[1]) * 0.05;
+    const shade = Math.min(0.58, 0.26 + diffuse * 0.29 + lowerFill);
     return [
       clamp01(color[0] * shade),
       clamp01(color[1] * shade),

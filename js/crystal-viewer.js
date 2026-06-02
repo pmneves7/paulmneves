@@ -2594,18 +2594,46 @@
 
     const canvas = $("crystal-canvas");
     let drag = null;
-    canvas.addEventListener("pointerdown", (event) => {
-      canvas.setPointerCapture(event.pointerId);
+    let pinch = null;
+    const activePointers = new Map();
+    const pointerDistance = () => {
+      const points = [...activePointers.values()];
+      if (points.length < 2) return 0;
+      return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+    };
+    const startPinch = () => {
+      const distance = pointerDistance();
+      pinch = distance > 0 ? { distance, zoom: state.view.zoom } : null;
+      drag = null;
+    };
+    const startDragFromPointer = (point) => {
       drag = {
-        x: event.clientX,
-        y: event.clientY,
+        x: point.x,
+        y: point.y,
         rotation: ensureRotationMatrix().slice(),
         panX: state.view.panX,
         panY: state.view.panY,
         zoom: state.view.zoom
       };
+    };
+    canvas.addEventListener("pointerdown", (event) => {
+      canvas.setPointerCapture(event.pointerId);
+      activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (activePointers.size >= 2) startPinch();
+      else startDragFromPointer({ x: event.clientX, y: event.clientY });
     });
     canvas.addEventListener("pointermove", (event) => {
+      if (activePointers.has(event.pointerId)) {
+        activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      }
+      if (pinch && activePointers.size >= 2) {
+        const distance = pointerDistance();
+        if (distance > 0) {
+          state.view.zoom = Math.max(0.15, Math.min(12, pinch.zoom * distance / pinch.distance));
+          render();
+        }
+        return;
+      }
       if (!drag) return;
       const dx = event.clientX - drag.x;
       const dy = event.clientY - drag.y;
@@ -2623,8 +2651,13 @@
       render();
     });
     ["pointerup", "pointercancel", "pointerleave"].forEach((type) => {
-      canvas.addEventListener(type, () => {
+      canvas.addEventListener(type, (event) => {
+        activePointers.delete(event.pointerId);
+        pinch = null;
         drag = null;
+        if (activePointers.size === 1) {
+          startDragFromPointer([...activePointers.values()][0]);
+        }
       });
     });
     canvas.addEventListener("wheel", (event) => {
