@@ -489,13 +489,13 @@
 
   function resolvedSpaceGroup() {
     if (!window.SpaceGroupEngine || typeof window.SpaceGroupEngine.lookupSpaceGroup !== "function") return null;
-    return window.SpaceGroupEngine.lookupSpaceGroup(text("crystal-spacegroup", ""));
+    return window.SpaceGroupEngine.lookupSpaceGroup(text("crystal-spacegroup", ""), text("crystal-spacegroup-setting", ""));
   }
 
   function resolvedSymmetry() {
     const spaceGroup = text("crystal-spacegroup", "");
     if (isP1SpaceGroup(spaceGroup)) return { operations: [], source: "none", group: null };
-    if (Array.isArray(state.symmetryOperations) && state.symmetryOperations.length) {
+    if (!text("crystal-spacegroup-setting", "") && Array.isArray(state.symmetryOperations) && state.symmetryOperations.length) {
       return { operations: state.symmetryOperations, source: "cif", group: resolvedSpaceGroup() };
     }
     const group = resolvedSpaceGroup();
@@ -504,6 +504,35 @@
       source: group ? "engine" : "none",
       group
     };
+  }
+
+  function settingOptionLabel(setting, index, total) {
+    const base = `${setting.hermannMauguin} [${setting.hallSymbol}]`;
+    if (setting.preferred) return `${base} - conventional`;
+    return total > 1 ? `${base} - setting ${index + 1}` : base;
+  }
+
+  function updateSpaceGroupSettingOptions() {
+    const field = $("crystal-setting-field");
+    const select = $("crystal-spacegroup-setting");
+    if (!field || !select || !window.SpaceGroupEngine || typeof window.SpaceGroupEngine.listSpaceGroupSettings !== "function") return;
+    const previous = select.value;
+    const settings = window.SpaceGroupEngine.listSpaceGroupSettings(text("crystal-spacegroup", ""));
+    select.innerHTML = "";
+    if (settings.length <= 1) {
+      field.hidden = true;
+      select.value = "";
+      return;
+    }
+    field.hidden = false;
+    settings.forEach((setting, index) => {
+      const option = document.createElement("option");
+      option.value = setting.hallSymbol;
+      option.textContent = settingOptionLabel(setting, index, settings.length);
+      select.appendChild(option);
+    });
+    const preferred = settings.find((setting) => setting.preferred) || settings[0];
+    select.value = settings.some((setting) => setting.hallSymbol === previous) ? previous : preferred.hallSymbol;
   }
 
   function shouldApplySymmetry() {
@@ -910,6 +939,7 @@
 
   function refreshControls() {
     ensureStyles();
+    updateSpaceGroupSettingOptions();
     renderAtomTable();
     renderAtomStyles();
     renderAtomDropdowns();
@@ -2050,6 +2080,7 @@
     const asymmetricAtoms = Array.isArray(data.atoms) ? data.atoms : [];
     state.symmetryOperations = Array.isArray(data.symmetryOperations) ? data.symmetryOperations.slice() : [];
     let symmetryExpansion = { atoms: asymmetricAtoms, expanded: false, operationCount: 0 };
+    updateSpaceGroupSettingOptions();
     let symmetry = resolvedSymmetry();
     if (asymmetricAtoms.length) {
       state.atoms = asymmetricAtoms.map(normalizeAtom);
@@ -2293,7 +2324,7 @@
   function persistedControlIds() {
     return [
       "crystal-a", "crystal-b", "crystal-c", "crystal-alpha", "crystal-beta", "crystal-gamma",
-      "crystal-spacegroup", "show-generated-atoms", "color-scheme", "radius-mode", "radius-scale",
+      "crystal-spacegroup", "crystal-spacegroup-setting", "show-generated-atoms", "color-scheme", "radius-mode", "radius-scale",
       "atom-lighting-mode", "light-intensity", "light-color", "light-azimuth", "light-elevation",
       "material-roughness", "material-specular", "range-a-min", "range-b-min", "range-c-min",
       "range-a-max", "range-b-max", "range-c-max", "show-cell-outline", "show-all-outlines",
@@ -2317,11 +2348,19 @@
   function applyControlState(controls) {
     if (!controls || typeof controls !== "object") return;
     Object.entries(controls).forEach(([id, value]) => {
+      if (id === "crystal-spacegroup-setting") return;
       const el = $(id);
       if (!el) return;
       if (el.type === "checkbox") el.checked = !!value;
       else el.value = value;
     });
+    updateSpaceGroupSettingOptions();
+    if (controls["crystal-spacegroup-setting"] != null) {
+      const setting = $("crystal-spacegroup-setting");
+      if (setting && [...setting.options].some((option) => option.value === controls["crystal-spacegroup-setting"])) {
+        setting.value = controls["crystal-spacegroup-setting"];
+      }
+    }
   }
 
   function saveViewerState() {
@@ -2459,6 +2498,16 @@
     if (spaceGroupInput) {
       spaceGroupInput.addEventListener("change", () => {
         if (isP1SpaceGroup(spaceGroupInput.value)) promoteGeneratedAtomsToEditable();
+        updateSpaceGroupSettingOptions();
+        refreshControls();
+        render();
+      });
+    }
+
+    const spaceGroupSetting = $("crystal-spacegroup-setting");
+    if (spaceGroupSetting) {
+      spaceGroupSetting.addEventListener("change", () => {
+        refreshControls();
         render();
       });
     }
@@ -2500,7 +2549,7 @@
 
     document.querySelectorAll("input, select").forEach((el) => {
       if (el.closest("#crystal-atom-table") || el.closest("#crystal-atom-style-list") || ["cif-file", "crystal-config-file"].includes(el.id)) return;
-      if (["show-generated-atoms", "crystal-spacegroup"].includes(el.id)) return;
+      if (["show-generated-atoms", "crystal-spacegroup", "crystal-spacegroup-setting"].includes(el.id)) return;
       el.addEventListener("input", render);
       el.addEventListener("change", render);
     });

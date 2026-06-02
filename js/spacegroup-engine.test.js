@@ -1,6 +1,7 @@
 const assert = require("assert");
 
 globalThis["space-groups"] = require("./space-groups-data.js");
+require("./spacegroup-settings-data.js");
 require("./spacegroup-engine.js");
 require("./crystal-model.js");
 
@@ -11,6 +12,8 @@ assert(fd3m, "Fd-3m should resolve");
 assert.strictEqual(fd3m.id, 227);
 assert.strictEqual(fd3m.operations.length, 192);
 assert.strictEqual(globalThis.SpaceGroupEngine.lookupSpaceGroup("227").hallSymbol, "-F 4vw 2vw 3");
+assert.strictEqual(globalThis.SpaceGroupEngine.listSpaceGroupSettings("F d -3 m").length, 2);
+assert.strictEqual(globalThis.SpaceGroupEngine.lookupSpaceGroup("F d -3 m", "F 4d 2 3 -1d").hallSymbol, "F 4d 2 3 -1d");
 
 const scene = globalThis.CrystalModel.recipeToScene({
   controls: {

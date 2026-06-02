@@ -99,6 +99,10 @@
                   <label for="crystal-spacegroup">Space group</label>
                   <input type="text" id="crystal-spacegroup" value="Fd-3m" placeholder="symbol or IT number" />
                 </div>
+                <div class="tool-field crystal-wide-field" id="crystal-setting-field" hidden>
+                  <label for="crystal-spacegroup-setting">Crystallographic setting</label>
+                  <select id="crystal-spacegroup-setting"></select>
+                </div>
               </form>
 
               <div class="crystal-table-header">
@@ -422,6 +426,7 @@
   <script src="../js/crystal-presets.js"></script>
   <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
   <script src="../js/space-groups-data.js"></script>
+  <script src="../js/spacegroup-settings-data.js"></script>
   <script src="../js/spacegroup-engine.js"></script>
   <script src="../js/crystal-model.js"></script>
   <script src="../js/crystal-xr.js"></script>

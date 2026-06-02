@@ -172,6 +172,7 @@
     ["be", "crystal-beta", 90, "number"],
     ["ga", "crystal-gamma", 90, "number"],
     ["sg", "crystal-spacegroup", "Fd-3m", "text"],
+    ["sgs", "crystal-spacegroup-setting", "", "text"],
     ["rs", "radius-scale", 1, "number"],
     ["lm", "atom-lighting-mode", "realistic", "text"],
     ["li", "light-intensity", 2, "number"],
@@ -521,11 +522,11 @@
     return /^p\s*1$/i.test(String(value || "").trim()) || String(value || "").trim() === "1";
   }
 
-  function resolvedSymmetryOperations(spaceGroup, explicitOperations) {
+  function resolvedSymmetryOperations(spaceGroup, settingHallSymbol, explicitOperations) {
     if (isP1SpaceGroup(spaceGroup)) return [];
     if (Array.isArray(explicitOperations) && explicitOperations.length) return explicitOperations;
     if (global.SpaceGroupEngine && typeof global.SpaceGroupEngine.operationsForSpaceGroup === "function") {
-      return global.SpaceGroupEngine.operationsForSpaceGroup(spaceGroup);
+      return global.SpaceGroupEngine.operationsForSpaceGroup(spaceGroup, settingHallSymbol);
     }
     return [];
   }
@@ -560,7 +561,8 @@
         undefined
     }));
     const spaceGroup = textControl(controls, "crystal-spacegroup", "");
-    const operations = resolvedSymmetryOperations(spaceGroup, recipe.symmetryOperations);
+    const settingHallSymbol = textControl(controls, "crystal-spacegroup-setting", "");
+    const operations = resolvedSymmetryOperations(spaceGroup, settingHallSymbol, recipe.symmetryOperations);
     if (operations.length) {
       const seen = new Set();
       const expanded = [];
