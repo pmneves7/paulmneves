@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Count words, characters, sentences, and paragraphs, or compare two texts side by side." />
+  <title>Word counter and difference checker | Paul M. Neves</title>
+  <link rel="canonical" href="https://paulmneves.com/tools/word-counter.html" />
+  <link rel="icon" type="image/png" href="../media/favicon.png" />
+  <link rel="stylesheet" href="../css/site.css" />
+</head>
+<body>
+  <header>
+    <nav aria-label="Main navigation">
+      <a class="site-title" href="../index.html">Paul M. Neves</a>
+      <div class="nav-links">
+        <a href="../index.html#biography">Biography</a>
+        <a href="../research.html">Research</a>
+        <a href="../publications.html">Publications</a>
+        <a href="../news.html">News</a>
+        <a href="../gallery.html">Gallery</a>
+        <a href="../tools.html">Tools</a>
+        <a href="../index.html#contact">Contact</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <header class="page-header">
+      <h1>Word counter and difference checker</h1>
+      <p class="lead">
+        Count characters, words, sentences, and paragraphs, or compare two versions of text to
+        highlight what changed.
+      </p>
+      <p class="tool-disclaimer">
+        <strong>Disclaimer:</strong> These tools are experimental and may still have bugs/errors.
+        If you spot one, please <a href="../index.html#contact">tell me</a>!
+      </p>
+    </header>
+
+    <div class="tool-panel tool-panel-wide text-tool-panel">
+      <div class="text-tool-tabs" role="tablist" aria-label="Text tool mode">
+        <button type="button" class="text-tool-tab is-active" data-tab="counter" role="tab" aria-selected="true" id="text-tab-counter">Word counter</button>
+        <button type="button" class="text-tool-tab" data-tab="diff" role="tab" aria-selected="false" id="text-tab-diff">Difference checker</button>
+      </div>
+
+      <div class="text-tool-pane" data-tab-pane="counter">
+        <div class="text-tool-counter-layout">
+          <div class="tool-field text-tool-counter-field">
+            <label for="counter-input">Text</label>
+            <textarea id="counter-input" class="text-tool-grow-input" rows="8" spellcheck="true" placeholder="Paste or type text here…"></textarea>
+          </div>
+          <div class="text-tool-stats" aria-live="polite">
+            <h2 class="text-tool-stats-heading">Counts</h2>
+            <dl class="text-tool-stat-list">
+              <div class="text-tool-stat">
+                <dt>Characters</dt>
+                <dd id="stat-characters">0</dd>
+              </div>
+              <div class="text-tool-stat">
+                <dt>Words</dt>
+                <dd id="stat-words">0</dd>
+              </div>
+              <div class="text-tool-stat">
+                <dt>Sentences</dt>
+                <dd id="stat-sentences">0</dd>
+              </div>
+              <div class="text-tool-stat">
+                <dt>Paragraphs</dt>
+                <dd id="stat-paragraphs">0</dd>
+              </div>
+            </dl>
+            <h3 class="text-tool-stats-subheading">Most common words</h3>
+            <ol id="stat-common-words" class="text-tool-common-words">
+              <li class="text-tool-common-empty">Enter text to see word frequencies.</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+
+      <div class="text-tool-pane" data-tab-pane="diff" hidden>
+        <div class="text-tool-diff-inputs">
+          <div class="tool-field">
+            <label for="diff-old">Old text</label>
+            <textarea id="diff-old" class="text-tool-grow-input text-tool-diff-textarea" rows="10" spellcheck="true" placeholder="Paste the original text…"></textarea>
+          </div>
+          <div class="tool-field">
+            <label for="diff-new">New text</label>
+            <textarea id="diff-new" class="text-tool-grow-input text-tool-diff-textarea" rows="10" spellcheck="true" placeholder="Paste the revised text…"></textarea>
+          </div>
+        </div>
+        <div id="diff-output-wrap" class="text-tool-diff-output-wrap" hidden>
+          <h2 class="text-tool-diff-heading">Changes</h2>
+          <div id="diff-output" class="text-tool-diff-output" aria-live="polite"></div>
+        </div>
+      </div>
+    </div>
+
+    <p class="back-link-panel"><a href="../tools.html">← Back to tools</a></p>
+  </main>
+
+  <footer>
+    © <span id="year"></span> Paul M. Neves. All rights reserved.
+  </footer>
+
+  <script src="../js/site.js"></script>
+  <script src="../js/word-counter.js"></script>
+</body>
+</html>

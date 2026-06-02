@@ -154,7 +154,7 @@
                   <input type="number" id="radius-scale" step="any" min="0" value="1" />
                 </div>
               </div>
-              <h3 class="laue-subheading">Lighting and materials</h3>
+              <h3 class="laue-subheading">Materials</h3>
               <div class="tool-grid crystal-form-grid">
                 <div class="tool-field">
                   <label for="atom-lighting-mode">Atom lighting</label>
@@ -162,22 +162,6 @@
                     <option value="cartoon">Cartoon</option>
                     <option value="realistic" selected>Realistic</option>
                   </select>
-                </div>
-                <div class="tool-field">
-                  <label for="light-intensity">Light intensity</label>
-                  <input type="range" id="light-intensity" min="0" max="2" step="0.05" value="1.6" />
-                </div>
-                <div class="tool-field">
-                  <label for="light-color">Light color</label>
-                  <input type="color" id="light-color" value="#ffffff" />
-                </div>
-                <div class="tool-field">
-                  <label for="light-azimuth">Light azimuth (°)</label>
-                  <input type="range" id="light-azimuth" min="0" max="360" step="1" value="140" />
-                </div>
-                <div class="tool-field">
-                  <label for="light-elevation">Light elevation (°)</label>
-                  <input type="range" id="light-elevation" min="-90" max="90" step="1" value="30" />
                 </div>
                 <div class="tool-field">
                   <label for="material-roughness">Roughness</label>
@@ -267,22 +251,55 @@
                 </div>
               </div>
 
-              <h3 class="laue-subheading">Outlines and axes</h3>
+              <h3 class="laue-subheading">Outlines</h3>
               <div class="laue-check-row">
                 <label><input type="checkbox" id="show-cell-outline" checked /> Show unit cell outline</label>
                 <label><input type="checkbox" id="show-all-outlines" /> Show all outlines</label>
-                <label><input type="checkbox" id="show-lattice-vectors" checked /> Show lattice compass</label>
-                <label><input type="checkbox" id="show-vector-labels" checked /> Show labels</label>
               </div>
               <div class="tool-grid crystal-form-grid">
                 <div class="tool-field">
                   <label for="cell-line-thickness">Outline thickness (Å)</label>
-                  <input type="number" id="cell-line-thickness" step="any" min="0.005" value="0.035" />
+                  <input type="number" id="cell-line-thickness" step="any" min="0.005" value="0.06" />
                 </div>
                 <div class="tool-field">
                   <label for="cell-line-color">Outline color</label>
                   <input type="color" id="cell-line-color" value="#111827" />
                 </div>
+              </div>
+
+              <h3 class="laue-subheading">Axes</h3>
+              <div class="laue-check-row">
+                <label><input type="checkbox" id="show-lattice-vectors" checked /> Show lattice compass</label>
+                <label><input type="checkbox" id="show-vector-labels" /> Show labels</label>
+              </div>
+              <div class="tool-grid crystal-form-grid">
+                <div class="tool-field">
+                  <label for="lattice-compass-position">Compass position</label>
+                  <select id="lattice-compass-position">
+                    <option value="cell" selected>Unit cell axes</option>
+                    <option value="bottom-left">Bottom left overlay</option>
+                  </select>
+                </div>
+                <div class="tool-field">
+                  <label for="lattice-arrow-stem-thickness">Stem thickness (Å)</label>
+                  <input type="number" id="lattice-arrow-stem-thickness" step="any" min="0.001" value="0.08" />
+                </div>
+                <div class="tool-field">
+                  <label for="lattice-arrow-head-width">Head width (Å)</label>
+                  <input type="number" id="lattice-arrow-head-width" step="any" min="0.001" value="0.25" />
+                </div>
+                <div class="tool-field">
+                  <label for="lattice-arrow-head-length">Head length (Å)</label>
+                  <input type="number" id="lattice-arrow-head-length" step="any" min="0.001" value="0.4" />
+                </div>
+                <div class="tool-field">
+                  <label for="lattice-label-font-size">Label font size</label>
+                  <input type="number" id="lattice-label-font-size" step="1" min="6" value="32" />
+                </div>
+              </div>
+
+              <h3 class="laue-subheading">Scene</h3>
+              <div class="tool-grid crystal-form-grid">
                 <div class="tool-field">
                   <label for="projection-mode">View projection</label>
                   <select id="projection-mode">
@@ -293,6 +310,37 @@
                 <div class="tool-field">
                   <label for="background-color">Background</label>
                   <input type="color" id="background-color" value="#ffffff" />
+                </div>
+                <label class="crystal-inline-check">
+                  <input type="checkbox" id="depth-fade-enabled" /> Depth fade
+                </label>
+                <div class="tool-field">
+                  <label for="depth-fade-start">Fade start</label>
+                  <input type="number" id="depth-fade-start" step="any" min="0" value="5" />
+                </div>
+                <div class="tool-field">
+                  <label for="depth-fade-end">Fade end</label>
+                  <input type="number" id="depth-fade-end" step="any" min="0" value="8" />
+                </div>
+              </div>
+
+              <h3 class="laue-subheading">Lighting</h3>
+              <div class="tool-grid crystal-form-grid">
+                <div class="tool-field">
+                  <label for="light-intensity">Light intensity</label>
+                  <input type="range" id="light-intensity" min="0" max="2" step="0.05" value="2" />
+                </div>
+                <div class="tool-field">
+                  <label for="light-color">Light color</label>
+                  <input type="color" id="light-color" value="#ffffff" />
+                </div>
+                <div class="tool-field">
+                  <label for="light-azimuth">Light azimuth (°)</label>
+                  <input type="range" id="light-azimuth" min="0" max="360" step="1" value="140" />
+                </div>
+                <div class="tool-field">
+                  <label for="light-elevation">Light elevation (°)</label>
+                  <input type="range" id="light-elevation" min="-90" max="90" step="1" value="30" />
                 </div>
               </div>
 

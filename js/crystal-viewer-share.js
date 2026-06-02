@@ -65,6 +65,11 @@
     renderer.setPixelRatio(window.devicePixelRatio || 1);
     renderer.setClearColor(new THREE.Color(data.background || "#ffffff"), 1);
     scene = new THREE.Scene();
+    if (data.depthFade && data.depthFade.enabled) {
+      const start = Math.max(0, Number(data.depthFade.start) || 5);
+      const end = Math.max(start + 0.001, Number(data.depthFade.end) || 8);
+      scene.fog = new THREE.Fog(new THREE.Color(data.background || "#ffffff"), start, end);
+    }
     root = new THREE.Group();
     scene.add(root);
     root.add(new THREE.AmbientLight(0xffffff, 0.35));

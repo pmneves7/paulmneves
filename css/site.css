@@ -2979,14 +2979,43 @@ body.laue-page.laue-nav-hidden .crystal-panel-restore {
 }
 
 @media (max-width: 1100px) {
+  .crystal-layout {
+    gap: 1rem;
+  }
+
+  .crystal-layout .laue-tools-scroll {
+    flex-basis: auto;
+    max-width: none;
+    width: 100%;
+  }
+
+  .crystal-panel-splitter {
+    display: none;
+  }
+
+  .crystal-panel-restore {
+    align-self: stretch;
+    position: static;
+    text-align: center;
+    writing-mode: horizontal-tb;
+  }
+
   .crystal-canvas-wrap {
     min-height: min(74vw, 540px);
   }
 }
 
 @media (max-width: 720px) {
+  .crystal-view-controls {
+    gap: 0.6rem;
+  }
+
   .crystal-control-row {
     grid-template-columns: 1fr;
+  }
+
+  .crystal-control-group {
+    width: 100%;
   }
 
   .crystal-control-group-right {
@@ -3008,5 +3037,187 @@ body.laue-page.laue-nav-hidden .crystal-panel-restore {
 
   .crystal-style-name {
     grid-column: 1 / -1;
+  }
+}
+
+.text-tool-panel {
+  padding-top: 1rem;
+}
+
+.text-tool-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0 0 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.text-tool-tab {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-top-left-radius: 0.6rem;
+  border-top-right-radius: 0.6rem;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 650;
+  margin-bottom: -1px;
+  padding: 0.55rem 1.1rem;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.text-tool-tab:hover:not(.is-active) {
+  color: var(--accent);
+  background: rgba(48, 92, 138, 0.06);
+}
+
+.text-tool-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.text-tool-tab.is-active {
+  background: var(--card);
+  border-color: var(--border);
+  border-bottom-color: var(--card);
+  color: var(--accent-dark);
+}
+
+.text-tool-counter-layout {
+  align-items: start;
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 320px);
+}
+
+.text-tool-counter-field {
+  margin-bottom: 0;
+}
+
+.text-tool-grow-input {
+  min-height: 12rem;
+  overflow: hidden;
+  resize: none;
+}
+
+.text-tool-stats {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 1rem 1.1rem;
+}
+
+.text-tool-stats-heading,
+.text-tool-stats-subheading {
+  font-size: 1rem;
+  margin: 0 0 0.75rem;
+}
+
+.text-tool-stats-subheading {
+  border-top: 1px solid var(--border);
+  margin-top: 1rem;
+  padding-top: 1rem;
+}
+
+.text-tool-stat-list {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+}
+
+.text-tool-stat {
+  align-items: baseline;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.text-tool-stat dt {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.text-tool-stat dd {
+  font-size: 1.35rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  margin: 0;
+}
+
+.text-tool-common-words {
+  display: grid;
+  gap: 0.45rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.text-tool-common-words li {
+  align-items: baseline;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.text-tool-common-word {
+  font-weight: 600;
+}
+
+.text-tool-common-count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.text-tool-common-empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.text-tool-diff-inputs {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.text-tool-diff-textarea {
+  min-height: 14rem;
+}
+
+.text-tool-diff-output-wrap {
+  margin-top: 1.5rem;
+}
+
+.text-tool-diff-heading {
+  font-size: 1rem;
+  margin: 0 0 0.75rem;
+}
+
+.text-tool-diff-output {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  line-height: 1.6;
+  min-height: 4rem;
+  padding: 1rem 1.1rem;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.text-tool-diff-output .diff-removed {
+  color: #b3261e;
+  text-decoration: line-through;
+}
+
+.text-tool-diff-output .diff-added {
+  color: #1e7f4f;
+}
+
+@media (max-width: 760px) {
+  .text-tool-counter-layout,
+  .text-tool-diff-inputs {
+    grid-template-columns: 1fr;
   }
 }

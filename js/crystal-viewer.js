@@ -556,7 +556,9 @@
 
   function renderConsole() {
     const out = $("crystal-console-output");
-    if (out) out.textContent = state.consoleLines.join("\n");
+    if (!out) return;
+    out.textContent = state.consoleLines.join("\n");
+    out.scrollTop = out.scrollHeight;
   }
 
   function updateAtomFromTable(index, field, value) {
@@ -1082,7 +1084,7 @@
 
   function drawCell(ctx, vectors, cell, rotate, bounds, canvas) {
     const color = text("cell-line-color", "#111827");
-    const thickness = Math.max(0.005, num("cell-line-thickness", 0.035));
+    const thickness = Math.max(0.005, num("cell-line-thickness", 0.06));
     const corners = cellCorners(vectors, cell).map((p) => {
       const centered = sub(rotate(p), bounds.center);
       return project(centered, bounds, canvas);
@@ -1101,7 +1103,7 @@
 
   function cellEdgeItems(vectors, cell, rotate, bounds, canvas) {
     const color = text("cell-line-color", "#111827");
-    const thickness = Math.max(0.005, num("cell-line-thickness", 0.035));
+    const thickness = Math.max(0.005, num("cell-line-thickness", 0.06));
     const corners = cellCorners(vectors, cell).map((p) => {
       const centered = sub(rotate(p), bounds.center);
       return project(centered, bounds, canvas);
@@ -1169,7 +1171,7 @@
   function drawAtom(ctx, item, point, dpr) {
     const roughness = num("material-roughness", 0.9);
     const specular = num("material-specular", 0.15);
-    const intensity = num("light-intensity", 1.6);
+    const intensity = num("light-intensity", 2);
     const light = lightVector();
     const realistic = text("atom-lighting-mode", "realistic") === "realistic";
     const normal = normalize({ x: -0.35, y: 0.45, z: 0.82 });
@@ -1283,8 +1285,11 @@
     object.traverse((child) => {
       if (child.geometry) child.geometry.dispose();
       if (child.material) {
-        if (Array.isArray(child.material)) child.material.forEach((material) => material.dispose());
-        else child.material.dispose();
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        materials.forEach((material) => {
+          if (material.map) material.map.dispose();
+          material.dispose();
+        });
       }
     });
   }
@@ -1381,12 +1386,37 @@
     root.add(mesh);
   }
 
+  function addThreeCone(root, baseCenter, tip, radius, color) {
+    const THREE = window.THREE;
+    const start = baseCenter.clone();
+    const end = tip.clone();
+    const axis = end.clone().sub(start);
+    const lengthValue = axis.length();
+    if (lengthValue < 1e-5) return;
+    const geometry = new THREE.ConeGeometry(radius, lengthValue, 24, 1, false);
+    const mesh = new THREE.Mesh(geometry, threeMaterial(color, "bond"));
+    mesh.position.copy(start).add(end).multiplyScalar(0.5);
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis.normalize());
+    root.add(mesh);
+  }
+
+  function addThreeArrow(root, origin, direction, lengthValue, color, fit, overlay) {
+    const stemRadius = Math.max(0.002, num("lattice-arrow-stem-thickness", 0.08) * 0.5 * fit.scale);
+    const headRadius = Math.max(stemRadius * 1.5, num("lattice-arrow-head-width", 0.25) * 0.5 * fit.scale);
+    const headLength = Math.min(lengthValue * 0.55, Math.max(stemRadius * 3, num("lattice-arrow-head-length", 0.4) * fit.scale));
+    const end = origin.clone().addScaledVector(direction, lengthValue);
+    const headBase = origin.clone().addScaledVector(direction, Math.max(0, lengthValue - headLength));
+    addThreeCylinder(root, origin, headBase, stemRadius, color, "bond");
+    addThreeCone(root, headBase, end, headRadius, color);
+    return end;
+  }
+
   function addThreeLights() {
     const THREE = window.THREE;
     const ambient = new THREE.AmbientLight(0xffffff, 0.25);
     threeState.root.add(ambient);
     const light = lightVector();
-    const directional = new THREE.DirectionalLight(threeColor(text("light-color", "#ffffff")), num("light-intensity", 1.6));
+    const directional = new THREE.DirectionalLight(threeColor(text("light-color", "#ffffff")), num("light-intensity", 2));
     const target = threeState.cameraTarget || new THREE.Vector3();
     const right = threeState.cameraRight || new THREE.Vector3(1, 0, 0);
     const up = threeState.cameraUp || new THREE.Vector3(0, 1, 0);
@@ -1402,20 +1432,90 @@
     threeState.root.add(directional);
   }
 
+  function configureThreeDepthFade() {
+    const THREE = window.THREE;
+    if (!threeState.scene) return;
+    if (!checked("depth-fade-enabled")) {
+      threeState.scene.fog = null;
+      return;
+    }
+    const start = Math.max(0, num("depth-fade-start", 5));
+    const end = Math.max(start + 0.001, num("depth-fade-end", 8));
+    threeState.scene.fog = new THREE.Fog(threeColor(text("background-color", "#ffffff")), start, end);
+  }
+
+  function lowerLeftCompassOrigin() {
+    const THREE = window.THREE;
+    const camera = threeState.camera;
+    if (!camera) return new THREE.Vector3(-1.4, -1.4, 0);
+    const rect = threeState.canvas ? threeState.canvas.getBoundingClientRect() : { width: 1, height: 1 };
+    const aspect = Math.max(0.1, rect.width / Math.max(1, rect.height));
+    const target = threeState.cameraTarget || new THREE.Vector3();
+    const right = threeState.cameraRight || new THREE.Vector3(1, 0, 0);
+    const up = threeState.cameraUp || new THREE.Vector3(0, 1, 0);
+    let halfHeight = 2 / Math.max(0.15, state.view.zoom);
+    if (camera.isPerspectiveCamera) {
+      const distance = camera.position.distanceTo(target);
+      halfHeight = Math.tan(degToRad(camera.fov) / 2) * distance;
+    }
+    const halfWidth = halfHeight * aspect;
+    const margin = Math.min(0.42, halfHeight * 0.18);
+    return target.clone()
+      .addScaledVector(right, -halfWidth + margin)
+      .addScaledVector(up, -halfHeight + margin);
+  }
+
+  function createThreeTextSprite(label, color) {
+    const THREE = window.THREE;
+    const dpr = window.devicePixelRatio || 1;
+    const fontSize = Math.max(6, num("lattice-label-font-size", 32));
+    const size = Math.max(64, Math.ceil(fontSize * 2.4));
+    const canvas = document.createElement("canvas");
+    canvas.width = size * dpr;
+    canvas.height = size * dpr;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+    ctx.font = `600 ${fontSize}px system-ui, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = "rgba(255,255,255,0.9)";
+    ctx.fillStyle = color;
+    ctx.strokeText(label, size / 2, size / 2);
+    ctx.fillText(label, size / 2, size / 2);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace || "srgb";
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: true,
+      depthWrite: false
+    });
+    const sprite = new THREE.Sprite(material);
+    const scale = Math.max(0.06, 0.22 * fontSize / 32);
+    sprite.scale.set(scale, scale, scale);
+    return sprite;
+  }
+
   function addThreeCompass(vectors, fit) {
     if (!checked("show-lattice-vectors")) return;
     const THREE = window.THREE;
-    const origin = vectorToThree({ x: 0, y: 0, z: 0 }, fit);
+    const bottomLeft = text("lattice-compass-position", "cell") === "bottom-left";
+    const origin = bottomLeft ? lowerLeftCompassOrigin() : vectorToThree({ x: 0, y: 0, z: 0 }, fit);
     [
       ["a", vectors.a, "#dc2626"],
       ["b", vectors.b, "#16a34a"],
       ["c", vectors.c, "#2563eb"]
-    ].forEach(([, vector, color]) => {
-      const end = vectorToThree(vector, fit);
-      const dir = end.clone().sub(origin);
-      const len = Math.min(0.8, Math.max(0.25, dir.length() * 0.35));
-      const arrow = new THREE.ArrowHelper(dir.normalize(), origin, len, threeColor(color), len * 0.2, len * 0.09);
-      threeState.root.add(arrow);
+    ].forEach(([label, vector, color]) => {
+      const dir = new THREE.Vector3(vector.x, vector.y, vector.z).multiplyScalar(fit.scale);
+      const len = bottomLeft ? 0.42 : Math.min(0.8, Math.max(0.25, dir.length() * 0.35));
+      const direction = dir.normalize();
+      const arrowEnd = addThreeArrow(threeState.root, origin, direction, len, color, fit, bottomLeft);
+      if (checked("show-vector-labels")) {
+        const sprite = createThreeTextSprite(label, color);
+        sprite.position.copy(arrowEnd).addScaledVector(direction, len * 0.18);
+        threeState.root.add(sprite);
+      }
     });
   }
 
@@ -1423,6 +1523,7 @@
     if (!ensureThreeRenderer(canvas)) return false;
     resetThreeRoot();
     updateThreeCamera(canvas);
+    configureThreeDepthFade();
     addThreeLights();
 
     const outlineCells = checked("show-cell-outline") ?
@@ -1470,7 +1571,7 @@
           threeState.root,
           vectorToThree(a, fit),
           vectorToThree(b, fit),
-          Math.max(0.002, num("cell-line-thickness", 0.035) * 0.5 * fit.scale),
+          Math.max(0.002, num("cell-line-thickness", 0.06) * 0.5 * fit.scale),
           text("cell-line-color", "#111827"),
           "line"
         );
@@ -1520,7 +1621,7 @@
           a,
           b,
           color: text("cell-line-color", "#111827"),
-          radius: Math.max(0.002, num("cell-line-thickness", 0.035) * 0.5)
+          radius: Math.max(0.002, num("cell-line-thickness", 0.06) * 0.5)
         });
       });
     });
@@ -1547,6 +1648,22 @@
     };
   }
 
+  function currentShareRecipe() {
+    ensureStyles();
+    const saved = serializableViewerState();
+    return {
+      controls: saved.controls,
+      atoms: saved.atoms,
+      radiusMode: saved.radiusMode,
+      colorScheme: saved.colorScheme,
+      elementStyles: saved.elementStyles,
+      atomOverrides: saved.atomOverrides,
+      bondRules: saved.bondRules,
+      symmetryOperations: saved.symmetryOperations,
+      lastImportName: saved.lastImportName
+    };
+  }
+
   function downloadGlbModel() {
     if (!window.CrystalModel || typeof window.CrystalModel.downloadGlb !== "function") {
       logLine("GLB export is unavailable because the model exporter did not load.");
@@ -1557,8 +1674,8 @@
   }
 
   function shareViewerUrl() {
-    if (!window.CrystalModel || typeof window.CrystalModel.sceneToShareToken !== "function") return "";
-    const token = window.CrystalModel.sceneToShareToken(currentPortableScene());
+    if (!window.CrystalModel || typeof window.CrystalModel.recipeToShareToken !== "function") return "";
+    const token = window.CrystalModel.recipeToShareToken(currentShareRecipe());
     return new URL(`crystal-viewer-share.html#data=${token}`, window.location.href).href;
   }
 
@@ -1881,8 +1998,11 @@
       "atom-lighting-mode", "light-intensity", "light-color", "light-azimuth", "light-elevation",
       "material-roughness", "material-specular", "range-a-min", "range-b-min", "range-c-min",
       "range-a-max", "range-b-max", "range-c-max", "show-cell-outline", "show-all-outlines",
-      "show-lattice-vectors", "show-vector-labels", "cell-line-thickness", "cell-line-color",
-      "projection-mode", "background-color", "bond-cutoff", "bond-thickness", "bond-style", "bond-color"
+      "show-lattice-vectors", "show-vector-labels", "lattice-compass-position", "lattice-arrow-stem-thickness",
+      "lattice-arrow-head-width", "lattice-arrow-head-length", "lattice-label-font-size",
+      "cell-line-thickness", "cell-line-color", "projection-mode", "background-color",
+      "depth-fade-enabled", "depth-fade-start", "depth-fade-end",
+      "bond-cutoff", "bond-thickness", "bond-style", "bond-color"
     ];
   }
 
