@@ -8,16 +8,36 @@
   let scene = null;
   let camera = null;
   let root = null;
+  let ambientLight = null;
+  let directionalLight = null;
+  let lightTarget = null;
   let yaw = 0;
   let pitch = 0;
   let zoom = 1;
   let drag = null;
 
+  const DEFAULT_LIGHTING = {
+    intensity: 2,
+    color: "#ffffff",
+    azimuth: 140,
+    elevation: 30,
+    ambient: 0.25
+  };
+
   function setStatus(message) {
     if (status) status.textContent = message;
   }
 
+  function parseShareLocation() {
+    const params = new URLSearchParams(window.location.hash.slice(1));
+    return {
+      token: params.get("data") || "",
+      xr: params.get("xr") || ""
+    };
+  }
+
   function vec(point) {
+    if (Array.isArray(point)) return new THREE.Vector3(point[0] || 0, point[1] || 0, point[2] || 0);
     return new THREE.Vector3(point.x || 0, point.y || 0, point.z || 0);
   }
 
@@ -43,9 +63,47 @@
     return vec(point).sub(fit.center).multiplyScalar(fit.scale);
   }
 
+  function sceneMaterial() {
+    return (sceneData && sceneData.material) || {};
+  }
+
   function material(color, line) {
+    const mat = sceneMaterial();
     if (line) return new THREE.MeshBasicMaterial({ color, depthTest: true, depthWrite: true });
-    return new THREE.MeshStandardMaterial({ color, roughness: 0.9, metalness: 0 });
+    if (mat.unlit) {
+      return new THREE.MeshStandardMaterial({
+        color,
+        roughness: 1,
+        metalness: 0,
+        flatShading: true
+      });
+    }
+    return new THREE.MeshStandardMaterial({
+      color,
+      roughness: mat.roughness == null ? 0.9 : mat.roughness,
+      metalness: mat.metallic == null ? 0 : mat.metallic
+    });
+  }
+
+  function lightDirection() {
+    const settings = (sceneData && sceneData.lighting) || DEFAULT_LIGHTING;
+    const rotation = sceneData && sceneData.view && sceneData.view.rotation;
+    if (window.CrystalModel && typeof window.CrystalModel.cameraRelativeLightDirection === "function") {
+      const dir = window.CrystalModel.cameraRelativeLightDirection(settings, rotation);
+      return new THREE.Vector3(dir[0], dir[1], dir[2]);
+    }
+    return new THREE.Vector3(0, 0, 1);
+  }
+
+  function updateLights() {
+    if (!directionalLight || !lightTarget) return;
+    const settings = (sceneData && sceneData.lighting) || DEFAULT_LIGHTING;
+    const dir = lightDirection();
+    directionalLight.position.copy(dir).multiplyScalar(5);
+    lightTarget.position.set(0, 0, 0);
+    directionalLight.intensity = Number(settings.intensity) || 2;
+    directionalLight.color.set(settings.color || "#ffffff");
+    if (ambientLight) ambientLight.intensity = Number(settings.ambient) || 0.25;
   }
 
   function addCylinder(parent, start, end, radius, color) {
@@ -61,7 +119,7 @@
   }
 
   function buildScene(data) {
-    renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     renderer.setPixelRatio(window.devicePixelRatio || 1);
     renderer.setClearColor(new THREE.Color(data.background || "#ffffff"), 1);
     scene = new THREE.Scene();
@@ -72,10 +130,14 @@
     }
     root = new THREE.Group();
     scene.add(root);
-    root.add(new THREE.AmbientLight(0xffffff, 0.35));
-    const light = new THREE.DirectionalLight(0xffffff, 1.6);
-    light.position.set(2, 3, 4);
-    root.add(light);
+    const lighting = data.lighting || DEFAULT_LIGHTING;
+    ambientLight = new THREE.AmbientLight(0xffffff, Number(lighting.ambient) || 0.25);
+    scene.add(ambientLight);
+    directionalLight = new THREE.DirectionalLight(lighting.color || "#ffffff", Number(lighting.intensity) || 2);
+    lightTarget = new THREE.Object3D();
+    scene.add(lightTarget);
+    directionalLight.target = lightTarget;
+    scene.add(directionalLight);
     const fit = sceneFit(data);
 
     (data.atoms || []).forEach((atom) => {
@@ -101,6 +163,7 @@
 
     camera = new THREE.PerspectiveCamera(40, 1, 0.01, 100);
     updateCamera();
+    updateLights();
     resize();
     animate();
   }
@@ -122,11 +185,13 @@
 
   function animate() {
     requestAnimationFrame(animate);
+    if (renderer && renderer.xr && renderer.xr.isPresenting) return;
     if (root) {
       if (!drag) yaw += 0.004;
       root.rotation.set(pitch, yaw, 0);
     }
     updateCamera();
+    updateLights();
     if (renderer && scene && camera) renderer.render(scene, camera);
   }
 
@@ -157,27 +222,62 @@
   }
 
   function downloadGlb() {
-    if (!sceneData || !window.CrystalModel) return;
-    window.CrystalModel.downloadGlb(sceneData, `${(sceneData.name || "crystal").replace(/[^A-Za-z0-9_-]+/g, "-")}.glb`);
+    if (!sceneData || !window.CrystalModel) {
+      setStatus("Nothing to export.");
+      return;
+    }
+    try {
+      const filename = `${(sceneData.name || "crystal").replace(/[^A-Za-z0-9_-]+/g, "-")}.glb`;
+      window.CrystalModel.downloadGlb(sceneData, filename);
+      setStatus(`Downloaded ${filename}.`);
+    } catch (error) {
+      setStatus(`GLB export failed: ${error.message || error}`);
+    }
   }
 
   async function enterXr(mode) {
-    if (!navigator.xr) {
-      setStatus(`${mode.toUpperCase()} requires a WebXR browser on HTTPS.`);
+    if (!renderer || !scene || !camera) {
+      setStatus("3D view is not ready for XR.");
       return;
     }
-    const sessionMode = mode === "ar" ? "immersive-ar" : "immersive-vr";
-    const supported = await navigator.xr.isSessionSupported(sessionMode);
-    setStatus(supported ? `${mode.toUpperCase()} is supported by this device, but full session controls are still experimental.` : `${mode.toUpperCase()} is not supported by this device.`);
+    if (!window.CrystalXr || typeof window.CrystalXr.startWebXr !== "function") {
+      setStatus("XR helper did not load.");
+      return;
+    }
+    try {
+      await window.CrystalXr.startWebXr({
+        renderer,
+        scene,
+        camera,
+        mode,
+        onSessionStart: () => {
+          setStatus(`Entered ${mode.toUpperCase()} session. Use your headset or browser controls to exit.`);
+        },
+        onSessionEnd: () => {
+          setStatus(sceneData && sceneData.name ? sceneData.name : "Crystal loaded");
+        }
+      });
+    } catch (error) {
+      setStatus(error.message || `${mode.toUpperCase()} failed to start.`);
+    }
   }
 
-  try {
-    const token = window.location.hash.replace(/^#data=/, "");
-    sceneData = window.CrystalModel.sceneFromShareToken(token);
-    buildScene(sceneData);
-    setStatus(sceneData.name || "Crystal loaded");
-  } catch (error) {
-    setStatus("Could not load shared crystal data.");
+  function init() {
+    const { token, xr } = parseShareLocation();
+    if (!token || !window.CrystalModel) {
+      setStatus("Could not load shared crystal data.");
+      return;
+    }
+    try {
+      sceneData = window.CrystalModel.sceneFromShareToken(token);
+      buildScene(sceneData);
+      setStatus(sceneData.name || "Crystal loaded");
+      if (xr === "vr" || xr === "ar") {
+        enterXr(xr);
+      }
+    } catch (error) {
+      setStatus("Could not load shared crystal data.");
+    }
   }
 
   document.getElementById("share-download-glb")?.addEventListener("click", downloadGlb);
@@ -185,4 +285,5 @@
   document.getElementById("share-enter-ar")?.addEventListener("click", () => enterXr("ar"));
   bindInteraction();
   window.addEventListener("resize", resize);
+  init();
 })();

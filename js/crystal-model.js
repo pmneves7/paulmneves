@@ -41,6 +41,58 @@
     ];
   }
 
+  function normalize3(vector) {
+    const len = Math.hypot(vector[0], vector[1], vector[2]) || 1;
+    return [vector[0] / len, vector[1] / len, vector[2] / len];
+  }
+
+  function cross3(a, b) {
+    return [
+      a[1] * b[2] - a[2] * b[1],
+      a[2] * b[0] - a[0] * b[2],
+      a[0] * b[1] - a[1] * b[0]
+    ];
+  }
+
+  function matrixFromLookDirection(x, y, z) {
+    const forward = normalize3([x, y, z]);
+    const reference = Math.abs(forward[2]) > 0.96 ? [0, 1, 0] : [0, 0, 1];
+    const right = normalize3(cross3(reference, forward));
+    const up = normalize3(cross3(forward, right));
+    return [...right, ...up, ...forward];
+  }
+
+  function defaultViewRotationMatrix() {
+    const z = Math.SQRT2 * Math.tan((25 * Math.PI) / 180);
+    return matrixFromLookDirection(1, 1, z);
+  }
+
+  function lightDirectionFromAngles(azimuth, elevation) {
+    const az = (Number(azimuth) || 0) * Math.PI / 180;
+    const el = (Number(elevation) || 0) * Math.PI / 180;
+    return normalize3([
+      Math.cos(el) * Math.cos(az),
+      Math.cos(el) * Math.sin(az),
+      Math.sin(el)
+    ]);
+  }
+
+  function cameraRelativeLightDirection(lighting, viewRotation) {
+    const matrix = Array.isArray(viewRotation) && viewRotation.length === 9 ?
+      viewRotation :
+      defaultViewRotationMatrix();
+    const settings = lighting || {};
+    const light = lightDirectionFromAngles(settings.azimuth, settings.elevation);
+    const right = [matrix[0], matrix[1], matrix[2]];
+    const up = [matrix[3], matrix[4], matrix[5]];
+    const forward = [matrix[6], matrix[7], matrix[8]];
+    return normalize3([
+      right[0] * light[0] + up[0] * light[2] + forward[0] * light[1],
+      right[1] * light[0] + up[1] * light[2] + forward[1] * light[1],
+      right[2] * light[0] + up[2] * light[2] + forward[2] * light[1]
+    ]);
+  }
+
   function expandPoint(point) {
     return {
       x: point && Number(point[0]) || 0,
@@ -66,19 +118,19 @@
       a: (scene.atoms || []).map((atom) => [
         compactPoint(atom.pos),
         compactColor(atom.color, "#999999"),
-        compactNumber(atom.radius || 0.08, 5)
+        compactNumber(atom.radius || 0.08, 4)
       ]),
       b: (scene.bonds || []).map((bond) => [
         compactPoint(bond.a),
         compactPoint(bond.b),
-        compactNumber(bond.radius || 0.03, 5),
+        compactNumber(bond.radius || 0.03, 4),
         compactColor(bond.colorA || bond.color, "#6b7280"),
         compactColor(bond.colorB || bond.colorA || bond.color, "#6b7280")
       ]),
       e: (scene.edges || []).map((edge) => [
         compactPoint(edge.a),
         compactPoint(edge.b),
-        compactNumber(edge.radius || 0.01, 5),
+        compactNumber(edge.radius || 0.01, 4),
         compactColor(edge.color, "#111827")
       ])
     };
@@ -112,15 +164,111 @@
     };
   }
 
+  const CONTROL_SPECS = [
+    ["a", "crystal-a", 5.431, "number"],
+    ["b", "crystal-b", 5.431, "number"],
+    ["c", "crystal-c", 5.431, "number"],
+    ["al", "crystal-alpha", 90, "number"],
+    ["be", "crystal-beta", 90, "number"],
+    ["ga", "crystal-gamma", 90, "number"],
+    ["sg", "crystal-spacegroup", "Fd-3m", "text"],
+    ["rs", "radius-scale", 1, "number"],
+    ["lm", "atom-lighting-mode", "realistic", "text"],
+    ["li", "light-intensity", 2, "number"],
+    ["lc", "light-color", "#ffffff", "color"],
+    ["la", "light-azimuth", 140, "number"],
+    ["le", "light-elevation", 30, "number"],
+    ["mr", "material-roughness", 0.9, "number"],
+    ["ms", "material-specular", 0.15, "number"],
+    ["amin", "range-a-min", 0, "number"],
+    ["bmin", "range-b-min", 0, "number"],
+    ["cmin", "range-c-min", 0, "number"],
+    ["amax", "range-a-max", 1, "number"],
+    ["bmax", "range-b-max", 1, "number"],
+    ["cmax", "range-c-max", 1, "number"],
+    ["sco", "show-cell-outline", true, "checkbox"],
+    ["sao", "show-all-outlines", false, "checkbox"],
+    ["slv", "show-lattice-vectors", true, "checkbox"],
+    ["svl", "show-vector-labels", false, "checkbox"],
+    ["lcp", "lattice-compass-position", "cell", "text"],
+    ["lst", "lattice-arrow-stem-thickness", 0.08, "number"],
+    ["lhw", "lattice-arrow-head-width", 0.25, "number"],
+    ["lhl", "lattice-arrow-head-length", 0.4, "number"],
+    ["lfs", "lattice-label-font-size", 32, "number"],
+    ["clt", "cell-line-thickness", 0.06, "number"],
+    ["clc", "cell-line-color", "#111827", "color"],
+    ["pm", "projection-mode", "orthographic", "text"],
+    ["bg", "background-color", "#ffffff", "color"],
+    ["dfe", "depth-fade-enabled", false, "checkbox"],
+    ["dfs", "depth-fade-start", 5, "number"],
+    ["dfe2", "depth-fade-end", 8, "number"]
+  ];
+
+  const CONTROL_SHORT_TO_ID = CONTROL_SPECS.reduce((map, [short, id]) => {
+    map[short] = id;
+    return map;
+  }, {});
+
+  function compactControlValue(value, type) {
+    if (type === "checkbox") return !!value;
+    if (type === "number") {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return 0;
+      return Number.isInteger(number) ? number : compactNumber(number, 5);
+    }
+    if (type === "color") return compactColor(value);
+    return String(value == null ? "" : value);
+  }
+
+  function controlValuesEqual(a, b, type) {
+    if (type === "checkbox") return !!a === !!b;
+    if (type === "number") return Number(a) === Number(b);
+    if (type === "color") return compactColor(a) === compactColor(b);
+    return String(a) === String(b);
+  }
+
+  function compactControls(controls) {
+    const out = {};
+    CONTROL_SPECS.forEach(([short, id, fallback, type]) => {
+      if (!controls || !Object.prototype.hasOwnProperty.call(controls, id)) return;
+      const value = compactControlValue(controls[id], type);
+      if (!controlValuesEqual(value, compactControlValue(fallback, type), type)) {
+        out[short] = value;
+      }
+    });
+    return out;
+  }
+
+  function expandControls(compactControls) {
+    const out = {};
+    if (!compactControls || typeof compactControls !== "object") return out;
+    Object.entries(compactControls).forEach(([key, value]) => {
+      const spec = CONTROL_SPECS.find((entry) => entry[0] === key);
+      if (spec) {
+        const [, id, , type] = spec;
+        if (type === "checkbox") out[id] = !!value;
+        else if (type === "number") out[id] = String(value);
+        else if (type === "color") out[id] = expandColor(value);
+        else out[id] = String(value);
+        return;
+      }
+      if (CONTROL_SHORT_TO_ID[key]) out[CONTROL_SHORT_TO_ID[key]] = value;
+      else out[key] = value;
+    });
+    return out;
+  }
+
   function compactAtom(atom) {
-    return [
+    const row = [
       atom.label || "",
       atom.element || atom.typeSymbol || "",
-      compactNumber(atom.fractX, 6),
-      compactNumber(atom.fractY, 6),
-      compactNumber(atom.fractZ, 6),
-      compactNumber(atom.occupancy == null ? 1 : atom.occupancy, 4)
+      compactNumber(atom.fractX, 5),
+      compactNumber(atom.fractY, 5),
+      compactNumber(atom.fractZ, 5)
     ];
+    const occupancy = atom.occupancy == null ? 1 : Number(atom.occupancy);
+    if (occupancy !== 1) row.push(compactNumber(occupancy, 4));
+    return row;
   }
 
   function expandAtom(atom, index) {
@@ -135,51 +283,126 @@
     };
   }
 
-  function compactControls(controls) {
-    const ids = [
-      "crystal-a", "crystal-b", "crystal-c", "crystal-alpha", "crystal-beta", "crystal-gamma",
-      "crystal-spacegroup", "radius-scale", "atom-lighting-mode", "light-intensity", "light-color",
-      "light-azimuth", "light-elevation", "material-roughness", "material-specular",
-      "range-a-min", "range-b-min", "range-c-min", "range-a-max", "range-b-max", "range-c-max",
-      "show-cell-outline", "show-all-outlines", "show-lattice-vectors", "show-vector-labels",
-      "lattice-compass-position", "lattice-arrow-stem-thickness", "lattice-arrow-head-width",
-      "lattice-arrow-head-length", "lattice-label-font-size", "cell-line-thickness", "cell-line-color",
-      "projection-mode", "background-color", "depth-fade-enabled", "depth-fade-start", "depth-fade-end"
+  function compactBondRule(rule) {
+    const style = rule.style === "single" ? 1 : 0;
+    const row = [
+      rule.selectorA || "",
+      rule.selectorB || "",
+      compactNumber(rule.cutoff, 5),
+      compactNumber(rule.thickness, 5),
+      style
     ];
-    return ids.reduce((out, id) => {
-      if (controls && Object.prototype.hasOwnProperty.call(controls, id)) out[id] = controls[id];
+    if (style && rule.color) row.push(compactColor(rule.color, "#6b7280"));
+    return row;
+  }
+
+  function expandBondRule(row) {
+    if (!Array.isArray(row)) return row;
+    return {
+      selectorA: row[0] || "",
+      selectorB: row[1] || "",
+      cutoff: Number(row[2]) || 0,
+      thickness: Number(row[3]) || 0,
+      style: row[4] ? "single" : "split",
+      color: row[5] ? expandColor(row[5], "#6b7280") : "#6b7280"
+    };
+  }
+
+  function compactElementStyle(style) {
+    const row = [compactColor(style.color, "#999999")];
+    if (style.radius != null) row.push(compactNumber(style.radius, 5));
+    return row;
+  }
+
+  function expandElementStyle(row) {
+    return {
+      color: expandColor(row[0], "#999999"),
+      radius: row[1] == null ? undefined : Number(row[1]) || 0
+    };
+  }
+
+  function compactElementStyles(styles) {
+    return Object.keys(styles || {}).sort().map((element) => [element, compactElementStyle(styles[element])]);
+  }
+
+  function expandElementStyles(rows) {
+    if (!Array.isArray(rows)) return rows || {};
+    return rows.reduce((out, row) => {
+      if (!Array.isArray(row) || !row.length) return out;
+      out[row[0]] = expandElementStyle(row[1]);
+      return out;
+    }, {});
+  }
+
+  function compactAtomOverride(label, override) {
+    const row = [label];
+    if (override.color) row.push(compactColor(override.color));
+    if (override.radius != null) row.push(compactNumber(override.radius, 5));
+    return row.length > 1 ? row : null;
+  }
+
+  function expandAtomOverrides(rows) {
+    if (!Array.isArray(rows)) return rows || {};
+    return rows.reduce((out, row) => {
+      if (!Array.isArray(row) || !row.length) return out;
+      const label = row[0];
+      const override = {};
+      if (row[1]) override.color = expandColor(row[1]);
+      if (row[2] != null) override.radius = Number(row[2]) || 0;
+      if (Object.keys(override).length) out[label] = override;
       return out;
     }, {});
   }
 
   function compactRecipe(recipe) {
-    return {
-      v: 3,
-      n: recipe.lastImportName || recipe.name || "crystal",
-      c: compactControls(recipe.controls),
-      rm: recipe.radiusMode || "atomic",
-      cs: recipe.colorScheme || "jmol",
-      es: recipe.elementStyles || {},
-      ao: recipe.atomOverrides || {},
-      br: recipe.bondRules || [],
-      sy: recipe.symmetryOperations || [],
-      at: (recipe.atoms || []).map(compactAtom)
-    };
+    const body = { v: 4 };
+    const name = (recipe.lastImportName || recipe.name || "").replace(/\.cif$/i, "");
+    if (name && name !== "crystal") body.n = name;
+    const controls = compactControls(recipe.controls);
+    if (Object.keys(controls).length) body.c = controls;
+    if (recipe.radiusMode && recipe.radiusMode !== "atomic") body.rm = recipe.radiusMode;
+    if (recipe.colorScheme && recipe.colorScheme !== "jmol") body.cs = recipe.colorScheme;
+    const elementStyles = compactElementStyles(recipe.elementStyles);
+    if (elementStyles.length) body.es = elementStyles;
+    const atomOverrides = Object.keys(recipe.atomOverrides || {})
+      .sort()
+      .map((label) => compactAtomOverride(label, recipe.atomOverrides[label]))
+      .filter(Boolean);
+    if (atomOverrides.length) body.ao = atomOverrides;
+    const bondRules = (recipe.bondRules || []).map(compactBondRule);
+    if (bondRules.length) body.br = bondRules;
+    if (Array.isArray(recipe.symmetryOperations) && recipe.symmetryOperations.length) {
+      body.sy = recipe.symmetryOperations;
+    }
+    const atoms = (recipe.atoms || []).map(compactAtom);
+    if (atoms.length) body.at = atoms;
+    if (recipe.view && Array.isArray(recipe.view.rotation) && recipe.view.rotation.length === 9) {
+      body.vr = recipe.view.rotation.map((value) => compactNumber(value, 5));
+    }
+    return body;
   }
 
   function expandRecipe(compact) {
-    if (!compact || compact.v !== 3) return compact;
-    return {
-      lastImportName: compact.n || "crystal",
-      controls: compact.c || {},
-      radiusMode: compact.rm || "atomic",
-      colorScheme: compact.cs || "jmol",
-      elementStyles: compact.es || {},
-      atomOverrides: compact.ao || {},
-      bondRules: compact.br || [],
-      symmetryOperations: compact.sy || [],
-      atoms: (compact.at || []).map(expandAtom)
-    };
+    if (!compact) return compact;
+    if (compact.v === 4 || compact.v === 3) {
+      return {
+        lastImportName: compact.n || "crystal",
+        controls: compact.v === 4 ? expandControls(compact.c) : (compact.c || {}),
+        radiusMode: compact.rm || "atomic",
+        colorScheme: compact.cs || "jmol",
+        elementStyles: compact.v === 4 ? expandElementStyles(compact.es) : (compact.es || {}),
+        atomOverrides: compact.v === 4 ? expandAtomOverrides(compact.ao) : (compact.ao || {}),
+        bondRules: (compact.br || []).map((rule) => compact.v === 4 ? expandBondRule(rule) : rule),
+        symmetryOperations: compact.sy || [],
+        atoms: (compact.at || []).map(expandAtom),
+        view: {
+          rotation: Array.isArray(compact.vr) && compact.vr.length === 9 ?
+            compact.vr.map(Number) :
+            defaultViewRotationMatrix()
+        }
+      };
+    }
+    return compact;
   }
 
   function sceneToShareToken(scene) {
@@ -187,12 +410,12 @@
   }
 
   function recipeToShareToken(recipe) {
-    return `v3.${base64UrlFromText(JSON.stringify(compactRecipe(recipe)))}`;
+    return `v4.${base64UrlFromText(JSON.stringify(compactRecipe(recipe)))}`;
   }
 
   function sceneFromShareToken(token) {
     const clean = String(token || "").replace(/^#/, "").replace(/^data=/, "");
-    if (clean.startsWith("v3.")) {
+    if (clean.startsWith("v4.") || clean.startsWith("v3.")) {
       return recipeToScene(expandRecipe(JSON.parse(textFromBase64Url(clean.slice(3)))));
     }
     if (clean.startsWith("v2.")) {
@@ -468,6 +691,21 @@
     const scene = {
       name: (recipe.lastImportName || "crystal").replace(/\.cif$/i, ""),
       background: textControl(controls, "background-color", "#ffffff"),
+      material: {
+        roughness: numberControl(controls, "material-roughness", 0.9),
+        metallic: 0,
+        unlit: textControl(controls, "atom-lighting-mode", "realistic") === "cartoon"
+      },
+      lighting: {
+        intensity: numberControl(controls, "light-intensity", 2),
+        color: textControl(controls, "light-color", "#ffffff"),
+        azimuth: numberControl(controls, "light-azimuth", 140),
+        elevation: numberControl(controls, "light-elevation", 30),
+        ambient: 0.25
+      },
+      view: recipe.view && recipe.view.rotation ?
+        { rotation: recipe.view.rotation } :
+        { rotation: defaultViewRotationMatrix() },
       depthFade: {
         enabled: boolControl(controls, "depth-fade-enabled", false),
         start: numberControl(controls, "depth-fade-start", 5),
@@ -572,14 +810,32 @@
     return mulVec(subVec(pointArray(point), fit.center), fit.scale);
   }
 
-  function pushVertex(mesh, position, normal, color) {
+  function colorsMatch(a, b) {
+    return Math.abs(a[0] - b[0]) < 1e-6 &&
+      Math.abs(a[1] - b[1]) < 1e-6 &&
+      Math.abs(a[2] - b[2]) < 1e-6 &&
+      Math.abs(a[3] - b[3]) < 1e-6;
+  }
+
+  function colorGroupKey(color) {
+    return color.map((value) => value.toFixed(4)).join(",");
+  }
+
+  function solidGroup(groups, color) {
+    const key = colorGroupKey(color);
+    if (!groups.has(key)) {
+      groups.set(key, { color, positions: [], normals: [], indices: [] });
+    }
+    return groups.get(key);
+  }
+
+  function pushSolidVertex(mesh, position, normal) {
     mesh.positions.push(...position);
     mesh.normals.push(...normal);
-    mesh.colors.push(...color);
     return mesh.positions.length / 3 - 1;
   }
 
-  function addSphere(mesh, center, radius, color, segments, rings) {
+  function addSolidSphere(mesh, center, radius, segments, rings) {
     const base = mesh.positions.length / 3;
     for (let y = 0; y <= rings; y += 1) {
       const theta = y / rings * Math.PI;
@@ -588,7 +844,7 @@
       for (let x = 0; x <= segments; x += 1) {
         const phi = x / segments * Math.PI * 2;
         const normal = [Math.cos(phi) * sinTheta, cosTheta, Math.sin(phi) * sinTheta];
-        pushVertex(mesh, addVec(center, mulVec(normal, radius)), normal, color);
+        pushSolidVertex(mesh, addVec(center, mulVec(normal, radius)), normal);
       }
     }
     for (let y = 0; y < rings; y += 1) {
@@ -600,7 +856,7 @@
     }
   }
 
-  function addCylinder(mesh, start, end, radius, colorStart, colorEnd, segments) {
+  function addSolidCylinder(mesh, start, end, radius, segments) {
     const axis = subVec(end, start);
     if (lengthVec(axis) < 1e-8) return;
     const forward = normalizeVec(axis);
@@ -608,12 +864,11 @@
     const right = normalizeVec(crossVec(forward, helper));
     const up = normalizeVec(crossVec(right, forward));
     const base = mesh.positions.length / 3;
-    [start, end].forEach((center, row) => {
-      const color = row ? colorEnd : colorStart;
+    [start, end].forEach((center) => {
       for (let i = 0; i <= segments; i += 1) {
         const angle = i / segments * Math.PI * 2;
         const normal = normalizeVec(addVec(mulVec(right, Math.cos(angle)), mulVec(up, Math.sin(angle))));
-        pushVertex(mesh, addVec(center, mulVec(normal, radius)), normal, color);
+        pushSolidVertex(mesh, addVec(center, mulVec(normal, radius)), normal);
       }
     });
     for (let i = 0; i < segments; i += 1) {
@@ -623,15 +878,40 @@
     }
   }
 
-  function sceneToMesh(scene) {
+  function addColoredCylinder(groups, start, end, radius, colorStart, colorEnd, segments) {
+    if (colorsMatch(colorStart, colorEnd)) {
+      addSolidCylinder(solidGroup(groups, colorStart), start, end, radius, segments);
+      return;
+    }
+    const mid = mulVec(addVec(start, end), 0.5);
+    addSolidCylinder(solidGroup(groups, colorStart), start, mid, radius, segments);
+    addSolidCylinder(solidGroup(groups, colorEnd), mid, end, radius, segments);
+  }
+
+  function exportMaterial(scene) {
+    const raw = scene && scene.material;
+    return {
+      roughness: Math.max(0, Math.min(1, Number(raw && raw.roughness) || 0.9)),
+      metallic: Math.max(0, Math.min(1, Number(raw && raw.metallic) || 0)),
+      unlit: Boolean(raw && raw.unlit)
+    };
+  }
+
+  function sceneToSolidGroups(scene) {
     const fit = fitScene(scene);
-    const mesh = { positions: [], normals: [], colors: [], indices: [] };
+    const groups = new Map();
     (scene.atoms || []).forEach((atom) => {
-      addSphere(mesh, transformPoint(atom.pos, fit), Math.max(0.01, atom.radius || 0.08) * fit.scale, hexToRgb(atom.color), 24, 16);
+      addSolidSphere(
+        solidGroup(groups, hexToRgb(atom.color)),
+        transformPoint(atom.pos, fit),
+        Math.max(0.01, atom.radius || 0.08) * fit.scale,
+        24,
+        16
+      );
     });
     (scene.bonds || []).forEach((bond) => {
-      addCylinder(
-        mesh,
+      addColoredCylinder(
+        groups,
         transformPoint(bond.a, fit),
         transformPoint(bond.b, fit),
         Math.max(0.004, bond.radius || 0.03) * fit.scale,
@@ -641,17 +921,27 @@
       );
     });
     (scene.edges || []).forEach((edge) => {
-      addCylinder(
-        mesh,
+      const color = hexToRgb(edge.color || "#111827");
+      addSolidCylinder(
+        solidGroup(groups, color),
         transformPoint(edge.a, fit),
         transformPoint(edge.b, fit),
         Math.max(0.002, edge.radius || 0.01) * fit.scale,
-        hexToRgb(edge.color || "#111827"),
-        hexToRgb(edge.color || "#111827"),
         8
       );
     });
-    return mesh;
+    return {
+      groups: [...groups.values()].filter((group) => group.indices.length),
+      material: exportMaterial(scene)
+    };
+  }
+
+  function maxMeshIndex(indices) {
+    let max = 0;
+    for (let i = 0; i < indices.length; i += 1) {
+      if (indices[i] > max) max = indices[i];
+    }
+    return max;
   }
 
   function minMax(values) {
@@ -667,50 +957,99 @@
   }
 
   function createGlb(scene) {
-    const mesh = sceneToMesh(scene);
-    const positions = new Float32Array(mesh.positions);
-    const normals = new Float32Array(mesh.normals);
-    const colors = new Float32Array(mesh.colors);
-    const maxIndex = mesh.indices.length ? Math.max(...mesh.indices) : 0;
-    const indexArray = maxIndex > 65535 ? new Uint32Array(mesh.indices) : new Uint16Array(mesh.indices);
+    const { groups, material } = sceneToSolidGroups(scene);
+    if (!groups.length) {
+      throw new Error("Nothing to export.");
+    }
+
     const chunks = [];
+    const bufferViews = [];
+    const accessors = [];
+    const materials = [];
+    const primitives = [];
+
     const pushChunk = (typedArray, target) => {
       const byteOffset = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
       const bytes = new Uint8Array(typedArray.buffer, typedArray.byteOffset, typedArray.byteLength);
       chunks.push(aligned(bytes, 0));
-      return { buffer: 0, byteOffset, byteLength: bytes.byteLength, target };
+      const bufferView = {
+        buffer: 0,
+        byteOffset,
+        byteLength: bytes.byteLength,
+        target
+      };
+      bufferViews.push(bufferView);
+      return bufferViews.length - 1;
     };
-    const bufferViews = [
-      pushChunk(positions, 34962),
-      pushChunk(normals, 34962),
-      pushChunk(colors, 34962),
-      pushChunk(indexArray, 34963)
-    ];
-    const bounds = minMax(positions);
+
+    groups.forEach((group) => {
+      const positions = new Float32Array(group.positions);
+      const normals = new Float32Array(group.normals);
+      const maxIndex = maxMeshIndex(group.indices);
+      const indexArray = maxIndex > 65535 ? new Uint32Array(group.indices) : new Uint16Array(group.indices);
+      const positionView = pushChunk(positions, 34962);
+      const normalView = pushChunk(normals, 34962);
+      const indexView = pushChunk(indexArray, 34963);
+      const bounds = minMax(positions);
+      const positionAccessor = accessors.length;
+      accessors.push({
+        bufferView: positionView,
+        componentType: 5126,
+        count: positions.length / 3,
+        type: "VEC3",
+        min: bounds.min,
+        max: bounds.max
+      });
+      const normalAccessor = accessors.length;
+      accessors.push({
+        bufferView: normalView,
+        componentType: 5126,
+        count: normals.length / 3,
+        type: "VEC3"
+      });
+      const indexAccessor = accessors.length;
+      accessors.push({
+        bufferView: indexView,
+        componentType: maxIndex > 65535 ? 5125 : 5123,
+        count: indexArray.length,
+        type: "SCALAR"
+      });
+
+      const materialIndex = materials.length;
+      const entry = {
+        pbrMetallicRoughness: {
+          baseColorFactor: group.color,
+          metallicFactor: material.metallic,
+          roughnessFactor: material.roughness
+        },
+        doubleSided: true
+      };
+      if (material.unlit) {
+        entry.extensions = { KHR_materials_unlit: {} };
+      }
+      materials.push(entry);
+
+      primitives.push({
+        attributes: { POSITION: positionAccessor, NORMAL: normalAccessor },
+        indices: indexAccessor,
+        material: materialIndex
+      });
+    });
+
     const json = {
       asset: { version: "2.0", generator: "paulmneves.com crystal viewer" },
       scene: 0,
       scenes: [{ nodes: [0] }],
       nodes: [{ mesh: 0, name: scene.name || "Crystal" }],
-      meshes: [{
-        primitives: [{
-          attributes: { POSITION: 0, NORMAL: 1, COLOR_0: 2 },
-          indices: 3,
-          material: 0
-        }]
-      }],
-      materials: [{
-        pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, 1], metallicFactor: 0, roughnessFactor: 0.9 }
-      }],
+      meshes: [{ primitives }],
+      materials,
       buffers: [{ byteLength: chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0) }],
       bufferViews,
-      accessors: [
-        { bufferView: 0, componentType: 5126, count: positions.length / 3, type: "VEC3", min: bounds.min, max: bounds.max },
-        { bufferView: 1, componentType: 5126, count: normals.length / 3, type: "VEC3" },
-        { bufferView: 2, componentType: 5126, count: colors.length / 4, type: "VEC4" },
-        { bufferView: 3, componentType: maxIndex > 65535 ? 5125 : 5123, count: indexArray.length, type: "SCALAR" }
-      ]
+      accessors
     };
+    if (material.unlit) {
+      json.extensionsUsed = ["KHR_materials_unlit"];
+    }
     const jsonChunk = aligned(encoder.encode(JSON.stringify(json)), 0x20);
     const binChunk = new Uint8Array(json.buffers[0].byteLength);
     let cursor = 0;
@@ -735,18 +1074,24 @@
   }
 
   function downloadGlb(scene, filename) {
-    const url = URL.createObjectURL(createGlb(scene));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = filename || "crystal.glb";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+    let url = "";
+    try {
+      url = URL.createObjectURL(createGlb(scene));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename || "crystal.glb";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } finally {
+      if (url) URL.revokeObjectURL(url);
+    }
   }
 
   global.CrystalModel = {
+    cameraRelativeLightDirection,
     createGlb,
+    defaultViewRotationMatrix,
     downloadGlb,
     recipeToScene,
     recipeToShareToken,

@@ -115,7 +115,8 @@
     root: null,
     camera: null,
     activeProjection: "",
-    canvas: null
+    canvas: null,
+    xrSession: null
   };
 
   function $(id) {
@@ -1415,17 +1416,15 @@
     const THREE = window.THREE;
     const ambient = new THREE.AmbientLight(0xffffff, 0.25);
     threeState.root.add(ambient);
-    const light = lightVector();
     const directional = new THREE.DirectionalLight(threeColor(text("light-color", "#ffffff")), num("light-intensity", 2));
     const target = threeState.cameraTarget || new THREE.Vector3();
-    const right = threeState.cameraRight || new THREE.Vector3(1, 0, 0);
-    const up = threeState.cameraUp || new THREE.Vector3(0, 1, 0);
-    const forward = threeState.cameraForward || new THREE.Vector3(0, 0, 1);
-    const cameraRelativeLight = new THREE.Vector3()
-      .addScaledVector(right, light.x)
-      .addScaledVector(up, light.z)
-      .addScaledVector(forward, light.y)
-      .normalize();
+    const lightDir = window.CrystalModel && typeof window.CrystalModel.cameraRelativeLightDirection === "function" ?
+      window.CrystalModel.cameraRelativeLightDirection({
+        azimuth: num("light-azimuth", 140),
+        elevation: num("light-elevation", 30)
+      }, ensureRotationMatrix()) :
+      [0, 0, 1];
+    const cameraRelativeLight = new THREE.Vector3(lightDir[0], lightDir[1], lightDir[2]);
     directional.position.copy(target).addScaledVector(cameraRelativeLight, 5);
     directional.target.position.copy(target);
     threeState.root.add(directional.target);
@@ -1521,6 +1520,7 @@
 
   function renderThreeScene(canvas, vectors, atoms, bonds, ranges) {
     if (!ensureThreeRenderer(canvas)) return false;
+    if (threeState.xrSession) return true;
     resetThreeRoot();
     updateThreeCamera(canvas);
     configureThreeDepthFade();
@@ -1595,6 +1595,11 @@
     const scene = {
       name: (state.lastImportName || "crystal").replace(/\.cif$/i, ""),
       background: text("background-color", "#ffffff"),
+      material: {
+        roughness: num("material-roughness", 0.9),
+        metallic: 0,
+        unlit: text("atom-lighting-mode", "realistic") === "cartoon"
+      },
       atoms: atoms.map((item) => ({
         label: item.atom.label,
         element: item.atom.element,
@@ -1660,7 +1665,10 @@
       atomOverrides: saved.atomOverrides,
       bondRules: saved.bondRules,
       symmetryOperations: saved.symmetryOperations,
-      lastImportName: saved.lastImportName
+      lastImportName: saved.lastImportName,
+      view: {
+        rotation: ensureRotationMatrix()
+      }
     };
   }
 
@@ -1669,14 +1677,21 @@
       logLine("GLB export is unavailable because the model exporter did not load.");
       return;
     }
-    window.CrystalModel.downloadGlb(currentPortableScene(), glbFilename());
-    logLine(`Downloaded ${glbFilename()}.`);
+    try {
+      window.CrystalModel.downloadGlb(currentPortableScene(), glbFilename());
+      logLine(`Downloaded ${glbFilename()}.`);
+    } catch (error) {
+      logLine(`GLB export failed: ${error.message || error}`);
+    }
   }
 
-  function shareViewerUrl() {
+  function shareViewerUrl(xrMode) {
     if (!window.CrystalModel || typeof window.CrystalModel.recipeToShareToken !== "function") return "";
     const token = window.CrystalModel.recipeToShareToken(currentShareRecipe());
-    return new URL(`crystal-viewer-share.html#data=${token}`, window.location.href).href;
+    const params = new URLSearchParams();
+    params.set("data", token);
+    if (xrMode === "ar" || xrMode === "vr") params.set("xr", xrMode);
+    return new URL(`crystal-viewer-share.html#${params.toString()}`, window.location.href).href;
   }
 
   async function copyShareLink() {
@@ -1694,18 +1709,43 @@
   }
 
   async function startXrSession(mode) {
+    const canvas = $("crystal-canvas");
+    if (window.CrystalXr && typeof window.CrystalXr.startWebXr === "function" && canvas) {
+      render();
+      if (threeState.renderer && threeState.scene && threeState.camera) {
+        try {
+          await window.CrystalXr.startWebXr({
+            renderer: threeState.renderer,
+            scene: threeState.scene,
+            camera: threeState.camera,
+            mode,
+            onSessionStart: (session) => {
+              threeState.xrSession = session;
+              logLine(`Entered ${mode.toUpperCase()} session. Use your headset or browser controls to exit.`);
+            },
+            onSessionEnd: () => {
+              threeState.xrSession = null;
+              render();
+            }
+          });
+          return;
+        } catch (error) {
+          logLine(error.message || `${mode.toUpperCase()} failed to start.`);
+          return;
+        }
+      }
+    }
     if (!navigator.xr) {
       logLine(`${mode.toUpperCase()} is not available in this browser. Use the shared viewer on a WebXR-capable HTTPS device.`);
       return;
     }
-    const supported = await navigator.xr.isSessionSupported(mode === "ar" ? "immersive-ar" : "immersive-vr");
-    if (!supported) {
-      logLine(`${mode.toUpperCase()} is not supported on this device/browser.`);
+    const url = shareViewerUrl(mode);
+    if (!url) {
+      logLine("XR entry is unavailable because the share link could not be built.");
       return;
     }
-    const url = shareViewerUrl();
-    if (url) window.open(url, "_blank", "noopener");
-    logLine(`${mode.toUpperCase()} support detected. Opening a sharable viewer link for this crystal.`);
+    window.open(url, "_blank", "noopener");
+    logLine(`Opening the sharable crystal viewer for ${mode.toUpperCase()}…`);
   }
 
   function drawCompass(ctx, vectors, rotate, canvas, dpr) {
