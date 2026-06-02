@@ -25,6 +25,30 @@
     Md: "#b30da6", No: "#bd0d87", Lr: "#c70066"
   };
 
+  const CPK_COLORS = {
+    H: "#ffffff", C: "#2f2f2f", N: "#244cff", O: "#ff1f1f", F: "#7fd13b", Cl: "#1fb01f",
+    Br: "#a62929", I: "#940094", He: "#d9ffff", Ne: "#b3e3f5", Ar: "#80d1e3", Xe: "#429eb0",
+    Kr: "#5cb8d1", P: "#ff8000", S: "#ffe000", B: "#ffb5b5", Li: "#cc80ff", Na: "#ab5cf2",
+    K: "#8f40d4", Rb: "#702eb0", Cs: "#57178f", Be: "#c2ff00", Mg: "#8aff00", Ca: "#3dff00",
+    Sr: "#00ff00", Ba: "#00c900", Ti: "#bfc2c7", Fe: "#e06633"
+  };
+
+  const MOCAS_GV_COLORS = {
+    H: "#f7f7f7", Li: "#8f63d2", C: "#4a4a4a", N: "#2f64c8", O: "#d73027", F: "#4daf4a",
+    Na: "#6a3d9a", Mg: "#66c2a5", Al: "#b8a38d", Si: "#d9a66a", P: "#e6ab02", S: "#f0d64d",
+    Cl: "#33a02c", K: "#7b3294", Ca: "#5aae61", Ti: "#8da0cb", V: "#7f7f7f", Cr: "#91bfdb",
+    Mn: "#984ea3", Fe: "#b15928", Co: "#fb9a99", Ni: "#1b9e77", Cu: "#a6761d", Zn: "#7570b3",
+    Br: "#8c510a", Ag: "#bdbdbd", I: "#762a83", Ba: "#1b7837", Pb: "#525252", U: "#1f78b4"
+  };
+
+  const COLOR_SCHEMES = {
+    jmol: ELEMENT_COLORS,
+    cpk: { ...ELEMENT_COLORS, ...CPK_COLORS },
+    "mocas-gv": { ...ELEMENT_COLORS, ...MOCAS_GV_COLORS }
+  };
+
+  const STORAGE_KEY = "crystalViewerState.v1";
+
   const RADIUS_DATA = {
     atomic: {
       H: 0.31, He: 0.28, Li: 1.28, Be: 0.96, B: 0.84, C: 0.76, N: 0.71, O: 0.66, F: 0.57, Ne: 0.58,
@@ -68,9 +92,13 @@
   const state = {
     atoms: DEFAULT_ATOMS.map((atom) => ({ ...atom })),
     radiusMode: "atomic",
+    colorScheme: "jmol",
     elementStyles: {},
     atomOverrides: {},
     bondRules: [],
+    symmetryOperations: [],
+    lastImportName: "",
+    persistenceReady: false,
     view: {
       rotation: null,
       zoom: 1,
@@ -79,6 +107,15 @@
       tool: "rotate"
     },
     consoleLines: ["Ready. Load a CIF file or edit the default diamond-like Si cell."]
+  };
+
+  const threeState = {
+    renderer: null,
+    scene: null,
+    root: null,
+    camera: null,
+    activeProjection: "",
+    canvas: null
   };
 
   function $(id) {
@@ -141,7 +178,11 @@
   }
 
   function initialRotationMatrix() {
-    return multiplyMatrices(rotationMatrix("z", -35), rotationMatrix("x", -25));
+    return matrixFromLookDirection({
+      x: 1,
+      y: 1,
+      z: Math.SQRT2 * Math.tan(degToRad(25))
+    });
   }
 
   function ensureRotationMatrix() {
@@ -249,13 +290,14 @@
 
   function colorForElement(element) {
     const symbol = sanitizeElement(element);
-    return ELEMENT_COLORS[symbol] || "#3b82f6";
+    const scheme = COLOR_SCHEMES[state.colorScheme] || COLOR_SCHEMES.jmol;
+    return scheme[symbol] || ELEMENT_COLORS[symbol] || "#3b82f6";
   }
 
   function ensureStyles() {
     const activeElements = new Set();
     const activeLabels = new Set();
-    state.atoms.forEach((atom) => {
+    generatedAtomSites().forEach((atom) => {
       const element = sanitizeElement(atom.element);
       atom.element = element;
       activeElements.add(element);
@@ -304,10 +346,19 @@
       state.elementStyles[element].radius = defaultRadius(element);
     });
     Object.keys(state.atomOverrides).forEach((label) => {
-      const atom = state.atoms.find((candidate) => candidate.label === label);
+      const atom = generatedAtomSites().find((candidate) => candidate.label === label);
       if (atom && Object.prototype.hasOwnProperty.call(state.atomOverrides[label], "radius")) {
         state.atomOverrides[label].radius = defaultRadius(atom.element);
       }
+    });
+    renderAtomStyles();
+    render();
+  }
+
+  function applyColorScheme(scheme) {
+    state.colorScheme = COLOR_SCHEMES[scheme] ? scheme : "jmol";
+    Object.keys(state.elementStyles).forEach((element) => {
+      state.elementStyles[element].color = colorForElement(element);
     });
     renderAtomStyles();
     render();
@@ -411,6 +462,43 @@
     };
   }
 
+  function normalizeAtom(atom, index) {
+    return {
+      label: atom.label || `Atom${index + 1}`,
+      element: sanitizeElement(atom.element || atom.typeSymbol || atom.label),
+      fractX: wrapFraction(Number(atom.fractX) || 0),
+      fractY: wrapFraction(Number(atom.fractY) || 0),
+      fractZ: wrapFraction(Number(atom.fractZ) || 0),
+      occupancy: atom.occupancy == null ? 1 : Number(atom.occupancy) || 1
+    };
+  }
+
+  function isP1SpaceGroup(value) {
+    return /^p\s*1$/i.test(String(value || "").trim()) || String(value || "").trim() === "1";
+  }
+
+  function shouldApplyStoredSymmetry() {
+    return !isP1SpaceGroup(text("crystal-spacegroup", "")) && Array.isArray(state.symmetryOperations) && state.symmetryOperations.length;
+  }
+
+  function generatedAtomSites() {
+    if (!shouldApplyStoredSymmetry()) return state.atoms.map((atom, index) => normalizeAtom(atom, index));
+    return expandAtomsBySymmetry(state.atoms, state.symmetryOperations).atoms.map((atom, index) => normalizeAtom(atom, index));
+  }
+
+  function atomRowsForTable() {
+    return checked("show-generated-atoms") ? generatedAtomSites() : state.atoms;
+  }
+
+  function promoteGeneratedAtomsToEditable() {
+    if (!shouldApplyStoredSymmetry()) return;
+    state.atoms = generatedAtomSites();
+    state.symmetryOperations = [];
+    resetStyles();
+    refreshControls();
+    logLine("Promoted generated symmetry positions to editable P 1 atom sites.");
+  }
+
   function countAtomsByElement(atoms) {
     return atoms.reduce((counts, atom) => {
       const element = sanitizeElement(atom.element);
@@ -427,8 +515,19 @@
       .join(", ");
   }
 
+  function formatAtomList(atoms) {
+    if (!atoms.length) return ["Atomic positions: none"];
+    return [
+      "Atomic positions:",
+      ...atoms.map((atom) => {
+        const occ = atom.occupancy == null ? 1 : atom.occupancy;
+        return `  ${atom.label.padEnd(12)} ${sanitizeElement(atom.element).padEnd(3)} x=${Number(atom.fractX).toFixed(5)} y=${Number(atom.fractY).toFixed(5)} z=${Number(atom.fractZ).toFixed(5)} occ=${Number(occ).toFixed(3)}`;
+      })
+    ];
+  }
+
   function uniqueElements() {
-    return [...new Set(state.atoms.map((atom) => sanitizeElement(atom.element)))].sort();
+    return [...new Set(generatedAtomSites().map((atom) => sanitizeElement(atom.element)))].sort();
   }
 
   function atomOptionLabel(atom) {
@@ -483,8 +582,10 @@
   function renderAtomTable() {
     const body = $("crystal-atom-table");
     if (!body) return;
+    const showGenerated = checked("show-generated-atoms");
+    const rows = atomRowsForTable();
     body.innerHTML = "";
-    state.atoms.forEach((atom, index) => {
+    rows.forEach((atom, index) => {
       const row = document.createElement("tr");
       [
         ["label", atom.label, "text"],
@@ -499,22 +600,28 @@
         input.type = type;
         input.value = value;
         if (type === "number") input.step = "any";
-        input.addEventListener("change", () => updateAtomFromTable(index, field, input.value));
+        if (showGenerated) {
+          input.disabled = true;
+        } else {
+          input.addEventListener("change", () => updateAtomFromTable(index, field, input.value));
+        }
         cell.appendChild(input);
         row.appendChild(cell);
       });
       const action = document.createElement("td");
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "laue-mode-btn";
-      remove.textContent = "Remove";
-      remove.addEventListener("click", () => {
-        state.atoms.splice(index, 1);
-        refreshControls();
-        logLine(`Removed ${atom.label}.`);
-        render();
-      });
-      action.appendChild(remove);
+      if (!showGenerated) {
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "laue-mode-btn";
+        remove.textContent = "Remove";
+        remove.addEventListener("click", () => {
+          state.atoms.splice(index, 1);
+          refreshControls();
+          logLine(`Removed ${atom.label}.`);
+          render();
+        });
+        action.appendChild(remove);
+      }
       row.appendChild(action);
       body.appendChild(row);
     });
@@ -527,7 +634,7 @@
     list.innerHTML = "";
 
     const grouped = new Map();
-    state.atoms.forEach((atom) => {
+    generatedAtomSites().forEach((atom) => {
       const element = sanitizeElement(atom.element);
       if (!grouped.has(element)) grouped.set(element, []);
       grouped.get(element).push(atom);
@@ -593,7 +700,7 @@
     });
     list.querySelectorAll("input[data-override]").forEach((input) => {
       input.addEventListener("change", () => {
-        const atom = state.atoms.find((candidate) => candidate.label === input.dataset.override);
+        const atom = generatedAtomSites().find((candidate) => candidate.label === input.dataset.override);
         if (!atom) return;
         if (input.checked) {
           state.atomOverrides[atom.label] = { ...getAtomStyle(atom) };
@@ -634,7 +741,7 @@
 
       const siteGroup = document.createElement("optgroup");
       siteGroup.label = "Individual atom sites";
-      state.atoms.forEach((atom) => {
+      generatedAtomSites().forEach((atom) => {
         const option = document.createElement("option");
         option.value = `site:${atom.label}`;
         option.textContent = atomOptionLabel(atom);
@@ -723,7 +830,7 @@
 
     const siteGroup = document.createElement("optgroup");
     siteGroup.label = "Individual atom sites";
-    state.atoms.forEach((atom) => {
+    generatedAtomSites().forEach((atom) => {
       const option = document.createElement("option");
       option.value = `site:${atom.label}`;
       option.textContent = atomOptionLabel(atom);
@@ -762,7 +869,7 @@
   function expandedAtoms(vectors) {
     const ranges = cellRanges();
     const expanded = [];
-    state.atoms.forEach((atom) => {
+    generatedAtomSites().forEach((atom) => {
       const iMin = Math.floor(ranges.aMin - atom.fractX);
       const iMax = Math.ceil(ranges.aMax - atom.fractX);
       const jMin = Math.floor(ranges.bMin - atom.fractY);
@@ -975,11 +1082,12 @@
 
   function drawCell(ctx, vectors, cell, rotate, bounds, canvas) {
     const color = text("cell-line-color", "#111827");
-    const width = num("cell-line-thickness", 2) * (window.devicePixelRatio || 1);
+    const thickness = Math.max(0.005, num("cell-line-thickness", 0.035));
     const corners = cellCorners(vectors, cell).map((p) => {
       const centered = sub(rotate(p), bounds.center);
       return project(centered, bounds, canvas);
     });
+    const width = thickness * corners.reduce((sum, point) => sum + point.scale, 0) / corners.length;
     const idx = (i, j, k) => i * 4 + j * 2 + k;
     [[0, 0, 0], [1, 0, 0]].forEach((iBase) => {
       const i = iBase[0];
@@ -989,6 +1097,29 @@
       for (let k = 0; k <= 1; k += 1) drawLine(ctx, corners[idx(i, 0, k)], corners[idx(i, 1, k)], { color, width });
       for (let j = 0; j <= 1; j += 1) drawLine(ctx, corners[idx(i, j, 0)], corners[idx(i, j, 1)], { color, width });
     }
+  }
+
+  function cellEdgeItems(vectors, cell, rotate, bounds, canvas) {
+    const color = text("cell-line-color", "#111827");
+    const thickness = Math.max(0.005, num("cell-line-thickness", 0.035));
+    const corners = cellCorners(vectors, cell).map((p) => {
+      const centered = sub(rotate(p), bounds.center);
+      return project(centered, bounds, canvas);
+    });
+    const width = thickness * corners.reduce((sum, point) => sum + point.scale, 0) / corners.length;
+    const idx = (i, j, k) => i * 4 + j * 2 + k;
+    const edges = [];
+    for (let i = 0; i <= 1; i += 1) {
+      for (let k = 0; k <= 1; k += 1) edges.push([corners[idx(i, 0, k)], corners[idx(i, 1, k)]]);
+      for (let j = 0; j <= 1; j += 1) edges.push([corners[idx(i, j, 0)], corners[idx(i, j, 1)]]);
+    }
+    for (let j = 0; j <= 1; j += 1) {
+      for (let k = 0; k <= 1; k += 1) edges.push([corners[idx(0, j, k)], corners[idx(1, j, k)]]);
+    }
+    return edges.map(([a, b]) => ({
+      depth: (a.z + b.z) / 2,
+      draw: () => drawLine(ctx, a, b, { color, width })
+    }));
   }
 
   function hexToRgb(hex) {
@@ -1022,28 +1153,45 @@
   }
 
   function drawAtom(ctx, item, point, dpr) {
-    const roughness = num("material-roughness", 0.35);
-    const specular = num("material-specular", 0.45);
-    const intensity = num("light-intensity", 1);
+    const roughness = num("material-roughness", 0.9);
+    const specular = num("material-specular", 0.15);
+    const intensity = num("light-intensity", 1.6);
     const light = lightVector();
-    const facing = Math.max(0.18, 0.58 + 0.42 * dot(normalize({ x: -0.35, y: 0.45, z: 0.82 }), light));
+    const realistic = text("atom-lighting-mode", "realistic") === "realistic";
+    const normal = normalize({ x: -0.35, y: 0.45, z: 0.82 });
+    const facing = realistic ?
+      Math.max(0.06, 0.22 + 0.78 * Math.max(0, dot(normal, light)) * intensity) :
+      Math.max(0.18, 0.58 + 0.42 * dot(normal, light));
     const radius = Math.max(4, item.style.radius * displayRadiusScale() * point.scale * 0.2);
     const color = item.style.color;
     const gradient = ctx.createRadialGradient(
-      point.x - radius * 0.35,
-      point.y - radius * 0.45,
-      radius * 0.12,
+      point.x - radius * (realistic ? 0.42 : 0.35),
+      point.y - radius * (realistic ? 0.5 : 0.45),
+      radius * (realistic ? 0.02 : 0.12),
       point.x,
       point.y,
       radius
     );
-    gradient.addColorStop(0, shadeColor(color, facing + intensity * specular * 0.9));
-    gradient.addColorStop(Math.max(0.45, 0.8 - roughness * 0.25), shadeColor(color, facing * intensity));
-    gradient.addColorStop(1, shadeColor(color, Math.max(0.18, facing * 0.52)));
+    if (realistic) {
+      gradient.addColorStop(0, shadeColor(color, 1 + specular * intensity * 0.9));
+      gradient.addColorStop(Math.max(0.12, 0.26 + roughness * 0.22), shadeColor(color, facing));
+      gradient.addColorStop(0.78, shadeColor(color, Math.max(0.1, facing * 0.58)));
+      gradient.addColorStop(1, shadeColor(color, Math.max(0.04, facing * 0.28)));
+    } else {
+      gradient.addColorStop(0, shadeColor(color, facing + intensity * specular * 0.9));
+      gradient.addColorStop(Math.max(0.45, 0.8 - roughness * 0.25), shadeColor(color, facing * intensity));
+      gradient.addColorStop(1, shadeColor(color, Math.max(0.18, facing * 0.52)));
+    }
     ctx.save();
+    if (realistic) {
+      ctx.shadowColor = "rgba(15, 23, 42, 0.24)";
+      ctx.shadowBlur = radius * 0.15;
+      ctx.shadowOffsetX = radius * 0.04;
+      ctx.shadowOffsetY = radius * 0.06;
+    }
     ctx.fillStyle = gradient;
-    ctx.strokeStyle = "rgba(15, 23, 42, 0.28)";
-    ctx.lineWidth = 1 * dpr;
+    ctx.strokeStyle = realistic ? "rgba(15, 23, 42, 0.16)" : "rgba(15, 23, 42, 0.28)";
+    ctx.lineWidth = (realistic ? 0.65 : 1) * dpr;
     ctx.beginPath();
     ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
     ctx.fill();
@@ -1054,6 +1202,255 @@
   function bondScreenWidth(rule, pointA, pointB) {
     const thickness = Math.max(0.01, Number(rule.thickness) || 0.15);
     return thickness * (pointA.scale + pointB.scale) / 2;
+  }
+
+  function projectedAtomKey(item) {
+    return `${item.atom.label}|${item.shift.i}|${item.shift.j}|${item.shift.k}`;
+  }
+
+  function threeAvailable() {
+    return typeof window.THREE !== "undefined" && typeof window.THREE.WebGLRenderer === "function";
+  }
+
+  function vectorToThree(v, fit) {
+    const THREE = window.THREE;
+    return new THREE.Vector3(
+      (v.x - fit.center.x) * fit.scale,
+      (v.y - fit.center.y) * fit.scale,
+      (v.z - fit.center.z) * fit.scale
+    );
+  }
+
+  function sceneFit(points) {
+    if (!points.length) return { center: { x: 0, y: 0, z: 0 }, scale: 1, radius: 1 };
+    const min = {
+      x: Math.min(...points.map((p) => p.x)),
+      y: Math.min(...points.map((p) => p.y)),
+      z: Math.min(...points.map((p) => p.z))
+    };
+    const max = {
+      x: Math.max(...points.map((p) => p.x)),
+      y: Math.max(...points.map((p) => p.y)),
+      z: Math.max(...points.map((p) => p.z))
+    };
+    const center = mul(add(min, max), 0.5);
+    const radius = Math.max(1, ...points.map((p) => length(sub(p, center))));
+    return { center, radius, scale: 2 / radius };
+  }
+
+  function threeColor(hex) {
+    return new window.THREE.Color(hex || "#999999");
+  }
+
+  function threeMaterial(color, kind) {
+    const THREE = window.THREE;
+    const roughness = Math.max(0, Math.min(1, num("material-roughness", 0.9)));
+    const specular = Math.max(0, Math.min(1, num("material-specular", 0.15)));
+    const options = {
+      color: threeColor(color),
+      depthTest: true,
+      depthWrite: true
+    };
+    if (kind === "line") {
+      return new THREE.MeshBasicMaterial(options);
+    }
+    if (text("atom-lighting-mode", "realistic") === "cartoon" && typeof THREE.MeshToonMaterial === "function") {
+      return new THREE.MeshToonMaterial(options);
+    }
+    return new THREE.MeshStandardMaterial({
+      ...options,
+      roughness,
+      metalness: 0,
+      envMapIntensity: 0.3 + specular
+    });
+  }
+
+  function disposeThreeObject(object) {
+    object.traverse((child) => {
+      if (child.geometry) child.geometry.dispose();
+      if (child.material) {
+        if (Array.isArray(child.material)) child.material.forEach((material) => material.dispose());
+        else child.material.dispose();
+      }
+    });
+  }
+
+  function resetThreeRoot() {
+    if (!threeState.root) return;
+    while (threeState.root.children.length) {
+      const child = threeState.root.children.pop();
+      disposeThreeObject(child);
+    }
+  }
+
+  function ensureThreeRenderer(canvas) {
+    if (!threeAvailable()) return false;
+    const THREE = window.THREE;
+    if (!threeState.renderer || threeState.canvas !== canvas) {
+      try {
+        threeState.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+      } catch (error) {
+        threeState.renderer = null;
+        return false;
+      }
+      threeState.renderer.outputColorSpace = THREE.SRGBColorSpace || "srgb";
+      threeState.renderer.setPixelRatio(window.devicePixelRatio || 1);
+      threeState.scene = new THREE.Scene();
+      threeState.root = new THREE.Group();
+      threeState.scene.add(threeState.root);
+      threeState.canvas = canvas;
+    }
+    const rect = canvas.getBoundingClientRect();
+    threeState.renderer.setPixelRatio(window.devicePixelRatio || 1);
+    threeState.renderer.setSize(Math.max(320, rect.width), Math.max(320, rect.height), false);
+    threeState.renderer.setClearColor(threeColor(text("background-color", "#ffffff")), 1);
+    return true;
+  }
+
+  function updateThreeCamera(canvas) {
+    const THREE = window.THREE;
+    const rect = canvas.getBoundingClientRect();
+    const aspect = Math.max(0.1, rect.width / Math.max(1, rect.height));
+    const projection = text("projection-mode", "orthographic");
+    if (!threeState.camera || threeState.activeProjection !== projection) {
+      threeState.camera = projection === "perspective" ?
+        new THREE.PerspectiveCamera(38, aspect, 0.01, 100) :
+        new THREE.OrthographicCamera(-aspect * 2, aspect * 2, 2, -2, 0.01, 100);
+      threeState.activeProjection = projection;
+    }
+    const camera = threeState.camera;
+    if (projection === "perspective") {
+      camera.aspect = aspect;
+      camera.fov = 38;
+    } else {
+      const halfHeight = 2 / Math.max(0.15, state.view.zoom);
+      camera.left = -halfHeight * aspect;
+      camera.right = halfHeight * aspect;
+      camera.top = halfHeight;
+      camera.bottom = -halfHeight;
+    }
+
+    const matrix = ensureRotationMatrix();
+    const right = new THREE.Vector3(matrix[0], matrix[1], matrix[2]).normalize();
+    const up = new THREE.Vector3(matrix[3], matrix[4], matrix[5]).normalize();
+    const forward = new THREE.Vector3(matrix[6], matrix[7], matrix[8]).normalize();
+    const viewHeight = projection === "perspective" ? 4 / Math.max(0.15, state.view.zoom) : 4 / Math.max(0.15, state.view.zoom);
+    const panScale = viewHeight / Math.max(320, rect.height);
+    const target = new THREE.Vector3()
+      .addScaledVector(right, -state.view.panX * panScale)
+      .addScaledVector(up, state.view.panY * panScale);
+    const distance = projection === "perspective" ? 6 / Math.max(0.15, state.view.zoom) : 6;
+    camera.position.copy(target).addScaledVector(forward, distance);
+    camera.up.copy(up);
+    camera.lookAt(target);
+    camera.near = 0.01;
+    camera.far = 100;
+    camera.updateProjectionMatrix();
+  }
+
+  function addThreeCylinder(root, a, b, radius, color, kind) {
+    const THREE = window.THREE;
+    const start = a.clone();
+    const end = b.clone();
+    const axis = end.clone().sub(start);
+    const lengthValue = axis.length();
+    if (lengthValue < 1e-5) return;
+    const geometry = new THREE.CylinderGeometry(radius, radius, lengthValue, kind === "line" ? 8 : 24, 1, false);
+    const material = threeMaterial(color, kind);
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.copy(start).add(end).multiplyScalar(0.5);
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis.normalize());
+    root.add(mesh);
+  }
+
+  function addThreeLights() {
+    const THREE = window.THREE;
+    const ambient = new THREE.AmbientLight(0xffffff, 0.25);
+    threeState.root.add(ambient);
+    const light = lightVector();
+    const directional = new THREE.DirectionalLight(threeColor(text("light-color", "#ffffff")), num("light-intensity", 1.6));
+    directional.position.set(light.x * 5, light.y * 5, light.z * 5);
+    threeState.root.add(directional);
+  }
+
+  function addThreeCompass(vectors, fit) {
+    if (!checked("show-lattice-vectors")) return;
+    const THREE = window.THREE;
+    const origin = vectorToThree({ x: 0, y: 0, z: 0 }, fit);
+    [
+      ["a", vectors.a, "#dc2626"],
+      ["b", vectors.b, "#16a34a"],
+      ["c", vectors.c, "#2563eb"]
+    ].forEach(([, vector, color]) => {
+      const end = vectorToThree(vector, fit);
+      const dir = end.clone().sub(origin);
+      const len = Math.min(0.8, Math.max(0.25, dir.length() * 0.35));
+      const arrow = new THREE.ArrowHelper(dir.normalize(), origin, len, threeColor(color), len * 0.2, len * 0.09);
+      threeState.root.add(arrow);
+    });
+  }
+
+  function renderThreeScene(canvas, vectors, atoms, bonds, ranges) {
+    if (!ensureThreeRenderer(canvas)) return false;
+    resetThreeRoot();
+    updateThreeCamera(canvas);
+    addThreeLights();
+
+    const outlineCells = checked("show-cell-outline") ?
+      (checked("show-all-outlines") ? unitCellsWithinBoundaries(ranges) : [{ aMin: 0, aMax: 1, bMin: 0, bMax: 1, cMin: 0, cMax: 1 }]) :
+      [];
+    const fitPoints = scenePoints(vectors, atoms);
+    outlineCells.forEach((cell) => fitPoints.push(...cellCorners(vectors, cell)));
+    const fit = sceneFit(fitPoints);
+    const THREE = window.THREE;
+
+    atoms.forEach((item) => {
+      const radius = Math.max(0.015, item.style.radius * displayRadiusScale() * 0.2 * fit.scale);
+      const geometry = new THREE.SphereGeometry(radius, 32, 18);
+      const mesh = new THREE.Mesh(geometry, threeMaterial(item.style.color, "atom"));
+      mesh.position.copy(vectorToThree(item.pos, fit));
+      threeState.root.add(mesh);
+    });
+
+    bonds.forEach((bond) => {
+      const start = vectorToThree(bond.a.pos, fit);
+      const end = vectorToThree(bond.b.pos, fit);
+      const radius = Math.max(0.006, Math.max(0.01, Number(bond.rule.thickness) || 0.15) * 0.5 * fit.scale);
+      if (bond.rule.style === "split") {
+        const mid = start.clone().add(end).multiplyScalar(0.5);
+        addThreeCylinder(threeState.root, start, mid, radius, bond.a.style.color, "bond");
+        addThreeCylinder(threeState.root, mid, end, radius, bond.b.style.color, "bond");
+      } else {
+        addThreeCylinder(threeState.root, start, end, radius, bond.rule.color, "bond");
+      }
+    });
+
+    outlineCells.forEach((cell) => {
+      const corners = cellCorners(vectors, cell);
+      const idx = (i, j, k) => i * 4 + j * 2 + k;
+      const edges = [];
+      for (let i = 0; i <= 1; i += 1) {
+        for (let k = 0; k <= 1; k += 1) edges.push([corners[idx(i, 0, k)], corners[idx(i, 1, k)]]);
+        for (let j = 0; j <= 1; j += 1) edges.push([corners[idx(i, j, 0)], corners[idx(i, j, 1)]]);
+      }
+      for (let j = 0; j <= 1; j += 1) {
+        for (let k = 0; k <= 1; k += 1) edges.push([corners[idx(0, j, k)], corners[idx(1, j, k)]]);
+      }
+      edges.forEach(([a, b]) => {
+        addThreeCylinder(
+          threeState.root,
+          vectorToThree(a, fit),
+          vectorToThree(b, fit),
+          Math.max(0.002, num("cell-line-thickness", 0.035) * 0.5 * fit.scale),
+          text("cell-line-color", "#111827"),
+          "line"
+        );
+      });
+    });
+
+    addThreeCompass(vectors, fit);
+    threeState.renderer.render(threeState.scene, threeState.camera);
+    return true;
   }
 
   function drawCompass(ctx, vectors, rotate, canvas, dpr) {
@@ -1080,47 +1477,36 @@
     });
   }
 
-  function render() {
-    const canvas = $("crystal-canvas");
-    if (!canvas) return;
+  function renderCanvasScene(canvas, vectors, atoms, bonds, ranges) {
     const dpr = canvasSize(canvas);
     const ctx = canvas.getContext("2d");
+    if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = text("background-color", "#ffffff");
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    ensureStyles();
-    const params = cellParams();
-    const vectors = latticeVectors(params);
-    const atoms = expandedAtoms(vectors);
     const rotate = rotationBasis();
     const bounds = projectedBounds(scenePoints(vectors, atoms), rotate, canvas);
-    const ranges = cellRanges();
-
-    if (checked("show-cell-outline")) {
-      if (checked("show-all-outlines")) {
-        unitCellsWithinBoundaries(ranges).forEach((cell) => drawCell(ctx, vectors, cell, rotate, bounds, canvas));
-      } else {
-        drawCell(ctx, vectors, {
-          aMin: 0,
-          aMax: 1,
-          bMin: 0,
-          bMax: 1,
-          cMin: 0,
-          cMax: 1
-        }, rotate, bounds, canvas);
-      }
-    }
+    const drawItems = [];
 
     const projectedAtoms = atoms.map((item) => {
       const centered = sub(rotate(item.pos), bounds.center);
       return { ...item, point: project(centered, bounds, canvas) };
     });
+    const projectedByKey = new Map(projectedAtoms.map((item) => [projectedAtomKey(item), item]));
 
-    const bonds = computeBonds(atoms);
+    if (checked("show-cell-outline")) {
+      const cells = checked("show-all-outlines") ?
+        unitCellsWithinBoundaries(ranges) :
+        [{ aMin: 0, aMax: 1, bMin: 0, bMax: 1, cMin: 0, cMax: 1 }];
+      cells.forEach((cell) => {
+        drawItems.push(...cellEdgeItems(vectors, cell, rotate, bounds, canvas).map((item) => ({ ...item, priority: 0 })));
+      });
+    }
+
     bonds.forEach((bond) => {
-      const pa = projectedAtoms.find((item) => item === bond.a || (item.atom === bond.a.atom && item.shift === bond.a.shift));
-      const pb = projectedAtoms.find((item) => item === bond.b || (item.atom === bond.b.atom && item.shift === bond.b.shift));
+      const pa = projectedByKey.get(projectedAtomKey(bond.a));
+      const pb = projectedByKey.get(projectedAtomKey(bond.b));
       if (!pa || !pb) return;
       const width = bondScreenWidth(bond.rule, pa.point, pb.point);
       if (bond.rule.style === "split") {
@@ -1130,18 +1516,63 @@
           z: (pa.point.z + pb.point.z) / 2,
           scale: (pa.point.scale + pb.point.scale) / 2
         };
-        drawCylinder(ctx, pa.point, mid, { color: pa.style.color, width, capEnd: false });
-        drawCylinder(ctx, mid, pb.point, { color: pb.style.color, width, capStart: false });
+        drawItems.push({
+          depth: (pa.point.z + mid.z) / 2,
+          priority: 1,
+          draw: () => drawCylinder(ctx, pa.point, mid, { color: pa.style.color, width, capEnd: false })
+        });
+        drawItems.push({
+          depth: (mid.z + pb.point.z) / 2,
+          priority: 1,
+          draw: () => drawCylinder(ctx, mid, pb.point, { color: pb.style.color, width, capStart: false })
+        });
       } else {
-        drawCylinder(ctx, pa.point, pb.point, { color: bond.rule.color, width });
+        drawItems.push({
+          depth: (pa.point.z + pb.point.z) / 2,
+          priority: 1,
+          draw: () => drawCylinder(ctx, pa.point, pb.point, { color: bond.rule.color, width })
+        });
       }
     });
 
-    projectedAtoms
-      .sort((a, b) => a.point.z - b.point.z)
-      .forEach((item) => drawAtom(ctx, item, item.point, dpr));
+    projectedAtoms.forEach((item) => {
+      drawItems.push({
+        depth: item.point.z,
+        priority: 2,
+        draw: () => drawAtom(ctx, item, item.point, dpr)
+      });
+    });
+
+    drawItems
+      .sort((a, b) => a.depth - b.depth || a.priority - b.priority)
+      .forEach((item) => item.draw());
 
     drawCompass(ctx, vectors, rotate, canvas, dpr);
+  }
+
+  function render() {
+    const canvas = $("crystal-canvas");
+    if (!canvas) return;
+
+    ensureStyles();
+    const params = cellParams();
+    const vectors = latticeVectors(params);
+    const atoms = expandedAtoms(vectors);
+    const ranges = cellRanges();
+    const bonds = computeBonds(atoms);
+    let renderedWithThree = false;
+    try {
+      renderedWithThree = renderThreeScene(canvas, vectors, atoms, bonds, ranges);
+    } catch (error) {
+      renderedWithThree = false;
+      if (window.console && typeof window.console.warn === "function") {
+        window.console.warn("Falling back to 2D crystal renderer.", error);
+      }
+    }
+    if (!renderedWithThree) {
+      renderCanvasScene(canvas, vectors, atoms, bonds, ranges);
+    }
+    saveViewerState();
   }
 
   function addBondRule() {
@@ -1175,21 +1606,17 @@
     if (data.spaceGroupName) $("crystal-spacegroup").value = data.spaceGroupName;
     else if (data.spaceGroupNumber != null) $("crystal-spacegroup").value = String(data.spaceGroupNumber);
     const asymmetricAtoms = Array.isArray(data.atoms) ? data.atoms : [];
-    let symmetryExpansion = { atoms: asymmetricAtoms, expanded: false, operationCount: 0 };
+    state.symmetryOperations = Array.isArray(data.symmetryOperations) ? data.symmetryOperations.slice() : [];
+    let symmetryExpansion = { atoms: asymmetricAtoms, expanded: false, operationCount: state.symmetryOperations.length };
     if (asymmetricAtoms.length) {
-      symmetryExpansion = expandAtomsBySymmetry(asymmetricAtoms, data.symmetryOperations);
-      state.atoms = symmetryExpansion.atoms.map((atom, index) => ({
-        label: atom.label || `Atom${index + 1}`,
-        element: sanitizeElement(atom.element || atom.typeSymbol || atom.label),
-        fractX: wrapFraction(atom.fractX),
-        fractY: wrapFraction(atom.fractY),
-        fractZ: wrapFraction(atom.fractZ),
-        occupancy: atom.occupancy == null ? 1 : atom.occupancy
-      }));
+      state.atoms = asymmetricAtoms.map(normalizeAtom);
+      symmetryExpansion = expandAtomsBySymmetry(state.atoms, state.symmetryOperations);
+      state.lastImportName = name;
       resetStyles();
     }
     const vectors = latticeVectors(cellParams());
     const volume = data.volume || cellVolume(vectors);
+    const renderedAtoms = generatedAtomSites();
     const status = $("cif-status");
     if (status) {
       status.textContent = `Loaded ${name}.`;
@@ -1202,8 +1629,8 @@
       `Unit cell volume: ${volume.toFixed(4)} Å^3`,
       `Asymmetric atom sites: ${asymmetricAtoms.length}`,
       symmetryExpansion.operationCount ? `Symmetry operations: ${symmetryExpansion.operationCount}` : "Symmetry operations: none found",
-      `Unit-cell atoms shown: ${state.atoms.length}${state.atoms.length ? ` (${formatElementCounts(state.atoms)})` : ""}`,
-      `Atoms: ${state.atoms.map((atom) => `${atom.label} ${atom.element} (${atom.fractX}, ${atom.fractY}, ${atom.fractZ})`).join("; ")}`
+      `Generated unit-cell sites: ${renderedAtoms.length}${renderedAtoms.length ? ` (${formatElementCounts(renderedAtoms)})` : ""}`,
+      ...formatAtomList(state.atoms)
     ];
     renderConsole();
     refreshControls();
@@ -1241,6 +1668,8 @@
     const presetAtoms = atomsForPreset(preset);
     if (presetAtoms) {
       state.atoms = presetAtoms;
+      state.symmetryOperations = [];
+      state.lastImportName = preset.name || "";
       resetStyles();
       logLine(`Loaded preset ${preset.name} with ${presetAtoms.length} atom site${presetAtoms.length === 1 ? "" : "s"}.`);
     } else {
@@ -1257,6 +1686,126 @@
       status.classList.add("tool-cif-status-error");
     }
     logLine(message);
+  }
+
+  function cifNumber(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? Number(number.toFixed(8)).toString() : "0";
+  }
+
+  function exportCurrentCif() {
+    const params = cellParams();
+    const atoms = state.atoms.map(normalizeAtom);
+    const name = (state.lastImportName || "crystal-viewer-export.cif").replace(/\.cif$/i, "");
+    const lines = [
+      `data_${name.replace(/[^A-Za-z0-9_]+/g, "_") || "crystal"}`,
+      "_audit_creation_method 'paulmneves.com crystal viewer'",
+      `_cell_length_a ${cifNumber(params.a)}`,
+      `_cell_length_b ${cifNumber(params.b)}`,
+      `_cell_length_c ${cifNumber(params.c)}`,
+      `_cell_angle_alpha ${cifNumber(params.alpha)}`,
+      `_cell_angle_beta ${cifNumber(params.beta)}`,
+      `_cell_angle_gamma ${cifNumber(params.gamma)}`,
+      `_symmetry_space_group_name_H-M '${params.spaceGroup || "P 1"}'`
+    ];
+    if (state.symmetryOperations.length && !isP1SpaceGroup(params.spaceGroup)) {
+      lines.push("loop_", "_space_group_symop_operation_xyz");
+      state.symmetryOperations.forEach((operation) => lines.push(`'${operation}'`));
+    }
+    lines.push(
+      "loop_",
+      "_atom_site_label",
+      "_atom_site_type_symbol",
+      "_atom_site_fract_x",
+      "_atom_site_fract_y",
+      "_atom_site_fract_z",
+      "_atom_site_occupancy"
+    );
+    atoms.forEach((atom) => {
+      lines.push(`${atom.label} ${sanitizeElement(atom.element)} ${cifNumber(atom.fractX)} ${cifNumber(atom.fractY)} ${cifNumber(atom.fractZ)} ${cifNumber(atom.occupancy)}`);
+    });
+    const blob = new Blob([`${lines.join("\n")}\n`], { type: "chemical/x-cif" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${name || "crystal-viewer-export"}.cif`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    logLine(`Exported ${atoms.length} editable atom site${atoms.length === 1 ? "" : "s"} to CIF.`);
+  }
+
+  function persistedControlIds() {
+    return [
+      "crystal-a", "crystal-b", "crystal-c", "crystal-alpha", "crystal-beta", "crystal-gamma",
+      "crystal-spacegroup", "show-generated-atoms", "color-scheme", "radius-mode", "radius-scale",
+      "atom-lighting-mode", "light-intensity", "light-color", "light-azimuth", "light-elevation",
+      "material-roughness", "material-specular", "range-a-min", "range-b-min", "range-c-min",
+      "range-a-max", "range-b-max", "range-c-max", "show-cell-outline", "show-all-outlines",
+      "show-lattice-vectors", "show-vector-labels", "cell-line-thickness", "cell-line-color",
+      "projection-mode", "background-color", "bond-cutoff", "bond-thickness", "bond-style", "bond-color"
+    ];
+  }
+
+  function readControlState() {
+    return persistedControlIds().reduce((controls, id) => {
+      const el = $(id);
+      if (!el) return controls;
+      controls[id] = el.type === "checkbox" ? el.checked : el.value;
+      return controls;
+    }, {});
+  }
+
+  function applyControlState(controls) {
+    if (!controls || typeof controls !== "object") return;
+    Object.entries(controls).forEach(([id, value]) => {
+      const el = $(id);
+      if (!el) return;
+      if (el.type === "checkbox") el.checked = !!value;
+      else el.value = value;
+    });
+  }
+
+  function saveViewerState() {
+    if (!state.persistenceReady) return;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        controls: readControlState(),
+        atoms: state.atoms,
+        radiusMode: state.radiusMode,
+        colorScheme: state.colorScheme,
+        elementStyles: state.elementStyles,
+        atomOverrides: state.atomOverrides,
+        bondRules: state.bondRules,
+        symmetryOperations: state.symmetryOperations,
+        lastImportName: state.lastImportName,
+        view: state.view,
+        consoleLines: state.consoleLines.slice(-40)
+      }));
+    } catch (error) {
+      // Local storage can be unavailable in private or restricted browser contexts.
+    }
+  }
+
+  function restoreViewerState() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+      if (!saved || !Array.isArray(saved.atoms)) return;
+      applyControlState(saved.controls);
+      state.atoms = saved.atoms.map(normalizeAtom);
+      state.radiusMode = RADIUS_DATA[saved.radiusMode] ? saved.radiusMode : text("radius-mode", "atomic");
+      state.colorScheme = COLOR_SCHEMES[saved.colorScheme] ? saved.colorScheme : text("color-scheme", "jmol");
+      state.elementStyles = saved.elementStyles && typeof saved.elementStyles === "object" ? saved.elementStyles : {};
+      state.atomOverrides = saved.atomOverrides && typeof saved.atomOverrides === "object" ? saved.atomOverrides : {};
+      state.bondRules = Array.isArray(saved.bondRules) ? saved.bondRules : [];
+      state.symmetryOperations = Array.isArray(saved.symmetryOperations) ? saved.symmetryOperations : [];
+      state.lastImportName = saved.lastImportName || "";
+      state.view = saved.view && typeof saved.view === "object" ? { ...state.view, ...saved.view } : state.view;
+      state.consoleLines = Array.isArray(saved.consoleLines) && saved.consoleLines.length ? saved.consoleLines : state.consoleLines;
+    } catch (error) {
+      localStorage.removeItem(STORAGE_KEY);
+    }
   }
 
   function setLookDirection(kind) {
@@ -1279,11 +1828,17 @@
   function bindEvents() {
     const loadButton = $("cif-load-button");
     const fileInput = $("cif-file");
+    const exportButton = $("cif-export-button");
     const presetSelect = $("crystal-preset");
     const radiusModeSelect = $("radius-mode");
+    const colorSchemeSelect = $("color-scheme");
     if (radiusModeSelect) {
       radiusModeSelect.value = state.radiusMode;
       radiusModeSelect.addEventListener("change", () => applyRadiusMode(radiusModeSelect.value));
+    }
+    if (colorSchemeSelect) {
+      colorSchemeSelect.value = state.colorScheme;
+      colorSchemeSelect.addEventListener("change", () => applyColorScheme(colorSchemeSelect.value));
     }
     if (presetSelect && typeof window.populateCrystalPresetSelect === "function") {
       window.populateCrystalPresetSelect(presetSelect);
@@ -1305,6 +1860,23 @@
         } catch (error) {
           setCifError(error.message || "Could not load this CIF file.");
         }
+      });
+    }
+    if (exportButton) exportButton.addEventListener("click", exportCurrentCif);
+
+    const generatedToggle = $("show-generated-atoms");
+    if (generatedToggle) {
+      generatedToggle.addEventListener("change", () => {
+        refreshControls();
+        render();
+      });
+    }
+
+    const spaceGroupInput = $("crystal-spacegroup");
+    if (spaceGroupInput) {
+      spaceGroupInput.addEventListener("change", () => {
+        if (isP1SpaceGroup(spaceGroupInput.value)) promoteGeneratedAtomsToEditable();
+        render();
       });
     }
 
@@ -1345,6 +1917,7 @@
 
     document.querySelectorAll("input, select").forEach((el) => {
       if (el.closest("#crystal-atom-table") || el.closest("#crystal-atom-style-list") || el.id === "cif-file") return;
+      if (["show-generated-atoms", "crystal-spacegroup"].includes(el.id)) return;
       el.addEventListener("input", render);
       el.addEventListener("change", render);
     });
@@ -1594,12 +2167,14 @@
   }
 
   function bootstrap() {
+    restoreViewerState();
     refreshControls();
     renderConsole();
     bindEvents();
     initResizablePanels();
     initCrystalViewerSnap();
     initCrystalNavAutoHide();
+    state.persistenceReady = true;
     render();
   }
 

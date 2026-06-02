@@ -58,6 +58,20 @@
     return tokens;
   }
 
+  function firstCifToken(value) {
+    const tokens = tokenizeCifLine(value);
+    return tokens.length ? tokens[0] : "";
+  }
+
+  function normalizeSpaceGroupName(value) {
+    const cleaned = stripCifString(value).replace(/\s+/g, " ").trim();
+    if (!cleaned) return "";
+    if (/\s+[A-Z]$/.test(cleaned) && /[-\d/]/.test(cleaned)) {
+      return cleaned.replace(/\s+[A-Z]$/, "").trim();
+    }
+    return cleaned;
+  }
+
   function readSemicolonBlock(lines, startIndex) {
     const first = lines[startIndex];
     const parts = [first.replace(/^;/, "")];
@@ -176,12 +190,11 @@
         i += 1;
         continue;
       }
-      if (trimmed.startsWith(";")) {
+      if (lines[i].startsWith(";")) {
         const parts = [trimmed.slice(1)];
         i += 1;
         while (i < lines.length) {
-          const blockTrim = lines[i].trim();
-          if (blockTrim.startsWith(";")) {
+          if (lines[i].startsWith(";")) {
             i += 1;
             return { value: parts.join("\n").trim(), nextIndex: i };
           }
@@ -190,7 +203,7 @@
         }
         return { value: parts.join("\n").trim(), nextIndex: i };
       }
-      return { value: trimmed, nextIndex: i + 1 };
+      return { value: firstCifToken(trimmed), nextIndex: i + 1 };
     }
     return { value: "", nextIndex: i };
   }
@@ -236,6 +249,8 @@
         const next = readNextValue(lines, i);
         value = next.value;
         i = next.nextIndex;
+      } else {
+        value = firstCifToken(value);
       }
 
       switch (key) {
@@ -264,7 +279,10 @@
         case "_space_group_name_h-m":
         case "_space_group_name_h-m_alt":
         case "_space_group_name_h-m_ref":
-          if (!result.spaceGroupName) result.spaceGroupName = stripCifString(value);
+          if (!result.spaceGroupNameRaw) {
+            result.spaceGroupNameRaw = stripCifString(value);
+            result.spaceGroupName = normalizeSpaceGroupName(value);
+          }
           break;
         case "_symmetry_int_tables_number":
         case "_space_group_it_number":

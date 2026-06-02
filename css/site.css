@@ -2654,8 +2654,8 @@ body.laue-page.laue-nav-hidden .crystal-panel-restore {
 }
 
 .crystal-radius-controls {
-  grid-template-columns: minmax(180px, 260px) minmax(130px, 180px);
-  max-width: 480px;
+  grid-template-columns: minmax(150px, 220px) minmax(180px, 240px) minmax(130px, 180px);
+  max-width: 680px;
 }
 
 .crystal-element-style {
@@ -2741,6 +2741,7 @@ body.laue-page.laue-nav-hidden .crystal-panel-restore {
   opacity: 0.48;
 }
 
+.crystal-inline-check,
 .crystal-style-row .crystal-inline-check {
   align-items: center;
   color: var(--text);
@@ -2749,9 +2750,17 @@ body.laue-page.laue-nav-hidden .crystal-panel-restore {
   white-space: nowrap;
 }
 
+.crystal-inline-check input,
 .crystal-style-row .crystal-inline-check input {
   height: auto;
   width: auto;
+}
+
+.crystal-generated-toggle {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 650;
+  margin: 0.1rem 0 0.4rem;
 }
 
 .crystal-rule-row {

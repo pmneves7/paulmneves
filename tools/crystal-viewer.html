@@ -63,6 +63,7 @@
                   </select>
                 </div>
                 <button type="button" id="cif-load-button" class="button secondary">Load CIF file…</button>
+                <button type="button" id="cif-export-button" class="button secondary">Export CIF</button>
                 <p id="cif-status" class="tool-cif-status" role="status" aria-live="polite"></p>
               </div>
 
@@ -101,6 +102,9 @@
                 <h3 class="laue-subheading">Atomic positions</h3>
                 <button type="button" class="button secondary" id="crystal-add-atom">Add atom</button>
               </div>
+              <label class="crystal-inline-check crystal-generated-toggle">
+                <input type="checkbox" id="show-generated-atoms" /> Show generated positions
+              </label>
               <details class="crystal-nested-collapsible">
                 <summary class="crystal-nested-summary">Atom list</summary>
                 <div class="tool-table-wrap crystal-table-wrap">
@@ -130,6 +134,14 @@
             <div class="tool-collapsible-body">
               <div class="tool-grid crystal-radius-controls">
                 <div class="tool-field">
+                  <label for="color-scheme">Element colors</label>
+                  <select id="color-scheme">
+                    <option value="jmol" selected>Jmol/Rasmol</option>
+                    <option value="cpk">CPK</option>
+                    <option value="mocas-gv">MOCAS GV</option>
+                  </select>
+                </div>
+                <div class="tool-field">
                   <label for="radius-mode">Display radii</label>
                   <select id="radius-mode">
                     <option value="atomic" selected>Atomic radii</option>
@@ -140,6 +152,40 @@
                 <div class="tool-field">
                   <label for="radius-scale">Radius scale</label>
                   <input type="number" id="radius-scale" step="any" min="0" value="1" />
+                </div>
+              </div>
+              <h3 class="laue-subheading">Lighting and materials</h3>
+              <div class="tool-grid crystal-form-grid">
+                <div class="tool-field">
+                  <label for="atom-lighting-mode">Atom lighting</label>
+                  <select id="atom-lighting-mode">
+                    <option value="cartoon">Cartoon</option>
+                    <option value="realistic" selected>Realistic</option>
+                  </select>
+                </div>
+                <div class="tool-field">
+                  <label for="light-intensity">Light intensity</label>
+                  <input type="range" id="light-intensity" min="0" max="2" step="0.05" value="1.6" />
+                </div>
+                <div class="tool-field">
+                  <label for="light-color">Light color</label>
+                  <input type="color" id="light-color" value="#ffffff" />
+                </div>
+                <div class="tool-field">
+                  <label for="light-azimuth">Light azimuth (°)</label>
+                  <input type="number" id="light-azimuth" step="any" value="-35" />
+                </div>
+                <div class="tool-field">
+                  <label for="light-elevation">Light elevation (°)</label>
+                  <input type="number" id="light-elevation" step="any" value="45" />
+                </div>
+                <div class="tool-field">
+                  <label for="material-roughness">Roughness</label>
+                  <input type="range" id="material-roughness" min="0" max="1" step="0.05" value="0.9" />
+                </div>
+                <div class="tool-field">
+                  <label for="material-specular">Specular</label>
+                  <input type="range" id="material-specular" min="0" max="1" step="0.05" value="0.15" />
                 </div>
               </div>
               <div id="crystal-atom-style-list" class="crystal-style-list"></div>
@@ -230,8 +276,8 @@
               </div>
               <div class="tool-grid crystal-form-grid">
                 <div class="tool-field">
-                  <label for="cell-line-thickness">Outline thickness</label>
-                  <input type="number" id="cell-line-thickness" step="any" min="0.5" value="2" />
+                  <label for="cell-line-thickness">Outline thickness (Å)</label>
+                  <input type="number" id="cell-line-thickness" step="any" min="0.005" value="0.035" />
                 </div>
                 <div class="tool-field">
                   <label for="cell-line-color">Outline color</label>
@@ -250,33 +296,6 @@
                 </div>
               </div>
 
-              <h3 class="laue-subheading">Lighting and materials</h3>
-              <div class="tool-grid crystal-form-grid">
-                <div class="tool-field">
-                  <label for="light-intensity">Light intensity</label>
-                  <input type="range" id="light-intensity" min="0" max="2" step="0.05" value="1" />
-                </div>
-                <div class="tool-field">
-                  <label for="light-color">Light color</label>
-                  <input type="color" id="light-color" value="#ffffff" />
-                </div>
-                <div class="tool-field">
-                  <label for="light-azimuth">Light azimuth (°)</label>
-                  <input type="number" id="light-azimuth" step="any" value="-35" />
-                </div>
-                <div class="tool-field">
-                  <label for="light-elevation">Light elevation (°)</label>
-                  <input type="number" id="light-elevation" step="any" value="45" />
-                </div>
-                <div class="tool-field">
-                  <label for="material-roughness">Roughness</label>
-                  <input type="range" id="material-roughness" min="0" max="1" step="0.05" value="0.35" />
-                </div>
-                <div class="tool-field">
-                  <label for="material-specular">Specular</label>
-                  <input type="range" id="material-specular" min="0" max="1" step="0.05" value="0.45" />
-                </div>
-              </div>
             </div>
           </details>
         </section>
@@ -337,6 +356,7 @@
   <script src="../js/site.js"></script>
   <script src="../js/cif-parser.js"></script>
   <script src="../js/crystal-presets.js"></script>
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
   <script src="../js/crystal-viewer.js"></script>
 </body>
 </html>
