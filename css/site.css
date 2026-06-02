@@ -2798,11 +2798,31 @@ body.laue-page.laue-nav-hidden .crystal-panel-restore {
   gap: 0.45rem;
 }
 
+.crystal-control-row {
+  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 0.45rem;
+}
+
 .crystal-control-group {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
+}
+
+.crystal-control-group-right {
+  justify-content: flex-end;
+}
+
+.crystal-tool-divider {
+  align-self: center;
+  color: var(--muted);
+  font-weight: 700;
+  justify-self: center;
+  line-height: 1;
+  opacity: 0.65;
 }
 
 .crystal-control-group label {
@@ -2912,6 +2932,46 @@ body.laue-page.laue-nav-hidden .crystal-panel-restore {
   flex: 0 0 auto;
 }
 
+.crystal-share-page {
+  background: #ffffff;
+}
+
+.crystal-share-page::before {
+  display: none;
+}
+
+.crystal-share-main {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  max-width: none;
+  padding: 0;
+}
+
+.crystal-share-toolbar {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.94);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0.6rem;
+  z-index: 2;
+}
+
+.crystal-share-status {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-left: 0.35rem;
+}
+
+#shared-crystal-canvas {
+  display: block;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+}
+
 @media (max-width: 1100px) {
   .crystal-canvas-wrap {
     min-height: min(74vw, 540px);
@@ -2919,6 +2979,18 @@ body.laue-page.laue-nav-hidden .crystal-panel-restore {
 }
 
 @media (max-width: 720px) {
+  .crystal-control-row {
+    grid-template-columns: 1fr;
+  }
+
+  .crystal-control-group-right {
+    justify-content: flex-start;
+  }
+
+  .crystal-tool-divider {
+    display: none;
+  }
+
   .crystal-boundary-grid {
     grid-template-columns: 1fr;
   }

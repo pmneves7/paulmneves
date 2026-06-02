@@ -1122,6 +1122,20 @@
     }));
   }
 
+  function cellEdgeSegments(vectors, cell) {
+    const corners = cellCorners(vectors, cell);
+    const idx = (i, j, k) => i * 4 + j * 2 + k;
+    const edges = [];
+    for (let i = 0; i <= 1; i += 1) {
+      for (let k = 0; k <= 1; k += 1) edges.push([corners[idx(i, 0, k)], corners[idx(i, 1, k)]]);
+      for (let j = 0; j <= 1; j += 1) edges.push([corners[idx(i, j, 0)], corners[idx(i, j, 1)]]);
+    }
+    for (let j = 0; j <= 1; j += 1) {
+      for (let k = 0; k <= 1; k += 1) edges.push([corners[idx(0, j, k)], corners[idx(1, j, k)]]);
+    }
+    return edges;
+  }
+
   function hexToRgb(hex) {
     const clean = String(hex || "#ffffff").replace("#", "");
     const value = parseInt(clean.length === 3 ? clean.split("").map((c) => c + c).join("") : clean, 16);
@@ -1453,6 +1467,115 @@
     return true;
   }
 
+  function currentPortableScene() {
+    ensureStyles();
+    const vectors = latticeVectors(cellParams());
+    const atoms = expandedAtoms(vectors);
+    const bonds = computeBonds(atoms);
+    const ranges = cellRanges();
+    const outlineCells = checked("show-cell-outline") ?
+      (checked("show-all-outlines") ? unitCellsWithinBoundaries(ranges) : [{ aMin: 0, aMax: 1, bMin: 0, bMax: 1, cMin: 0, cMax: 1 }]) :
+      [];
+    const scene = {
+      name: (state.lastImportName || "crystal").replace(/\.cif$/i, ""),
+      background: text("background-color", "#ffffff"),
+      atoms: atoms.map((item) => ({
+        label: item.atom.label,
+        element: item.atom.element,
+        pos: item.pos,
+        color: item.style.color,
+        radius: Math.max(0.015, item.style.radius * displayRadiusScale() * 0.2)
+      })),
+      bonds: [],
+      edges: []
+    };
+    bonds.forEach((bond) => {
+      const radius = Math.max(0.005, Math.max(0.01, Number(bond.rule.thickness) || 0.15) * 0.5);
+      if (bond.rule.style === "split") {
+        const mid = mul(add(bond.a.pos, bond.b.pos), 0.5);
+        scene.bonds.push({ a: bond.a.pos, b: mid, colorA: bond.a.style.color, colorB: bond.a.style.color, radius });
+        scene.bonds.push({ a: mid, b: bond.b.pos, colorA: bond.b.style.color, colorB: bond.b.style.color, radius });
+      } else {
+        scene.bonds.push({ a: bond.a.pos, b: bond.b.pos, color: bond.rule.color, radius });
+      }
+    });
+    outlineCells.forEach((cell) => {
+      cellEdgeSegments(vectors, cell).forEach(([a, b]) => {
+        scene.edges.push({
+          a,
+          b,
+          color: text("cell-line-color", "#111827"),
+          radius: Math.max(0.002, num("cell-line-thickness", 0.035) * 0.5)
+        });
+      });
+    });
+    return scene;
+  }
+
+  function glbFilename() {
+    return `${(state.lastImportName || "crystal").replace(/\.cif$/i, "").replace(/[^A-Za-z0-9_-]+/g, "-") || "crystal"}.glb`;
+  }
+
+  function serializableViewerState() {
+    return {
+      controls: readControlState(),
+      atoms: state.atoms,
+      radiusMode: state.radiusMode,
+      colorScheme: state.colorScheme,
+      elementStyles: state.elementStyles,
+      atomOverrides: state.atomOverrides,
+      bondRules: state.bondRules,
+      symmetryOperations: state.symmetryOperations,
+      lastImportName: state.lastImportName,
+      view: state.view,
+      consoleLines: state.consoleLines.slice(-40)
+    };
+  }
+
+  function downloadGlbModel() {
+    if (!window.CrystalModel || typeof window.CrystalModel.downloadGlb !== "function") {
+      logLine("GLB export is unavailable because the model exporter did not load.");
+      return;
+    }
+    window.CrystalModel.downloadGlb(currentPortableScene(), glbFilename());
+    logLine(`Downloaded ${glbFilename()}.`);
+  }
+
+  function shareViewerUrl() {
+    if (!window.CrystalModel || typeof window.CrystalModel.sceneToShareToken !== "function") return "";
+    const token = window.CrystalModel.sceneToShareToken(currentPortableScene());
+    return new URL(`crystal-viewer-share.html#data=${token}`, window.location.href).href;
+  }
+
+  async function copyShareLink() {
+    const url = shareViewerUrl();
+    if (!url) {
+      logLine("Share links are unavailable because the model exporter did not load.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      logLine("Copied sharable crystal viewer link to clipboard.");
+    } catch (error) {
+      logLine(`Shareable viewer link: ${url}`);
+    }
+  }
+
+  async function startXrSession(mode) {
+    if (!navigator.xr) {
+      logLine(`${mode.toUpperCase()} is not available in this browser. Use the shared viewer on a WebXR-capable HTTPS device.`);
+      return;
+    }
+    const supported = await navigator.xr.isSessionSupported(mode === "ar" ? "immersive-ar" : "immersive-vr");
+    if (!supported) {
+      logLine(`${mode.toUpperCase()} is not supported on this device/browser.`);
+      return;
+    }
+    const url = shareViewerUrl();
+    if (url) window.open(url, "_blank", "noopener");
+    logLine(`${mode.toUpperCase()} support detected. Opening a sharable viewer link for this crystal.`);
+  }
+
   function drawCompass(ctx, vectors, rotate, canvas, dpr) {
     if (!checked("show-lattice-vectors")) return;
     const origin = { x: 55 * dpr, y: canvas.height - 58 * dpr };
@@ -1770,39 +1893,45 @@
   function saveViewerState() {
     if (!state.persistenceReady) return;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        controls: readControlState(),
-        atoms: state.atoms,
-        radiusMode: state.radiusMode,
-        colorScheme: state.colorScheme,
-        elementStyles: state.elementStyles,
-        atomOverrides: state.atomOverrides,
-        bondRules: state.bondRules,
-        symmetryOperations: state.symmetryOperations,
-        lastImportName: state.lastImportName,
-        view: state.view,
-        consoleLines: state.consoleLines.slice(-40)
-      }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(serializableViewerState()));
     } catch (error) {
       // Local storage can be unavailable in private or restricted browser contexts.
+    }
+  }
+
+  function applySerializedViewerState(saved) {
+    if (!saved || !Array.isArray(saved.atoms)) return false;
+    applyControlState(saved.controls);
+    state.atoms = saved.atoms.map(normalizeAtom);
+    state.radiusMode = RADIUS_DATA[saved.radiusMode] ? saved.radiusMode : text("radius-mode", "atomic");
+    state.colorScheme = COLOR_SCHEMES[saved.colorScheme] ? saved.colorScheme : text("color-scheme", "jmol");
+    state.elementStyles = saved.elementStyles && typeof saved.elementStyles === "object" ? saved.elementStyles : {};
+    state.atomOverrides = saved.atomOverrides && typeof saved.atomOverrides === "object" ? saved.atomOverrides : {};
+    state.bondRules = Array.isArray(saved.bondRules) ? saved.bondRules : [];
+    state.symmetryOperations = Array.isArray(saved.symmetryOperations) ? saved.symmetryOperations : [];
+    state.lastImportName = saved.lastImportName || "";
+    state.view = saved.view && typeof saved.view === "object" ? { ...state.view, ...saved.view } : state.view;
+    state.consoleLines = Array.isArray(saved.consoleLines) && saved.consoleLines.length ? saved.consoleLines : state.consoleLines;
+    return true;
+  }
+
+  function restoreViewerStateFromHash() {
+    const match = window.location.hash.match(/^#state=(.+)$/);
+    if (!match || !window.CrystalModel || typeof window.CrystalModel.sceneFromShareToken !== "function") return false;
+    try {
+      const restored = applySerializedViewerState(window.CrystalModel.sceneFromShareToken(match[1]));
+      if (restored) logLine("Loaded crystal state from sharable link.");
+      return restored;
+    } catch (error) {
+      logLine("Could not load crystal state from this sharable link.");
+      return false;
     }
   }
 
   function restoreViewerState() {
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-      if (!saved || !Array.isArray(saved.atoms)) return;
-      applyControlState(saved.controls);
-      state.atoms = saved.atoms.map(normalizeAtom);
-      state.radiusMode = RADIUS_DATA[saved.radiusMode] ? saved.radiusMode : text("radius-mode", "atomic");
-      state.colorScheme = COLOR_SCHEMES[saved.colorScheme] ? saved.colorScheme : text("color-scheme", "jmol");
-      state.elementStyles = saved.elementStyles && typeof saved.elementStyles === "object" ? saved.elementStyles : {};
-      state.atomOverrides = saved.atomOverrides && typeof saved.atomOverrides === "object" ? saved.atomOverrides : {};
-      state.bondRules = Array.isArray(saved.bondRules) ? saved.bondRules : [];
-      state.symmetryOperations = Array.isArray(saved.symmetryOperations) ? saved.symmetryOperations : [];
-      state.lastImportName = saved.lastImportName || "";
-      state.view = saved.view && typeof saved.view === "object" ? { ...state.view, ...saved.view } : state.view;
-      state.consoleLines = Array.isArray(saved.consoleLines) && saved.consoleLines.length ? saved.consoleLines : state.consoleLines;
+      applySerializedViewerState(saved);
     } catch (error) {
       localStorage.removeItem(STORAGE_KEY);
     }
@@ -1863,6 +1992,14 @@
       });
     }
     if (exportButton) exportButton.addEventListener("click", exportCurrentCif);
+    const downloadGlbButton = $("download-glb");
+    const copyShareButton = $("copy-share-link");
+    const enterVrButton = $("enter-vr");
+    const enterArButton = $("enter-ar");
+    if (downloadGlbButton) downloadGlbButton.addEventListener("click", downloadGlbModel);
+    if (copyShareButton) copyShareButton.addEventListener("click", copyShareLink);
+    if (enterVrButton) enterVrButton.addEventListener("click", () => startXrSession("vr").catch((error) => logLine(error.message || "VR failed to start.")));
+    if (enterArButton) enterArButton.addEventListener("click", () => startXrSession("ar").catch((error) => logLine(error.message || "AR failed to start.")));
 
     const generatedToggle = $("show-generated-atoms");
     if (generatedToggle) {
@@ -2167,7 +2304,7 @@
   }
 
   function bootstrap() {
-    restoreViewerState();
+    if (!restoreViewerStateFromHash()) restoreViewerState();
     refreshControls();
     renderConsole();
     bindEvents();

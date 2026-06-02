@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    name="description"
+    content="Shared crystal unit cell viewer with WebGL, GLB export, and WebXR entry points."
+  />
+  <title>Shared crystal viewer | Paul M. Neves</title>
+  <link rel="canonical" href="https://paulmneves.com/tools/crystal-viewer-share.html" />
+  <link rel="icon" type="image/png" href="../media/favicon.png" />
+  <link rel="stylesheet" href="../css/site.css" />
+</head>
+<body class="laue-page crystal-viewer-page crystal-share-page">
+  <main class="crystal-share-main">
+    <div class="crystal-share-toolbar">
+      <a class="laue-mode-btn" href="crystal-viewer.html">Edit in full viewer</a>
+      <button type="button" class="laue-mode-btn" id="share-download-glb">Download GLB</button>
+      <button type="button" class="laue-mode-btn" id="share-enter-vr">VR</button>
+      <button type="button" class="laue-mode-btn" id="share-enter-ar">AR</button>
+      <span id="share-status" class="crystal-share-status" role="status" aria-live="polite"></span>
+    </div>
+    <canvas id="shared-crystal-canvas" aria-label="Shared crystal rendering"></canvas>
+  </main>
+
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+  <script src="../js/crystal-model.js"></script>
+  <script src="../js/crystal-viewer-share.js"></script>
+</body>
+</html>

@@ -306,29 +306,41 @@
 
       <aside class="laue-viewer-panel crystal-viewer-panel" aria-label="Crystal viewer">
         <div class="crystal-view-controls">
-          <div class="crystal-control-group" role="toolbar" aria-label="Look along crystal directions">
-            <button type="button" class="laue-mode-btn" data-look="a">a</button>
-            <button type="button" class="laue-mode-btn" data-look="b">b</button>
-            <button type="button" class="laue-mode-btn" data-look="c">c</button>
-            <button type="button" class="laue-mode-btn" data-look="astar">a*</button>
-            <button type="button" class="laue-mode-btn" data-look="bstar">b*</button>
-            <button type="button" class="laue-mode-btn" data-look="cstar">c*</button>
+          <div class="crystal-control-row">
+            <div class="crystal-control-group" role="toolbar" aria-label="Interaction tools">
+              <button type="button" class="laue-mode-btn active" data-tool="rotate">Rotate</button>
+              <button type="button" class="laue-mode-btn" data-tool="pan">Pan</button>
+              <button type="button" class="laue-mode-btn" data-tool="zoom">Zoom</button>
+              <button type="button" class="laue-mode-btn laue-mode-action" id="view-reset">Reset</button>
+            </div>
+            <span class="crystal-tool-divider" aria-hidden="true">|</span>
+            <div class="crystal-control-group crystal-control-group-right" role="toolbar" aria-label="Share, XR, and model export">
+              <button type="button" class="laue-mode-btn" id="download-glb">Download GLB</button>
+              <button type="button" class="laue-mode-btn" id="copy-share-link">Copy sharable link</button>
+              <button type="button" class="laue-mode-btn" id="enter-vr">VR</button>
+              <button type="button" class="laue-mode-btn" id="enter-ar">AR</button>
+            </div>
           </div>
-          <div class="crystal-control-group">
-            <label for="view-step-degrees">Step</label>
-            <input type="number" id="view-step-degrees" step="any" min="0" value="10" />
-            <button type="button" class="laue-mode-btn" data-rotate-axis="x" data-rotate-sign="-1">X−</button>
-            <button type="button" class="laue-mode-btn" data-rotate-axis="x" data-rotate-sign="1">X+</button>
-            <button type="button" class="laue-mode-btn" data-rotate-axis="y" data-rotate-sign="-1">Y−</button>
-            <button type="button" class="laue-mode-btn" data-rotate-axis="y" data-rotate-sign="1">Y+</button>
-            <button type="button" class="laue-mode-btn" data-rotate-axis="z" data-rotate-sign="-1">Z−</button>
-            <button type="button" class="laue-mode-btn" data-rotate-axis="z" data-rotate-sign="1">Z+</button>
-          </div>
-          <div class="crystal-control-group" role="toolbar" aria-label="Interaction tools">
-            <button type="button" class="laue-mode-btn active" data-tool="rotate">Rotate</button>
-            <button type="button" class="laue-mode-btn" data-tool="pan">Pan</button>
-            <button type="button" class="laue-mode-btn" data-tool="zoom">Zoom</button>
-            <button type="button" class="laue-mode-btn laue-mode-action" id="view-reset">Reset</button>
+          <div class="crystal-control-row">
+            <div class="crystal-control-group" role="toolbar" aria-label="Look along crystal directions">
+              <button type="button" class="laue-mode-btn" data-look="a">a</button>
+              <button type="button" class="laue-mode-btn" data-look="b">b</button>
+              <button type="button" class="laue-mode-btn" data-look="c">c</button>
+              <button type="button" class="laue-mode-btn" data-look="astar">a*</button>
+              <button type="button" class="laue-mode-btn" data-look="bstar">b*</button>
+              <button type="button" class="laue-mode-btn" data-look="cstar">c*</button>
+            </div>
+            <span class="crystal-tool-divider" aria-hidden="true">|</span>
+            <div class="crystal-control-group crystal-control-group-right">
+              <label for="view-step-degrees">Step</label>
+              <input type="number" id="view-step-degrees" step="any" min="0" value="10" />
+              <button type="button" class="laue-mode-btn" data-rotate-axis="x" data-rotate-sign="-1">X−</button>
+              <button type="button" class="laue-mode-btn" data-rotate-axis="x" data-rotate-sign="1">X+</button>
+              <button type="button" class="laue-mode-btn" data-rotate-axis="y" data-rotate-sign="-1">Y−</button>
+              <button type="button" class="laue-mode-btn" data-rotate-axis="y" data-rotate-sign="1">Y+</button>
+              <button type="button" class="laue-mode-btn" data-rotate-axis="z" data-rotate-sign="-1">Z−</button>
+              <button type="button" class="laue-mode-btn" data-rotate-axis="z" data-rotate-sign="1">Z+</button>
+            </div>
           </div>
         </div>
         <div class="crystal-canvas-wrap">
@@ -357,6 +369,7 @@
   <script src="../js/cif-parser.js"></script>
   <script src="../js/crystal-presets.js"></script>
   <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+  <script src="../js/crystal-model.js"></script>
   <script src="../js/crystal-viewer.js"></script>
 </body>
 </html>
