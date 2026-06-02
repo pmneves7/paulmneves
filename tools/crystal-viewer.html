@@ -49,7 +49,7 @@
         </div>
         <section class="tool-section">
           <details class="tool-collapsible" open>
-            <summary class="tool-collapsible-summary">1. Crystal importer</summary>
+            <summary class="tool-collapsible-summary">1. Crystal importer/exporter</summary>
             <div class="tool-collapsible-body">
               <p class="tool-note">
                 Load a CIF file to populate the lattice parameters, space group, and fractional atom positions.
@@ -67,6 +67,17 @@
                 <button type="button" id="cif-export-button" class="button secondary">Export CIF</button>
                 <button type="button" id="crystal-config-save-button" class="button secondary">Save config…</button>
                 <button type="button" id="crystal-config-load-button" class="button secondary">Load config…</button>
+                <div class="tool-field tool-cif-preset">
+                  <label for="model-export-format">3D model format</label>
+                  <select id="model-export-format">
+                    <option value="glb">GLB</option>
+                    <option value="ppt-glb">PowerPoint GLB</option>
+                    <option value="obj">OBJ</option>
+                    <option value="stl">STL</option>
+                    <option value="usdz">USDZ</option>
+                  </select>
+                </div>
+                <button type="button" id="model-export-button" class="button secondary">Export 3D model</button>
                 <p id="cif-status" class="tool-cif-status" role="status" aria-live="polite"></p>
               </div>
 

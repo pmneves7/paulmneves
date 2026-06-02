@@ -44,6 +44,12 @@
     };
   }
 
+  function setFullViewerLink(token) {
+    const link = document.getElementById("share-edit-full-viewer");
+    if (!link || !token) return;
+    link.href = `crystal-viewer.html#state=${token}`;
+  }
+
   function vec(point) {
     if (Array.isArray(point)) return new THREE.Vector3(point[0] || 0, point[1] || 0, point[2] || 0);
     return new THREE.Vector3(point.x || 0, point.y || 0, point.z || 0);
@@ -288,6 +294,7 @@
 
   function init() {
     const { token, xr } = parseShareLocation();
+    setFullViewerLink(token);
     if (!token || !window.CrystalModel) {
       setStatus("Could not load shared crystal data.");
       return;

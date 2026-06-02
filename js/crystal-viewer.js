@@ -1732,6 +1732,13 @@
     return `${(state.lastImportName || "crystal").replace(/\.cif$/i, "").replace(/[^A-Za-z0-9_-]+/g, "-") || "crystal"}.glb`;
   }
 
+  function modelFilename(format) {
+    const requested = String(format || "glb").toLowerCase();
+    const extension = requested === "ppt-glb" ? "glb" : requested;
+    const stem = (state.lastImportName || "crystal").replace(/\.cif$/i, "").replace(/[^A-Za-z0-9_-]+/g, "-") || "crystal";
+    return requested === "ppt-glb" ? `${stem}-powerpoint.${extension}` : `${stem}.${extension}`;
+  }
+
   function configFilename() {
     return `${(state.lastImportName || "crystal-viewer-config").replace(/\.(cif|json)$/i, "").replace(/[^A-Za-z0-9_-]+/g, "-") || "crystal-viewer-config"}.crystal-viewer.json`;
   }
@@ -1780,7 +1787,11 @@
       atomOverrides: saved.atomOverrides,
       bondRules: saved.bondRules,
       symmetryOperations: shareSymmetry,
-      lastImportName: saved.lastImportName
+      lastImportName: saved.lastImportName,
+      view: {
+        ...saved.view,
+        rotation: ensureRotationMatrix()
+      }
     };
   }
 
@@ -1794,6 +1805,28 @@
       logLine(`Downloaded ${glbFilename()}.`);
     } catch (error) {
       logLine(`GLB export failed: ${error.message || error}`);
+    }
+  }
+
+  function downloadSelectedModelFormat() {
+    const format = text("model-export-format", "glb").toLowerCase();
+    const method = {
+      glb: "downloadGlb",
+      "ppt-glb": "downloadPowerPointGlb",
+      obj: "downloadObj",
+      stl: "downloadStl",
+      usdz: "downloadUsdz"
+    }[format];
+    if (!method || !window.CrystalModel || typeof window.CrystalModel[method] !== "function") {
+      logLine(`${format === "ppt-glb" ? "PowerPoint GLB" : format.toUpperCase()} export is unavailable because the model exporter did not load.`);
+      return;
+    }
+    try {
+      const filename = modelFilename(format);
+      window.CrystalModel[method](currentPortableScene(), filename);
+      logLine(`Downloaded ${filename}.`);
+    } catch (error) {
+      logLine(`${format === "ppt-glb" ? "PowerPoint GLB" : format.toUpperCase()} export failed: ${error.message || error}`);
     }
   }
 
@@ -2389,10 +2422,13 @@
   }
 
   function restoreViewerStateFromHash() {
-    const match = window.location.hash.match(/^#state=(.+)$/);
-    if (!match || !window.CrystalModel || typeof window.CrystalModel.sceneFromShareToken !== "function") return false;
+    const raw = window.location.hash.slice(1);
+    if (!raw || !window.CrystalModel || typeof window.CrystalModel.recipeFromShareToken !== "function") return false;
+    const params = raw.includes("=") ? new URLSearchParams(raw) : null;
+    const token = params ? (params.get("state") || params.get("data") || "") : raw;
+    if (!token) return false;
     try {
-      const restored = applySerializedViewerState(window.CrystalModel.sceneFromShareToken(match[1]));
+      const restored = applySerializedViewerState(window.CrystalModel.recipeFromShareToken(token));
       if (restored) logLine("Loaded crystal state from sharable link.");
       return restored;
     } catch (error) {
@@ -2431,6 +2467,7 @@
     const loadButton = $("cif-load-button");
     const fileInput = $("cif-file");
     const exportButton = $("cif-export-button");
+    const modelExportButton = $("model-export-button");
     const saveConfigButton = $("crystal-config-save-button");
     const loadConfigButton = $("crystal-config-load-button");
     const configFileInput = $("crystal-config-file");
@@ -2468,6 +2505,7 @@
       });
     }
     if (exportButton) exportButton.addEventListener("click", exportCurrentCif);
+    if (modelExportButton) modelExportButton.addEventListener("click", downloadSelectedModelFormat);
     if (saveConfigButton) saveConfigButton.addEventListener("click", saveConfigFile);
     if (loadConfigButton && configFileInput) {
       loadConfigButton.addEventListener("click", () => configFileInput.click());
@@ -2549,7 +2587,7 @@
 
     document.querySelectorAll("input, select").forEach((el) => {
       if (el.closest("#crystal-atom-table") || el.closest("#crystal-atom-style-list") || ["cif-file", "crystal-config-file"].includes(el.id)) return;
-      if (["show-generated-atoms", "crystal-spacegroup", "crystal-spacegroup-setting"].includes(el.id)) return;
+      if (["show-generated-atoms", "crystal-spacegroup", "crystal-spacegroup-setting", "model-export-format"].includes(el.id)) return;
       el.addEventListener("input", render);
       el.addEventListener("change", render);
     });

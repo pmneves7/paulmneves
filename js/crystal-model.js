@@ -438,6 +438,25 @@
     return base64UrlFromText(JSON.stringify(compactRecipe(recipe)));
   }
 
+  function recipeFromShareToken(token) {
+    const clean = String(token || "").replace(/^#/, "").replace(/^state=/, "").replace(/^data=/, "");
+    const decodedToken = (() => {
+      try {
+        return decodeURIComponent(clean);
+      } catch (error) {
+        return clean;
+      }
+    })();
+    if (decodedToken.startsWith("v4.") || decodedToken.startsWith("v3.")) {
+      return expandRecipe(JSON.parse(textFromBase64Url(decodedToken.slice(3))));
+    }
+    const parsed = JSON.parse(textFromBase64Url(decodedToken));
+    if (parsed && (parsed.at || parsed.c || parsed.n || parsed.sy || parsed.br)) {
+      return expandRecipe(parsed);
+    }
+    return null;
+  }
+
   function sceneFromShareToken(token) {
     const clean = String(token || "").replace(/^#/, "").replace(/^data=/, "");
     try {
@@ -889,10 +908,85 @@
     return color.map((value) => value.toFixed(4)).join(",");
   }
 
-  function solidGroup(groups, color) {
+  function clamp01(value) {
+    return Math.max(0, Math.min(1, Number(value) || 0));
+  }
+
+  function rgbToHsl(rgb) {
+    const r = clamp01(rgb[0]);
+    const g = clamp01(rgb[1]);
+    const b = clamp01(rgb[2]);
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    let h = 0;
+    let s = 0;
+    const l = (max + min) / 2;
+    if (max !== min) {
+      const d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+      else if (max === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h /= 6;
+    }
+    return [h, s, l];
+  }
+
+  function hslToRgb(hsl) {
+    const h = ((Number(hsl[0]) || 0) % 1 + 1) % 1;
+    const s = clamp01(hsl[1]);
+    const l = clamp01(hsl[2]);
+    if (s === 0) return [l, l, l];
+    const hueToRgb = (p, q, tRaw) => {
+      let t = tRaw;
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
+    };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    return [
+      hueToRgb(p, q, h + 1 / 3),
+      hueToRgb(p, q, h),
+      hueToRgb(p, q, h - 1 / 3)
+    ];
+  }
+
+  function exportColor(color, options) {
+    if (!options || options.colorProfile !== "powerpoint") return color;
+    const hsl = rgbToHsl(color);
+    const rgb = hslToRgb([hsl[0], Math.min(1, hsl[1] * 1.3 + 0.06), Math.max(0, hsl[2] * 0.78)]);
+    return [rgb[0], rgb[1], rgb[2], color[3] == null ? 1 : color[3]];
+  }
+
+  function bakedVertexColor(color, normal, options) {
+    if (!options || options.colorProfile !== "powerpoint") return null;
+    const light = normalizeVec([-0.35, 0.55, 0.76]);
+    const n = normalizeVec(normal);
+    const diffuse = Math.max(0, n[0] * light[0] + n[1] * light[1] + n[2] * light[2]);
+    const lowerFill = Math.max(0, -n[1]) * 0.18;
+    const shade = Math.min(1, 0.46 + diffuse * 0.52 + lowerFill);
+    return [
+      clamp01(color[0] * shade),
+      clamp01(color[1] * shade),
+      clamp01(color[2] * shade),
+      color[3] == null ? 1 : color[3]
+    ];
+  }
+
+  function solidGroup(groups, color, options) {
     const key = colorGroupKey(color);
     if (!groups.has(key)) {
-      groups.set(key, { color, positions: [], normals: [], indices: [] });
+      groups.set(key, {
+        color,
+        positions: [],
+        normals: [],
+        colors: options && options.colorProfile === "powerpoint" ? [] : null,
+        indices: []
+      });
     }
     return groups.get(key);
   }
@@ -900,6 +994,9 @@
   function pushSolidVertex(mesh, position, normal) {
     mesh.positions.push(...position);
     mesh.normals.push(...normal);
+    if (mesh.colors) {
+      mesh.colors.push(...bakedVertexColor(mesh.color, normal, { colorProfile: "powerpoint" }));
+    }
     return mesh.positions.length / 3 - 1;
   }
 
@@ -946,14 +1043,14 @@
     }
   }
 
-  function addColoredCylinder(groups, start, end, radius, colorStart, colorEnd, segments) {
+  function addColoredCylinder(groups, start, end, radius, colorStart, colorEnd, segments, options) {
     if (colorsMatch(colorStart, colorEnd)) {
-      addSolidCylinder(solidGroup(groups, colorStart), start, end, radius, segments);
+      addSolidCylinder(solidGroup(groups, colorStart, options), start, end, radius, segments);
       return;
     }
     const mid = mulVec(addVec(start, end), 0.5);
-    addSolidCylinder(solidGroup(groups, colorStart), start, mid, radius, segments);
-    addSolidCylinder(solidGroup(groups, colorEnd), mid, end, radius, segments);
+    addSolidCylinder(solidGroup(groups, colorStart, options), start, mid, radius, segments);
+    addSolidCylinder(solidGroup(groups, colorEnd, options), mid, end, radius, segments);
   }
 
   function exportMaterial(scene) {
@@ -965,12 +1062,12 @@
     };
   }
 
-  function sceneToSolidGroups(scene) {
+  function sceneToSolidGroups(scene, options) {
     const fit = fitScene(scene);
     const groups = new Map();
     (scene.atoms || []).forEach((atom) => {
       addSolidSphere(
-        solidGroup(groups, hexToRgb(atom.color)),
+        solidGroup(groups, exportColor(hexToRgb(atom.color), options), options),
         transformPoint(atom.pos, fit),
         Math.max(0.01, atom.radius || 0.08) * fit.scale,
         24,
@@ -983,15 +1080,16 @@
         transformPoint(bond.a, fit),
         transformPoint(bond.b, fit),
         Math.max(0.004, bond.radius || 0.03) * fit.scale,
-        hexToRgb(bond.colorA || bond.color || "#6b7280"),
-        hexToRgb(bond.colorB || bond.colorA || bond.color || "#6b7280"),
-        18
+        exportColor(hexToRgb(bond.colorA || bond.color || "#6b7280"), options),
+        exportColor(hexToRgb(bond.colorB || bond.colorA || bond.color || "#6b7280"), options),
+        18,
+        options
       );
     });
     (scene.edges || []).forEach((edge) => {
-      const color = hexToRgb(edge.color || "#111827");
+      const color = exportColor(hexToRgb(edge.color || "#111827"), options);
       addSolidCylinder(
-        solidGroup(groups, color),
+        solidGroup(groups, color, options),
         transformPoint(edge.a, fit),
         transformPoint(edge.b, fit),
         Math.max(0.002, edge.radius || 0.01) * fit.scale,
@@ -1024,11 +1122,12 @@
     return { min, max };
   }
 
-  function createGlb(scene) {
-    const { groups, material } = sceneToSolidGroups(scene);
+  function createGlb(scene, options) {
+    const { groups, material } = sceneToSolidGroups(scene, options);
     if (!groups.length) {
       throw new Error("Nothing to export.");
     }
+    const powerpointProfile = options && options.colorProfile === "powerpoint";
 
     const chunks = [];
     const bufferViews = [];
@@ -1057,6 +1156,7 @@
       const indexArray = maxIndex > 65535 ? new Uint32Array(group.indices) : new Uint16Array(group.indices);
       const positionView = pushChunk(positions, 34962);
       const normalView = pushChunk(normals, 34962);
+      const colorView = group.colors ? pushChunk(new Float32Array(group.colors), 34962) : null;
       const indexView = pushChunk(indexArray, 34963);
       const bounds = minMax(positions);
       const positionAccessor = accessors.length;
@@ -1075,6 +1175,15 @@
         count: normals.length / 3,
         type: "VEC3"
       });
+      const colorAccessor = group.colors ? accessors.length : null;
+      if (group.colors) {
+        accessors.push({
+          bufferView: colorView,
+          componentType: 5126,
+          count: group.colors.length / 4,
+          type: "VEC4"
+        });
+      }
       const indexAccessor = accessors.length;
       accessors.push({
         bufferView: indexView,
@@ -1086,19 +1195,22 @@
       const materialIndex = materials.length;
       const entry = {
         pbrMetallicRoughness: {
-          baseColorFactor: group.color,
-          metallicFactor: material.metallic,
-          roughnessFactor: material.roughness
+          baseColorFactor: group.colors ? [1, 1, 1, group.color[3] == null ? 1 : group.color[3]] : group.color,
+          metallicFactor: powerpointProfile ? 0 : material.metallic,
+          roughnessFactor: powerpointProfile ? 1 : material.roughness
         },
+        emissiveFactor: [0, 0, 0],
         doubleSided: true
       };
-      if (material.unlit) {
+      if (material.unlit || powerpointProfile) {
         entry.extensions = { KHR_materials_unlit: {} };
       }
       materials.push(entry);
 
+      const attributes = { POSITION: positionAccessor, NORMAL: normalAccessor };
+      if (colorAccessor != null) attributes.COLOR_0 = colorAccessor;
       primitives.push({
-        attributes: { POSITION: positionAccessor, NORMAL: normalAccessor },
+        attributes,
         indices: indexAccessor,
         material: materialIndex
       });
@@ -1115,7 +1227,7 @@
       bufferViews,
       accessors
     };
-    if (material.unlit) {
+    if (material.unlit || powerpointProfile) {
       json.extensionsUsed = ["KHR_materials_unlit"];
     }
     const jsonChunk = aligned(encoder.encode(JSON.stringify(json)), 0x20);
@@ -1297,13 +1409,76 @@
     return new Blob([createStoredZip([{ name, bytes }])], { type: "model/vnd.usdz+zip" });
   }
 
-  function downloadGlb(scene, filename) {
+  function createObj(scene) {
+    const { groups } = sceneToSolidGroups(scene);
+    if (!groups.length) throw new Error("Nothing to export.");
+    const lines = [
+      "# Crystal model exported from paulmneves.com",
+      `o ${usdName(scene && scene.name, "crystal")}`
+    ];
+    let vertexOffset = 1;
+    groups.forEach((group, groupIndex) => {
+      lines.push(`g material_${groupIndex + 1}`);
+      for (let i = 0; i < group.positions.length; i += 3) {
+        lines.push(`v ${usdNumber(group.positions[i])} ${usdNumber(group.positions[i + 1])} ${usdNumber(group.positions[i + 2])}`);
+      }
+      for (let i = 0; i < group.normals.length; i += 3) {
+        lines.push(`vn ${usdNumber(group.normals[i])} ${usdNumber(group.normals[i + 1])} ${usdNumber(group.normals[i + 2])}`);
+      }
+      for (let i = 0; i < group.indices.length; i += 3) {
+        const a = group.indices[i] + vertexOffset;
+        const b = group.indices[i + 1] + vertexOffset;
+        const c = group.indices[i + 2] + vertexOffset;
+        lines.push(`f ${a}//${a} ${b}//${b} ${c}//${c}`);
+      }
+      vertexOffset += group.positions.length / 3;
+    });
+    return new Blob([`${lines.join("\n")}\n`], { type: "model/obj" });
+  }
+
+  function faceNormal(a, b, c) {
+    return normalizeVec(crossVec(subVec(b, a), subVec(c, a)));
+  }
+
+  function createStl(scene) {
+    const { groups } = sceneToSolidGroups(scene);
+    if (!groups.length) throw new Error("Nothing to export.");
+    let triangleCount = 0;
+    groups.forEach((group) => {
+      triangleCount += group.indices.length / 3;
+    });
+    const buffer = new ArrayBuffer(84 + triangleCount * 50);
+    const bytes = new Uint8Array(buffer);
+    encoder.encodeInto("Crystal model exported from paulmneves.com", bytes.subarray(0, 80));
+    const view = new DataView(buffer);
+    view.setUint32(80, triangleCount, true);
+    let offset = 84;
+    groups.forEach((group) => {
+      for (let i = 0; i < group.indices.length; i += 3) {
+        const vertices = [group.indices[i], group.indices[i + 1], group.indices[i + 2]].map((index) => [
+          group.positions[index * 3],
+          group.positions[index * 3 + 1],
+          group.positions[index * 3 + 2]
+        ]);
+        const normal = faceNormal(vertices[0], vertices[1], vertices[2]);
+        [...normal, ...vertices[0], ...vertices[1], ...vertices[2]].forEach((value) => {
+          view.setFloat32(offset, Number(value) || 0, true);
+          offset += 4;
+        });
+        view.setUint16(offset, 0, true);
+        offset += 2;
+      }
+    });
+    return new Blob([buffer], { type: "model/stl" });
+  }
+
+  function downloadBlob(blob, filename) {
     let url = "";
     try {
-      url = URL.createObjectURL(createGlb(scene));
+      url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = filename || "crystal.glb";
+      link.download = filename || "crystal";
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -1312,19 +1487,24 @@
     }
   }
 
+  function downloadGlb(scene, filename) {
+    downloadBlob(createGlb(scene), filename || "crystal.glb");
+  }
+
+  function downloadPowerPointGlb(scene, filename) {
+    downloadBlob(createGlb(scene, { colorProfile: "powerpoint" }), filename || "crystal-powerpoint.glb");
+  }
+
   function downloadUsdz(scene, filename) {
-    let url = "";
-    try {
-      url = URL.createObjectURL(createUsdz(scene));
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = filename || "crystal.usdz";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-    } finally {
-      if (url) window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    }
+    downloadBlob(createUsdz(scene), filename || "crystal.usdz");
+  }
+
+  function downloadObj(scene, filename) {
+    downloadBlob(createObj(scene), filename || "crystal.obj");
+  }
+
+  function downloadStl(scene, filename) {
+    downloadBlob(createStl(scene), filename || "crystal.stl");
   }
 
   function openUsdzQuickLook(scene, filename) {
@@ -1346,11 +1526,17 @@
   global.CrystalModel = {
     cameraRelativeLightDirection,
     createGlb,
+    createObj,
+    createStl,
     createUsdz,
     defaultViewRotationMatrix,
     downloadGlb,
+    downloadPowerPointGlb,
+    downloadObj,
+    downloadStl,
     downloadUsdz,
     openUsdzQuickLook,
+    recipeFromShareToken,
     recipeToScene,
     recipeToShareToken,
     sceneFromShareToken
