@@ -283,6 +283,38 @@
     return Math.abs(dot(vectors.a, cross(vectors.b, vectors.c)));
   }
 
+  const AVOGADRO = 6.02214076e23;
+
+  function unitCellDensity(volumeAngstrom3) {
+    const weights = window.ScatteringFactors && window.ScatteringFactors.ATOMIC_WEIGHTS;
+    if (!weights || !(volumeAngstrom3 > 0)) return null;
+    const atoms = generatedAtomSites();
+    if (!atoms.length) return null;
+    let molarMass = 0;
+    atoms.forEach((atom) => {
+      const weight = weights[sanitizeElement(atom.element)];
+      if (!weight) return;
+      const occupancy = atom.occupancy == null ? 1 : Number(atom.occupancy) || 1;
+      molarMass += weight * occupancy;
+    });
+    if (molarMass <= 0) return null;
+    return (molarMass / AVOGADRO) / (volumeAngstrom3 * 1e-24);
+  }
+
+  function updateCellMetrics(vectors) {
+    const volumeEl = $("crystal-cell-volume");
+    const densityEl = $("crystal-cell-density");
+    if (!volumeEl && !densityEl) return;
+    const volume = cellVolume(vectors);
+    if (volumeEl) {
+      volumeEl.textContent = Number.isFinite(volume) && volume > 0 ? `${volume.toFixed(3)} Å³` : "—";
+    }
+    if (densityEl) {
+      const density = unitCellDensity(volume);
+      densityEl.textContent = density != null && Number.isFinite(density) ? `${density.toFixed(3)} g/cm³` : "—";
+    }
+  }
+
   function fractionalToCartesian(atom, vectors, shift) {
     return add(
       add(mul(vectors.a, atom.fractX + shift.i), mul(vectors.b, atom.fractY + shift.j)),
@@ -1687,6 +1719,24 @@
     const outlineCells = checked("show-cell-outline") ?
       (checked("show-all-outlines") ? unitCellsWithinBoundaries(ranges) : [{ aMin: 0, aMax: 1, bMin: 0, bMax: 1, cMin: 0, cMax: 1 }]) :
       [];
+    const exportAtomRadius = (item) => Math.max(0.015, item.style.radius * displayRadiusScale() * 0.2);
+    const trimBondEndpoints = (a, b) => {
+      const delta = sub(b.pos, a.pos);
+      const len = length(delta);
+      if (len < 1e-8) return null;
+      const dir = mul(delta, 1 / len);
+      let trimA = Math.min(exportAtomRadius(a) * 0.85, len * 0.45);
+      let trimB = Math.min(exportAtomRadius(b) * 0.85, len * 0.45);
+      if (trimA + trimB > len * 0.9) {
+        const scale = len * 0.9 / (trimA + trimB);
+        trimA *= scale;
+        trimB *= scale;
+      }
+      return {
+        a: add(a.pos, mul(dir, trimA)),
+        b: add(b.pos, mul(dir, -trimB))
+      };
+    };
     const scene = {
       name: (state.lastImportName || "crystal").replace(/\.cif$/i, ""),
       background: text("background-color", "#ffffff"),
@@ -1700,19 +1750,21 @@
         element: item.atom.element,
         pos: item.pos,
         color: item.style.color,
-        radius: Math.max(0.015, item.style.radius * displayRadiusScale() * 0.2)
+        radius: exportAtomRadius(item)
       })),
       bonds: [],
       edges: []
     };
     bonds.forEach((bond) => {
+      const trimmed = trimBondEndpoints(bond.a, bond.b);
+      if (!trimmed) return;
       const radius = Math.max(0.005, Math.max(0.01, Number(bond.rule.thickness) || 0.15) * 0.5);
       if (bond.rule.style === "split") {
-        const mid = mul(add(bond.a.pos, bond.b.pos), 0.5);
-        scene.bonds.push({ a: bond.a.pos, b: mid, colorA: bond.a.style.color, colorB: bond.a.style.color, radius });
-        scene.bonds.push({ a: mid, b: bond.b.pos, colorA: bond.b.style.color, colorB: bond.b.style.color, radius });
+        const mid = mul(add(trimmed.a, trimmed.b), 0.5);
+        scene.bonds.push({ a: trimmed.a, b: mid, colorA: bond.a.style.color, colorB: bond.a.style.color, radius });
+        scene.bonds.push({ a: mid, b: trimmed.b, colorA: bond.b.style.color, colorB: bond.b.style.color, radius });
       } else {
-        scene.bonds.push({ a: bond.a.pos, b: bond.b.pos, color: bond.rule.color, radius });
+        scene.bonds.push({ a: trimmed.a, b: trimmed.b, color: bond.rule.color, radius });
       }
     });
     outlineCells.forEach((cell) => {
@@ -1874,6 +1926,12 @@
     return new URL(`crystal-viewer-share.html#${token}${xr}`, window.location.href).href;
   }
 
+  function scatteringCalculatorUrl() {
+    if (!window.CrystalModel || typeof window.CrystalModel.recipeToShareToken !== "function") return "";
+    const token = window.CrystalModel.recipeToShareToken(currentShareRecipe());
+    return new URL(`scattering-calculator.html#crystal=${encodeURIComponent(token)}`, window.location.href).href;
+  }
+
   function iosQuickLookAvailable() {
     return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
       (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
@@ -1907,6 +1965,16 @@
     } catch (error) {
       logLine(`Shareable viewer link: ${url}`);
     }
+  }
+
+  function openScatteringCalculator() {
+    const url = scatteringCalculatorUrl();
+    if (!url) {
+      logLine("The scattering calculator link is unavailable because the model exporter did not load.");
+      return;
+    }
+    window.open(url, "_blank", "noopener");
+    logLine("Opening the scattering calculator with the current crystal state.");
   }
 
   async function startXrSession(mode) {
@@ -2062,6 +2130,7 @@
     ensureStyles();
     const params = cellParams();
     const vectors = latticeVectors(params);
+    updateCellMetrics(vectors);
     const atoms = expandedAtoms(vectors);
     const ranges = cellRanges();
     const bonds = computeBonds(atoms);
@@ -2191,6 +2260,7 @@
   }
 
   function atomsForPreset(preset) {
+    if (typeof window.atomsForCrystalPreset === "function") return window.atomsForCrystalPreset(preset);
     if (!preset) return null;
     if (preset.structureModel === "diamond") {
       const element = preset.id && preset.id.startsWith("ge-") ? "Ge" : "Si";
@@ -2516,10 +2586,12 @@
       });
     }
     const downloadGlbButton = $("download-glb");
+    const openScatteringButton = $("open-scattering-calculator");
     const copyShareButton = $("copy-share-link");
     const enterVrButton = $("enter-vr");
     const enterArButton = $("enter-ar");
     if (downloadGlbButton) downloadGlbButton.addEventListener("click", downloadGlbModel);
+    if (openScatteringButton) openScatteringButton.addEventListener("click", openScatteringCalculator);
     if (copyShareButton) copyShareButton.addEventListener("click", copyShareLink);
     if (enterVrButton) enterVrButton.addEventListener("click", () => startXrSession("vr").catch((error) => logLine(error.message || "VR failed to start.")));
     if (enterArButton) enterArButton.addEventListener("click", () => startXrSession("ar").catch((error) => logLine(error.message || "AR failed to start.")));

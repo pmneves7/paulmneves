@@ -116,6 +116,17 @@
                 </div>
               </form>
 
+              <dl class="cell-metrics" id="crystal-cell-metrics" aria-live="polite">
+                <div class="cell-metric">
+                  <dt>Unit cell volume</dt>
+                  <dd id="crystal-cell-volume">—</dd>
+                </div>
+                <div class="cell-metric">
+                  <dt>Density</dt>
+                  <dd id="crystal-cell-density">—</dd>
+                </div>
+              </dl>
+
               <div class="crystal-table-header">
                 <h3 class="laue-subheading">Atomic positions</h3>
                 <button type="button" class="button secondary" id="crystal-add-atom">Add atom</button>
@@ -383,6 +394,7 @@
             <span class="crystal-tool-divider" aria-hidden="true">|</span>
             <div class="crystal-control-group crystal-control-group-right" role="toolbar" aria-label="Share, XR, and model export">
               <button type="button" class="laue-mode-btn" id="download-glb">Download GLB</button>
+              <button type="button" class="laue-mode-btn" id="open-scattering-calculator">Scattering</button>
               <button type="button" class="laue-mode-btn" id="copy-share-link">Copy sharable link</button>
               <button type="button" class="laue-mode-btn" id="enter-vr">VR</button>
               <button type="button" class="laue-mode-btn" id="enter-ar">AR</button>
@@ -441,6 +453,7 @@
   <script src="../js/spacegroup-engine.js"></script>
   <script src="../js/crystal-model.js"></script>
   <script src="../js/crystal-xr.js"></script>
+  <script src="../js/scattering-factors.js"></script>
   <script src="../js/crystal-viewer.js"></script>
 </body>
 </html>

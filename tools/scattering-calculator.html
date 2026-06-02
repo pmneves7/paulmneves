@@ -9,7 +9,7 @@
   <link rel="icon" type="image/png" href="../media/favicon.png" />
   <link rel="stylesheet" href="../css/site.css" />
 </head>
-<body>
+<body class="scattering-page">
   <header>
     <nav aria-label="Main navigation">
       <a class="site-title" href="../index.html">Paul M. Neves</a>
@@ -25,7 +25,7 @@
     </nav>
   </header>
 
-  <main>
+  <main class="scattering-main">
     <header class="page-header">
       <h1>Scattering calculator</h1>
       <p class="lead">
@@ -38,160 +38,303 @@
       </p>
     </header>
 
-    <div class="tool-panel tool-panel-wide">
-      <form id="scattering-form">
-        <section class="tool-section">
-          <h2>Import from CIF (optional)</h2>
-          <p class="tool-note">
-            Load a Crystallographic Information File to auto-fill the lattice parameters and space group.
-            Uncertainties in parentheses such as <code>5.6402(2)</code> are stripped automatically.
-          </p>
-          <div class="tool-cif-controls">
-            <input type="file" id="cif-file" accept=".cif,chemical/x-cif,text/plain" hidden />
-            <div class="tool-field tool-cif-preset">
-              <label for="crystal-preset">Standard crystal</label>
-              <select id="crystal-preset">
-                <option value="">Custom / manual entry</option>
-              </select>
+    <div class="scattering-layout">
+      <div class="scattering-panel-splitter" id="scattering-panel-splitter" role="separator" aria-orientation="vertical" aria-label="Resize settings and results panels" tabindex="0"></div>
+      <section class="scattering-results-pane" aria-label="Scattering results" aria-live="polite">
+        <details class="tool-collapsible scattering-result-block scattering-nuclear-block" open>
+          <summary class="tool-collapsible-summary">Nuclear Bragg peaks</summary>
+          <div class="tool-collapsible-body">
+            <div class="tool-results-header">
+              <p id="result-summary" class="tool-note">Enter parameters and calculate to generate peaks.</p>
             </div>
-            <button type="button" id="cif-load-button" class="button secondary">Load CIF file…</button>
-            <p id="cif-status" class="tool-cif-status" role="status" aria-live="polite"></p>
-          </div>
-        </section>
-
-        <section class="tool-section">
-          <h2>Crystal and beam</h2>
-          <div class="tool-grid">
-            <div class="tool-field">
-              <label for="a">a (Å)</label>
-              <input type="number" id="a" step="any" min="0" value="3.9" required />
-            </div>
-            <div class="tool-field">
-              <label for="b">b (Å)</label>
-              <input type="number" id="b" step="any" min="0" value="3.9" required />
-            </div>
-            <div class="tool-field">
-              <label for="c">c (Å)</label>
-              <input type="number" id="c" step="any" min="0" value="3.9" required />
-            </div>
-            <div class="tool-field">
-              <label for="alpha">α (deg)</label>
-              <input type="number" id="alpha" step="any" min="0" max="180" value="90" required />
-            </div>
-            <div class="tool-field">
-              <label for="beta">β (deg)</label>
-              <input type="number" id="beta" step="any" min="0" max="180" value="90" required />
-            </div>
-            <div class="tool-field">
-              <label for="gamma">γ (deg)</label>
-              <input type="number" id="gamma" step="any" min="0" max="180" value="90" required />
-            </div>
-            <div class="tool-field">
-              <label for="spacegroup">Space group</label>
-              <input
-                type="text"
-                id="spacegroup"
-                value="Pm-3m"
-                placeholder="symbol or number, e.g. 221"
-                title="Enter a Hermann-Mauguin symbol such as Pm-3m or Fd-3m, or an International Tables space-group number from 1 to 230."
-              />
-            </div>
-            <div class="tool-field">
-              <label for="rhombohedral-setting">Rhombohedral setting</label>
-              <select id="rhombohedral-setting" title="Used only for R-centered cells in hexagonal setting. Auto reads :H or :R from the space-group symbol if present.">
-                <option value="auto">Auto (from symbol)</option>
-                <option value="obverse">Obverse (−h + k + l = 3n)</option>
-                <option value="reverse">Reverse (h − k + l = 3n)</option>
-              </select>
-            </div>
-            <div class="tool-field">
-              <label for="wavelength">Wavelength (Å)</label>
-              <input type="number" id="wavelength" step="any" min="0" value="1.54" required />
-            </div>
-            <div class="tool-field">
-              <label for="max-index">Max |H|, |K|, |L|</label>
-              <input type="number" id="max-index" step="1" min="1" max="30" value="8" required />
+            <div class="tool-table-wrap scattering-table-wrap">
+              <table class="tool-table scattering-table">
+                <thead>
+                  <tr>
+                    <th class="sortable" data-sort-key="hkl" role="button" tabindex="0" title="Click to sort by HKL">HKL</th>
+                    <th class="sortable" data-sort-key="dSpacing" role="button" tabindex="0" title="Click to sort by d-spacing">d (Å)</th>
+                    <th class="sortable" data-sort-key="twoTheta" aria-sort="ascending" role="button" tabindex="0" title="Click to sort by 2θ">2θ (deg)</th>
+                    <th class="sortable" data-sort-key="qLength" role="button" tabindex="0" title="Click to sort by |Q|">|Q| (Å⁻¹)</th>
+                    <th class="sortable" data-sort-key="multiplicity" role="button" tabindex="0" title="Click to sort by peak multiplicity">Mult.</th>
+                    <th class="sortable" data-sort-key="fReal" role="button" tabindex="0" title="Click to sort by F_real">F_real <span class="col-unit" data-col-unit="F"></span></th>
+                    <th class="sortable" data-sort-key="fImag" role="button" tabindex="0" title="Click to sort by F_imag">F_imag <span class="col-unit" data-col-unit="F"></span></th>
+                    <th class="sortable" data-sort-key="fMagnitude" role="button" tabindex="0" title="Click to sort by |F|">|F| <span class="col-unit" data-col-unit="F"></span></th>
+                    <th class="sortable" data-sort-key="intensity" role="button" tabindex="0" title="Click to sort by intensity">Intensity <span class="col-unit" data-col-unit="I"></span></th>
+                    <th class="sortable" data-sort-key="countRate" role="button" tabindex="0" title="Click to sort by estimated count rate">Rate est. (s⁻¹)</th>
+                    <th class="sortable plane-column" data-sort-key="inPlane" role="button" tabindex="0" title="Click to sort by in-plane angle">In-plane (deg)</th>
+                    <th class="sortable plane-column" data-sort-key="outOfPlane" role="button" tabindex="0" title="Click to sort by out-of-plane angle">Out-of-plane (deg)</th>
+                    <th class="sortable plane-column" data-sort-key="rotation" role="button" tabindex="0" title="Click to sort by rotation ω">Rotation ω (deg)</th>
+                  </tr>
+                </thead>
+                <tbody id="peak-table">
+                  <tr>
+                    <td colspan="13">No peaks calculated yet.</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
-        </section>
+        </details>
 
-        <section class="tool-section">
-          <h2>Scattering plane</h2>
-          <p class="tool-note">
-            Enter two non-collinear HKLs in the scattering plane to calculate a signed out-of-plane angle.
-            The in-plane angle is measured from the first HKL toward the second. HKL 1 defines the in-plane reference axis used for φ and ω (not the incident beam direction).
-          </p>
-          <div class="tool-grid">
-            <div class="tool-field">
-              <label for="plane-hkl-1">Plane HKL 1</label>
-              <input
-                type="text"
-                id="plane-hkl-1"
-                placeholder="e.g. 1 0 0"
-                title="Enter three Miller indices separated by spaces or commas, such as 1 0 0 or 1,0,0. Negative values are allowed."
-              />
+        <div class="scattering-result-splitter" id="scattering-result-splitter" role="separator" aria-orientation="horizontal" aria-label="Resize nuclear and magnetic peak tables" tabindex="0"></div>
+
+        <details class="tool-collapsible scattering-result-block scattering-magnetic-block" open>
+          <summary class="tool-collapsible-summary">Magnetic Bragg peaks</summary>
+          <div class="tool-collapsible-body">
+            <div class="tool-results-header">
+              <p id="magnetic-summary" class="tool-note">Enable the magnetic estimator and load atom positions to estimate neutron magnetic satellites.</p>
             </div>
-            <div class="tool-field">
-              <label for="plane-hkl-2">Plane HKL 2</label>
-              <input
-                type="text"
-                id="plane-hkl-2"
-                placeholder="e.g. 0 -1 0"
-                title="Enter a second non-collinear HKL in the scattering plane, using spaces or commas. For example: 0 -1 0 or 0,-1,0."
-              />
-            </div>
-            <div class="tool-field">
-              <label for="in-plane-min">In-plane min (deg)</label>
-              <input type="number" id="in-plane-min" step="any" placeholder="optional" />
-            </div>
-            <div class="tool-field">
-              <label for="in-plane-max">In-plane max (deg)</label>
-              <input type="number" id="in-plane-max" step="any" placeholder="optional" />
+            <div class="tool-table-wrap scattering-table-wrap">
+              <table class="tool-table scattering-table">
+                <thead>
+                  <tr>
+                    <th>Magnetic HKL</th>
+                    <th>Parent τ</th>
+                    <th>d (Å)</th>
+                    <th>2θ (deg)</th>
+                    <th>|Q| (Å⁻¹)</th>
+                    <th>|Fmag| (fm)</th>
+                    <th>Imag</th>
+                    <th>Intensity</th>
+                    <th>Rel. nuclear max</th>
+                    <th>Rate est. (s⁻¹)</th>
+                    <th>Overlap</th>
+                  </tr>
+                </thead>
+                <tbody id="magnetic-peak-table">
+                  <tr>
+                    <td colspan="11">No magnetic estimate calculated yet.</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
-        </section>
+        </details>
 
-        <button class="button primary" type="submit">Calculate peaks</button>
-      </form>
-    </div>
+        <details class="tool-collapsible scattering-result-block scattering-rules-panel" open>
+          <summary class="tool-collapsible-summary">Extinction rules</summary>
+          <div class="tool-collapsible-body">
+            <p class="tool-note">Systematic absences applied to the peak list for the current space group (Bravais centering by default):</p>
+            <ol id="extinction-rules" class="tool-extinction-rules">
+              <li>Enter a space group and calculate to see the active rules.</li>
+            </ol>
+          </div>
+        </details>
 
-    <div class="tool-panel tool-panel-wide">
-      <h2>Extinction rules</h2>
-      <p class="tool-note">Systematic absences applied to the peak list for the current space group (Bravais centering by default):</p>
-      <ol id="extinction-rules" class="tool-extinction-rules">
-        <li>Enter a space group and calculate to see the active rules.</li>
-      </ol>
-    </div>
+        <details class="tool-collapsible scattering-result-block scattering-rotation-note" open>
+          <summary class="tool-collapsible-summary">Scattering angle definitions</summary>
+          <div class="tool-collapsible-body">
+            <p class="tool-note">
+              When a scattering plane is provided, ω is the smallest signed crystal rotation about the out-of-plane axis that satisfies cos(φ + ω) = −sin(θ)/cos(χ), including both symmetric detector branches (φ = in-plane angle, χ = out-of-plane angle, θ = Bragg angle).
+            </p>
+          </div>
+        </details>
+      </section>
 
-    <p class="tool-note tool-note-panel">
-      When a scattering plane is provided, ω is the smallest signed crystal rotation about the out-of-plane axis that satisfies cos(φ + ω) = −sin(θ)/cos(χ), including both symmetric detector branches (φ = in-plane angle, χ = out-of-plane angle, θ = Bragg angle).
-    </p>
+      <aside class="tool-panel tool-panel-wide scattering-settings-pane" aria-label="Scattering settings">
+        <form id="scattering-form">
+          <section class="tool-section">
+            <h2>Import crystal data</h2>
+            <p class="tool-note">
+              Load a CIF or crystal-viewer config to auto-fill the lattice parameters, space group,
+              and fractional atom positions.
+            </p>
+            <div class="tool-cif-controls">
+              <input type="file" id="cif-file" accept=".cif,chemical/x-cif,text/plain" hidden />
+              <input type="file" id="crystal-config-file" accept="application/json,.json" hidden />
+              <div class="tool-field tool-cif-preset">
+                <label for="crystal-preset">Standard crystal</label>
+                <select id="crystal-preset">
+                  <option value="">Custom / manual entry</option>
+                </select>
+              </div>
+              <button type="button" id="cif-load-button" class="button secondary">Load CIF file…</button>
+              <button type="button" id="crystal-config-load-button" class="button secondary" title="Loaded crystal data from the crystal viewer">Load viewer config…</button>
+              <p id="cif-status" class="tool-cif-status" role="status" aria-live="polite"></p>
+            </div>
+          </section>
 
-    <div class="tool-results" aria-live="polite">
-      <div class="tool-results-header">
-        <h2>Allowed Bragg peaks</h2>
-        <p id="result-summary" class="tool-note">Enter parameters and calculate to generate peaks.</p>
-      </div>
-      <div class="tool-table-wrap">
-        <table class="tool-table">
-          <thead>
-            <tr>
-              <th class="sortable" data-sort-key="hkl" role="button" tabindex="0" title="Click to sort by HKL">HKL</th>
-              <th class="sortable" data-sort-key="dSpacing" role="button" tabindex="0" title="Click to sort by d-spacing">d (Å)</th>
-              <th class="sortable" data-sort-key="twoTheta" aria-sort="ascending" role="button" tabindex="0" title="Click to sort by 2θ">2θ (deg)</th>
-              <th class="sortable" data-sort-key="qLength" role="button" tabindex="0" title="Click to sort by |Q|">|Q| (Å⁻¹)</th>
-              <th class="sortable plane-column" data-sort-key="inPlane" role="button" tabindex="0" title="Click to sort by in-plane angle">In-plane (deg)</th>
-              <th class="sortable plane-column" data-sort-key="outOfPlane" role="button" tabindex="0" title="Click to sort by out-of-plane angle">Out-of-plane (deg)</th>
-              <th class="sortable plane-column" data-sort-key="rotation" role="button" tabindex="0" title="Click to sort by rotation ω">Rotation ω (deg)</th>
-            </tr>
-          </thead>
-          <tbody id="peak-table">
-            <tr>
-              <td colspan="7">No peaks calculated yet.</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+          <section class="tool-section">
+            <h2>Crystal</h2>
+            <p id="scattering-model-status" class="tool-note">No atom sites loaded; intensity columns require crystal atom positions.</p>
+            <div class="tool-grid scattering-crystal-grid">
+              <div class="tool-field">
+                <label for="source-type">Source</label>
+                <select id="source-type">
+                  <option value="xray" selected>X-ray</option>
+                  <option value="neutron">Neutron</option>
+                </select>
+              </div>
+              <div class="tool-field" id="xray-line-field">
+                <label for="xray-line">X-ray line</label>
+                <select id="xray-line">
+                  <option value="cr">Chromium K-alpha</option>
+                  <option value="cu" selected>Copper K-alpha</option>
+                  <option value="mo">Molybdenum K-alpha</option>
+                  <option value="ag">Silver K-alpha</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </div>
+              <div class="tool-field">
+                <label for="wavelength">Wavelength (Å)</label>
+                <input type="number" id="wavelength" step="any" min="0" value="1.54056" required />
+              </div>
+              <div class="tool-field scattering-grid-break">
+                <label for="a">a (Å)</label>
+                <input type="number" id="a" step="any" min="0" value="3.9" required />
+              </div>
+              <div class="tool-field">
+                <label for="b">b (Å)</label>
+                <input type="number" id="b" step="any" min="0" value="3.9" required />
+              </div>
+              <div class="tool-field">
+                <label for="c">c (Å)</label>
+                <input type="number" id="c" step="any" min="0" value="3.9" required />
+              </div>
+              <div class="tool-field scattering-grid-break">
+                <label for="alpha">α (deg)</label>
+                <input type="number" id="alpha" step="any" min="0" max="180" value="90" required />
+              </div>
+              <div class="tool-field">
+                <label for="beta">β (deg)</label>
+                <input type="number" id="beta" step="any" min="0" max="180" value="90" required />
+              </div>
+              <div class="tool-field">
+                <label for="gamma">γ (deg)</label>
+                <input type="number" id="gamma" step="any" min="0" max="180" value="90" required />
+              </div>
+              <div class="tool-field scattering-grid-break">
+                <label for="spacegroup">Space group</label>
+                <input
+                  type="text"
+                  id="spacegroup"
+                  value="Pm-3m"
+                  placeholder="symbol or number, e.g. 221"
+                  title="Enter a Hermann-Mauguin symbol such as Pm-3m or Fd-3m, or an International Tables space-group number from 1 to 230."
+                />
+              </div>
+              <div class="tool-field" id="scattering-setting-field" hidden>
+                <label for="spacegroup-setting">Crystallographic setting</label>
+                <select id="spacegroup-setting" title="Select the crystallographic setting used for symmetry expansion and reflection conditions."></select>
+              </div>
+              <div class="tool-field">
+                <label for="max-index">Max |H|, |K|, |L|</label>
+                <input type="number" id="max-index" step="1" min="1" max="30" value="8" required />
+              </div>
+            </div>
+            <dl class="cell-metrics" id="scattering-cell-metrics" aria-live="polite">
+              <div class="cell-metric">
+                <dt>Unit cell volume</dt>
+                <dd id="scattering-cell-volume">—</dd>
+              </div>
+              <div class="cell-metric">
+                <dt>Density</dt>
+                <dd id="scattering-cell-density">—</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="tool-section">
+            <h2>Intensity</h2>
+            <div class="scattering-mode-toggle" role="group" aria-label="Diffraction intensity mode">
+              <button type="button" class="laue-mode-btn active" data-intensity-mode="single">Single crystal</button>
+              <button type="button" class="laue-mode-btn" data-intensity-mode="powder">Powder</button>
+            </div>
+            <div class="tool-grid scattering-experiment-grid">
+              <div class="tool-field">
+                <label for="sample-mass">Sample mass (mg)</label>
+                <input type="number" id="sample-mass" step="any" min="0" placeholder="optional" />
+              </div>
+              <div class="tool-field">
+                <label for="incident-flux">Incident flux (cm⁻² s⁻¹)</label>
+                <input type="number" id="incident-flux" step="any" min="0" placeholder="optional" />
+              </div>
+            </div>
+            <p class="tool-note">
+              Count-rate estimates use ideal coherent scattering from the loaded unit cell and do not include
+              absorption, sample shape, detector solid angle, efficiency, resolution, mosaicity, or extinction.
+            </p>
+          </section>
+
+          <section class="tool-section">
+            <h2>Magnetic order estimator</h2>
+            <p class="tool-note">
+              Simple collinear estimate for neutron satellites at τ ± k. Moments are taken equal and in phase
+              on the selected site or element; the intensity includes a 2/3 orientation average.
+            </p>
+            <div class="tool-grid scattering-magnetic-grid">
+              <label class="crystal-inline-check scattering-wide-check">
+                <input type="checkbox" id="magnetic-enabled" />
+                Estimate magnetic peaks
+              </label>
+              <div class="tool-field">
+                <label for="magnetic-site">Ordered site</label>
+                <select id="magnetic-site" disabled>
+                  <option value="">Load atom sites first</option>
+                </select>
+              </div>
+              <div class="tool-field">
+                <label for="magnetic-moment">Moment (μB)</label>
+                <input type="number" id="magnetic-moment" step="any" min="0" value="1" />
+              </div>
+              <div class="tool-field scattering-grid-break">
+                <label for="magnetic-kh">k (H)</label>
+                <input type="number" id="magnetic-kh" step="any" value="0.5" />
+              </div>
+              <div class="tool-field">
+                <label for="magnetic-kk">k (K)</label>
+                <input type="number" id="magnetic-kk" step="any" value="0" />
+              </div>
+              <div class="tool-field">
+                <label for="magnetic-kl">k (L)</label>
+                <input type="number" id="magnetic-kl" step="any" value="0" />
+              </div>
+              <label class="crystal-inline-check scattering-wide-check scattering-grid-break">
+                <input type="checkbox" id="magnetic-form-factor" checked />
+                Apply simple magnetic form-factor falloff
+              </label>
+            </div>
+          </section>
+
+          <section class="tool-section">
+            <h2>Scattering plane</h2>
+            <p class="tool-note">
+              Enter two non-collinear HKLs in the scattering plane to calculate a signed out-of-plane angle.
+              The in-plane angle is measured from the first HKL toward the second. HKL 1 defines the in-plane reference axis used for φ and ω (not the incident beam direction).
+            </p>
+            <div class="tool-grid">
+              <div class="tool-field">
+                <label for="plane-hkl-1">Plane HKL 1</label>
+                <input
+                  type="text"
+                  id="plane-hkl-1"
+                  placeholder="e.g. 1 0 0"
+                  title="Enter three Miller indices separated by spaces or commas, such as 1 0 0 or 1,0,0. Negative values are allowed."
+                />
+              </div>
+              <div class="tool-field">
+                <label for="plane-hkl-2">Plane HKL 2</label>
+                <input
+                  type="text"
+                  id="plane-hkl-2"
+                  placeholder="e.g. 0 -1 0"
+                  title="Enter a second non-collinear HKL in the scattering plane, using spaces or commas. For example: 0 -1 0 or 0,-1,0."
+                />
+              </div>
+              <div class="tool-field">
+                <label for="in-plane-min">In-plane min (deg)</label>
+                <input type="number" id="in-plane-min" step="any" placeholder="optional" />
+              </div>
+              <div class="tool-field">
+                <label for="in-plane-max">In-plane max (deg)</label>
+                <input type="number" id="in-plane-max" step="any" placeholder="optional" />
+              </div>
+            </div>
+          </section>
+
+          <button class="button primary" type="submit">Calculate peaks</button>
+        </form>
+      </aside>
     </div>
 
     <p class="back-link-panel"><a href="../tools.html">← Back to tools</a></p>
@@ -204,19 +347,52 @@
   <script src="../js/site.js"></script>
   <script src="../js/cif-parser.js"></script>
   <script src="../js/crystal-presets.js"></script>
+  <script src="../js/space-groups-data.js"></script>
+  <script src="../js/spacegroup-settings-data.js"></script>
+  <script src="../js/spacegroup-engine.js"></script>
+  <script src="../js/crystal-model.js"></script>
   <script src="../js/scattering-extinctions.js"></script>
+  <script src="../js/scattering-factors.js"></script>
   <script>
     const form = document.getElementById("scattering-form");
     const peakTable = document.getElementById("peak-table");
     const resultSummary = document.getElementById("result-summary");
     const cifFileInput = document.getElementById("cif-file");
     const cifLoadButton = document.getElementById("cif-load-button");
+    const crystalConfigFileInput = document.getElementById("crystal-config-file");
+    const crystalConfigLoadButton = document.getElementById("crystal-config-load-button");
     const cifStatusEl = document.getElementById("cif-status");
     const crystalPresetSelect = document.getElementById("crystal-preset");
     const extinctionRulesEl = document.getElementById("extinction-rules");
-    const rhombohedralSettingEl = document.getElementById("rhombohedral-setting");
+    const spaceGroupSettingField = document.getElementById("scattering-setting-field");
+    const spaceGroupSettingEl = document.getElementById("spacegroup-setting");
+    const sourceTypeEl = document.getElementById("source-type");
+    const xrayLineEl = document.getElementById("xray-line");
+    const xrayLineField = document.getElementById("xray-line-field");
+    const scatteringModelStatusEl = document.getElementById("scattering-model-status");
+    const sampleMassEl = document.getElementById("sample-mass");
+    const incidentFluxEl = document.getElementById("incident-flux");
+    const magneticEnabledEl = document.getElementById("magnetic-enabled");
+    const magneticSiteEl = document.getElementById("magnetic-site");
+    const magneticMomentEl = document.getElementById("magnetic-moment");
+    const magneticKhEl = document.getElementById("magnetic-kh");
+    const magneticKkEl = document.getElementById("magnetic-kk");
+    const magneticKlEl = document.getElementById("magnetic-kl");
+    const magneticFormFactorEl = document.getElementById("magnetic-form-factor");
+    const magneticPeakTable = document.getElementById("magnetic-peak-table");
+    const magneticSummary = document.getElementById("magnetic-summary");
 
-    const crystalMeta = { presetId: "", structureModel: "", chemicalFormula: "" };
+    const crystalMeta = {
+      presetId: "",
+      structureModel: "",
+      chemicalFormula: "",
+      atoms: [],
+      symmetryOperations: [],
+      spaceGroupSetting: "",
+      atomSource: ""
+    };
+    let intensityMode = "single";
+    const DISPLAY_ZERO_THRESHOLD = 1e-10;
 
     if (crystalPresetSelect && typeof populateCrystalPresetSelect === "function") {
       populateCrystalPresetSelect(crystalPresetSelect);
@@ -242,14 +418,151 @@
     }
 
     function setCrystalMeta(meta) {
-      crystalMeta.presetId = meta.presetId || "";
-      crystalMeta.structureModel = meta.structureModel || "";
-      crystalMeta.chemicalFormula = meta.chemicalFormula || "";
+      if (Object.prototype.hasOwnProperty.call(meta, "presetId")) crystalMeta.presetId = meta.presetId || "";
+      if (Object.prototype.hasOwnProperty.call(meta, "structureModel")) crystalMeta.structureModel = meta.structureModel || "";
+      if (Object.prototype.hasOwnProperty.call(meta, "chemicalFormula")) crystalMeta.chemicalFormula = meta.chemicalFormula || "";
+      if (Object.prototype.hasOwnProperty.call(meta, "atoms")) crystalMeta.atoms = Array.isArray(meta.atoms) ? meta.atoms : [];
+      if (Object.prototype.hasOwnProperty.call(meta, "symmetryOperations")) {
+        crystalMeta.symmetryOperations = Array.isArray(meta.symmetryOperations) ? meta.symmetryOperations : [];
+      }
+      if (Object.prototype.hasOwnProperty.call(meta, "spaceGroupSetting")) crystalMeta.spaceGroupSetting = meta.spaceGroupSetting || "";
+      if (Object.prototype.hasOwnProperty.call(meta, "atomSource")) crystalMeta.atomSource = meta.atomSource || "";
+      updateMagneticSiteOptions();
+      updateScatteringModelStatus();
     }
 
     function resetCrystalPresetSelect() {
       if (crystalPresetSelect) crystalPresetSelect.value = "";
-      setCrystalMeta({ chemicalFormula: crystalMeta.chemicalFormula });
+      setCrystalMeta({ presetId: "", structureModel: "" });
+    }
+
+    function currentSpaceGroupSetting() {
+      return (spaceGroupSettingEl && spaceGroupSettingEl.value) || crystalMeta.spaceGroupSetting || "";
+    }
+
+    function settingOptionLabel(setting, index, total) {
+      const base = `${setting.hermannMauguin} [${setting.hallSymbol}]`;
+      if (setting.preferred) return `${base} - conventional`;
+      return total > 1 ? `${base} - setting ${index + 1}` : base;
+    }
+
+    function updateSpaceGroupSettingOptions() {
+      if (!spaceGroupSettingField || !spaceGroupSettingEl || !window.SpaceGroupEngine || typeof window.SpaceGroupEngine.listSpaceGroupSettings !== "function") return;
+      const previous = crystalMeta.spaceGroupSetting || (spaceGroupSettingEl && spaceGroupSettingEl.value) || "";
+      const settings = window.SpaceGroupEngine.listSpaceGroupSettings(latticeFieldMap.spaceGroup ? latticeFieldMap.spaceGroup.value : "");
+      spaceGroupSettingEl.innerHTML = "";
+      if (settings.length <= 1) {
+        spaceGroupSettingField.hidden = true;
+        spaceGroupSettingEl.value = "";
+        crystalMeta.spaceGroupSetting = "";
+        updateMagneticSiteOptions();
+        updateScatteringModelStatus();
+        return;
+      }
+
+      spaceGroupSettingField.hidden = false;
+      settings.forEach((setting, index) => {
+        const option = document.createElement("option");
+        option.value = setting.hallSymbol;
+        option.textContent = settingOptionLabel(setting, index, settings.length);
+        spaceGroupSettingEl.appendChild(option);
+      });
+      const preferred = settings.find((setting) => setting.preferred) || settings[0];
+      spaceGroupSettingEl.value = settings.some((setting) => setting.hallSymbol === previous)
+        ? previous
+        : preferred.hallSymbol;
+      crystalMeta.spaceGroupSetting = spaceGroupSettingEl.value || "";
+      updateMagneticSiteOptions();
+      updateScatteringModelStatus();
+    }
+
+    function expandedAtomSites() {
+      if (!crystalMeta.atoms.length || !window.ScatteringFactors) return [];
+      return window.ScatteringFactors.expandAtomSites({
+        atoms: crystalMeta.atoms,
+        spaceGroup: document.getElementById("spacegroup").value || "P 1",
+        spaceGroupSetting: currentSpaceGroupSetting(),
+        symmetryOperations: crystalMeta.symmetryOperations
+      });
+    }
+
+    function updateMagneticSiteOptions() {
+      if (!magneticSiteEl || !window.ScatteringFactors) return;
+      const atoms = expandedAtomSites();
+      const previous = magneticSiteEl.value;
+      magneticSiteEl.innerHTML = "";
+      if (!atoms.length) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "Load atom sites first";
+        magneticSiteEl.appendChild(option);
+        magneticSiteEl.disabled = true;
+        return;
+      }
+
+      const elements = atoms.reduce((counts, atom) => {
+        const element = window.ScatteringFactors.sanitizeElement(atom.element);
+        counts[element] = (counts[element] || 0) + 1;
+        return counts;
+      }, {});
+      Object.keys(elements).sort().forEach((element) => {
+        const option = document.createElement("option");
+        option.value = `element:${element}`;
+        option.textContent = `${element} atoms (${elements[element]})`;
+        magneticSiteEl.appendChild(option);
+      });
+      atoms.forEach((atom) => {
+        const option = document.createElement("option");
+        option.value = `site:${atom.label}`;
+        option.textContent = `${atom.label} (${window.ScatteringFactors.sanitizeElement(atom.element)})`;
+        magneticSiteEl.appendChild(option);
+      });
+      magneticSiteEl.disabled = false;
+      magneticSiteEl.value = [...magneticSiteEl.options].some((option) => option.value === previous)
+        ? previous
+        : magneticSiteEl.options[0].value;
+    }
+
+    function updateScatteringModelStatus() {
+      if (!scatteringModelStatusEl) return;
+      const atomCount = crystalMeta.atoms.length;
+      if (!atomCount) {
+        scatteringModelStatusEl.textContent = "No atom sites loaded; intensity columns require crystal atom positions.";
+        return;
+      }
+      const generatedCount = expandedAtomSites().length;
+      const source = crystalMeta.atomSource ? ` from ${crystalMeta.atomSource}` : "";
+      scatteringModelStatusEl.textContent = `Using ${atomCount} input atom site${atomCount === 1 ? "" : "s"}${source}; ${generatedCount} site${generatedCount === 1 ? "" : "s"} after symmetry expansion.`;
+    }
+
+    function updateColumnUnits() {
+      const isXray = !sourceTypeEl || sourceTypeEl.value === "xray";
+      const fUnit = isXray ? "(e)" : "(fm)";
+      const iUnit = isXray ? "(e²)" : "(fm²)";
+      document.querySelectorAll(".col-unit").forEach((span) => {
+        span.textContent = span.dataset.colUnit === "I" ? iUnit : fUnit;
+      });
+    }
+
+    function updateSourceControls(forcePreset) {
+      const isXray = sourceTypeEl && sourceTypeEl.value === "xray";
+      if (xrayLineField) xrayLineField.hidden = !isXray;
+      updateColumnUnits();
+      if (!isXray || !window.ScatteringFactors || !xrayLineEl) return;
+      const line = window.ScatteringFactors.XRAY_K_ALPHA_LINES[xrayLineEl.value];
+      if (line && (forcePreset || xrayLineEl.value !== "custom")) {
+        document.getElementById("wavelength").value = String(line.wavelength);
+      }
+    }
+
+    function currentScatteringOptions() {
+      const sourceType = sourceTypeEl ? sourceTypeEl.value : "xray";
+      const lineKey = sourceType === "xray" && xrayLineEl && xrayLineEl.value !== "custom" ? xrayLineEl.value : "";
+      return {
+        sourceType,
+        xrayLine: lineKey,
+        intensityMode
+      };
     }
 
     if (crystalPresetSelect) {
@@ -260,16 +573,22 @@
         if (!preset) return;
 
         applyCrystalPresetToFields(preset, latticeFieldMap);
+        const presetAtoms = typeof atomsForCrystalPreset === "function" ? atomsForCrystalPreset(preset) : [];
         setCrystalMeta({
           presetId: preset.id,
           structureModel: preset.structureModel || "",
-          chemicalFormula: ""
+          chemicalFormula: "",
+          atoms: presetAtoms || [],
+          symmetryOperations: [],
+          spaceGroupSetting: "",
+          atomSource: preset.name || "preset"
         });
+        updateSpaceGroupSettingOptions();
 
         try {
           renderPeaks(calculatePeaks());
         } catch (error) {
-          peakTable.innerHTML = `<tr><td colspan="7">${error.message}</td></tr>`;
+          peakTable.innerHTML = `<tr><td colspan="13">${error.message}</td></tr>`;
           resultSummary.textContent = "Please fix the highlighted inputs and try again.";
         }
       });
@@ -277,14 +596,24 @@
 
     Object.values(latticeFieldMap).forEach((input) => {
       if (!input) return;
-      input.addEventListener("input", resetCrystalPresetSelect);
+      input.addEventListener("input", () => {
+        resetCrystalPresetSelect();
+        if (input === latticeFieldMap.spaceGroup) updateSpaceGroupSettingOptions();
+      });
     });
 
+    function rhombohedralSettingForExtinctions(spaceGroup) {
+      const raw = String(spaceGroup || "").toLowerCase();
+      if (/[:(]\s*r\s*\)?\s*$/.test(raw)) return "reverse";
+      if (/[:(]\s*h\s*\)?\s*$/.test(raw)) return "obverse";
+      const setting = currentSpaceGroupSetting();
+      if (!setting) return undefined;
+      return /(^|[-\s])p\s*3\*/i.test(setting) ? "reverse" : "obverse";
+    }
+
     function getExtinctionContext(spaceGroup) {
-      const setting = rhombohedralSettingEl ? rhombohedralSettingEl.value : "auto";
-      const override = setting === "auto" ? undefined : setting;
       if (typeof resolveExtinctionContext === "function") {
-        return resolveExtinctionContext(spaceGroup, { rhombohedralSetting: override });
+        return resolveExtinctionContext(spaceGroup, { rhombohedralSetting: rhombohedralSettingForExtinctions(spaceGroup) });
       }
       return { rules: [], rhombohedralSetting: "obverse", centering: "P" };
     }
@@ -362,7 +691,20 @@
 
     function format(value, digits = 4) {
       if (!Number.isFinite(value)) return "";
+      if (Math.abs(value) < DISPLAY_ZERO_THRESHOLD) return "0";
       return Number(value.toPrecision(digits)).toString();
+    }
+
+    function estimateCountRate(intensity, sourceType, atoms) {
+      if (!window.ScatteringFactors || typeof window.ScatteringFactors.countRateFromIntensity !== "function") {
+        return { rate: null, missingElements: [] };
+      }
+      return window.ScatteringFactors.countRateFromIntensity(intensity, {
+        sourceType,
+        atoms,
+        sampleMassMg: sampleMassEl ? sampleMassEl.value : "",
+        flux: incidentFluxEl ? incidentFluxEl.value : ""
+      });
     }
 
     function parseNumber(id) {
@@ -508,14 +850,235 @@
       return values;
     }
 
+    function multiplicityKey(peak) {
+      return String(Math.round(peak.gLength * 1e8));
+    }
+
+    function assignPeakMultiplicities(peaks) {
+      const groups = new Map();
+      peaks.forEach((peak) => {
+        const key = multiplicityKey(peak);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(peak);
+      });
+      groups.forEach((group) => {
+        group.forEach((peak) => {
+          peak.multiplicity = group.length;
+        });
+      });
+    }
+
+    function updatePeakIntensities(peaks, options) {
+      const atomSites = expandedAtomSites();
+      peaks.forEach((peak) => {
+        if (window.ScatteringFactors && peak.structureFactor) {
+          peak.intensity = window.ScatteringFactors.intensityFromStructureFactor(peak.structureFactor, peak, options);
+          const rate = estimateCountRate(peak.intensity, options.sourceType, atomSites);
+          peak.countRate = rate.rate;
+          peak.countRateMissingElements = rate.missingElements || [];
+        } else {
+          peak.intensity = null;
+          peak.countRate = null;
+          peak.countRateMissingElements = [];
+        }
+      });
+    }
+
+    function vectorNearlyInteger(hkl, tolerance = 1e-8) {
+      return hkl.every((value) => Math.abs(value - Math.round(value)) < tolerance);
+    }
+
+    function formatHKLValue(value) {
+      if (!Number.isFinite(value)) return "";
+      return Math.abs(value - Math.round(value)) < 1e-8 ? String(Math.round(value)) : format(value, 5);
+    }
+
+    function formatHKLTriplet(hkl) {
+      return `(${hkl.map(formatHKLValue).join(" ")})`;
+    }
+
+    function selectMagneticAtoms(atoms, selector) {
+      if (!selector) return [];
+      const [kind, value] = String(selector).split(":");
+      if (kind === "element") {
+        return atoms.filter((atom) => window.ScatteringFactors.sanitizeElement(atom.element) === value);
+      }
+      if (kind === "site") return atoms.filter((atom) => atom.label === value);
+      return [];
+    }
+
+    function collectMagneticInputs() {
+      const moment = Number(magneticMomentEl ? magneticMomentEl.value : NaN);
+      const kVector = [
+        Number(magneticKhEl ? magneticKhEl.value : NaN),
+        Number(magneticKkEl ? magneticKkEl.value : NaN),
+        Number(magneticKlEl ? magneticKlEl.value : NaN)
+      ];
+      if (!Number.isFinite(moment) || moment < 0) throw new Error("Magnetic moment must be zero or positive.");
+      if (kVector.some((value) => !Number.isFinite(value))) throw new Error("Magnetic propagation vector components must be finite numbers.");
+      return {
+        enabled: !!(magneticEnabledEl && magneticEnabledEl.checked),
+        selector: magneticSiteEl ? magneticSiteEl.value : "",
+        moment,
+        kVector,
+        useFormFactor: !magneticFormFactorEl || magneticFormFactorEl.checked
+      };
+    }
+
+    function strongestNuclearNeutronIntensity(peaks) {
+      return peaks.reduce((best, peak) => {
+        if (!peak.neutronStructureFactor) return best;
+        const intensity = window.ScatteringFactors.intensityFromStructureFactor(
+          peak.neutronStructureFactor,
+          peak,
+          { sourceType: "neutron", intensityMode }
+        );
+        return Math.max(best, Number.isFinite(intensity) ? intensity : 0);
+      }, 0);
+    }
+
+    function nuclearOverlapMap(peaks) {
+      const map = new Set();
+      peaks.forEach((peak) => {
+        map.add(`${Math.round(peak.h * 1e8)}|${Math.round(peak.k * 1e8)}|${Math.round(peak.l * 1e8)}`);
+      });
+      return map;
+    }
+
+    function magneticPeakKey(hkl) {
+      return hkl.map((value) => Math.round(value * 1e8)).join("|");
+    }
+
+    function calculateMagneticPeaks(nuclearPeaks, inputs, basis) {
+      if (!window.ScatteringFactors || !magneticPeakTable || !magneticSummary) return [];
+      const magnetic = collectMagneticInputs();
+      if (!magnetic.enabled) return [];
+      const allAtoms = expandedAtomSites();
+      const selectedAtoms = selectMagneticAtoms(allAtoms, magnetic.selector);
+      if (!selectedAtoms.length || magnetic.moment <= 0) return [];
+
+      const overlapMap = nuclearOverlapMap(nuclearPeaks);
+      const nuclearMax = strongestNuclearNeutronIntensity(nuclearPeaks);
+      const seen = new Set();
+      const peaks = [];
+      const signs = [
+        { sign: 1, label: "+k" },
+        { sign: -1, label: "-k" }
+      ];
+
+      for (let h = -inputs.maxIndex; h <= inputs.maxIndex; h += 1) {
+        for (let k = -inputs.maxIndex; k <= inputs.maxIndex; k += 1) {
+          for (let l = -inputs.maxIndex; l <= inputs.maxIndex; l += 1) {
+            signs.forEach(({ sign, label }) => {
+              const hkl = [
+                h + sign * magnetic.kVector[0],
+                k + sign * magnetic.kVector[1],
+                l + sign * magnetic.kVector[2]
+              ];
+              if (Math.abs(hkl[0]) < 1e-10 && Math.abs(hkl[1]) < 1e-10 && Math.abs(hkl[2]) < 1e-10) return;
+              const key = magneticPeakKey(hkl);
+              if (seen.has(key)) return;
+              seen.add(key);
+
+              const gVector = reciprocalVector(hkl, basis);
+              const gLength = norm(gVector);
+              if (gLength <= 0) return;
+              const dSpacing = 1 / gLength;
+              const sinTheta = inputs.wavelength / (2 * dSpacing);
+              if (sinTheta > 1) return;
+              const twoTheta = 2 * radToDeg(Math.asin(clamp(sinTheta, -1, 1)));
+              const qLength = 2 * Math.PI * gLength;
+              const factor = window.ScatteringFactors.magneticStructureFactor(hkl[0], hkl[1], hkl[2], selectedAtoms, {
+                moment: magnetic.moment,
+                s: 1 / (2 * dSpacing),
+                useFormFactor: magnetic.useFormFactor
+              });
+              const intensity = intensityMode === "powder"
+                ? factor.intensity * window.ScatteringFactors.powderCorrection(twoTheta, "neutron")
+                : factor.intensity;
+              const rate = estimateCountRate(intensity, "neutron", allAtoms);
+              const overlap = vectorNearlyInteger(hkl) && overlapMap.has(magneticPeakKey(hkl));
+
+              peaks.push({
+                hkl,
+                parent: [h, k, l],
+                satellite: label,
+                dSpacing,
+                twoTheta,
+                qLength,
+                fReal: factor.real,
+                fImag: factor.imag,
+                fMagnitude: factor.magnitude,
+                intensity,
+                relativeToNuclearMax: nuclearMax > 0 ? intensity / nuclearMax : null,
+                countRate: rate.rate,
+                countRateMissingElements: rate.missingElements || [],
+                overlap
+              });
+            });
+          }
+        }
+      }
+
+      return peaks.sort((a, b) => b.intensity - a.intensity || a.twoTheta - b.twoTheta).slice(0, 500);
+    }
+
+    const AVOGADRO = 6.02214076e23;
+
+    function cellVolumeAngstrom3(a, b, c, alpha, beta, gamma) {
+      if (![a, b, c, alpha, beta, gamma].every(Number.isFinite)) return null;
+      const cosA = Math.cos(degToRad(alpha));
+      const cosB = Math.cos(degToRad(beta));
+      const cosG = Math.cos(degToRad(gamma));
+      const volume = a * b * c * Math.sqrt(
+        Math.max(0, 1 - cosA * cosA - cosB * cosB - cosG * cosG + 2 * cosA * cosB * cosG)
+      );
+      return Number.isFinite(volume) && volume > 0 ? volume : null;
+    }
+
+    function unitCellDensity(volumeAngstrom3) {
+      const weights = window.ScatteringFactors && window.ScatteringFactors.ATOMIC_WEIGHTS;
+      if (!weights || !(volumeAngstrom3 > 0)) return null;
+      const atoms = expandedAtomSites();
+      if (!atoms.length) return null;
+      let molarMass = 0;
+      atoms.forEach((atom) => {
+        const weight = weights[window.ScatteringFactors.sanitizeElement(atom.element)];
+        if (!weight) return;
+        const occupancy = atom.occupancy == null ? 1 : Number(atom.occupancy) || 1;
+        molarMass += weight * occupancy;
+      });
+      if (molarMass <= 0) return null;
+      return (molarMass / AVOGADRO) / (volumeAngstrom3 * 1e-24);
+    }
+
+    function updateCellMetrics() {
+      const volumeEl = document.getElementById("scattering-cell-volume");
+      const densityEl = document.getElementById("scattering-cell-density");
+      if (!volumeEl && !densityEl) return;
+      const volume = cellVolumeAngstrom3(
+        parseNumber("a"), parseNumber("b"), parseNumber("c"),
+        parseNumber("alpha"), parseNumber("beta"), parseNumber("gamma")
+      );
+      if (volumeEl) volumeEl.textContent = volume != null ? `${volume.toFixed(3)} Å³` : "—";
+      if (densityEl) {
+        const density = volume != null ? unitCellDensity(volume) : null;
+        densityEl.textContent = density != null && Number.isFinite(density) ? `${density.toFixed(3)} g/cm³` : "—";
+      }
+    }
+
     function calculatePeaks() {
+      updateCellMetrics();
       const inputs = collectInputs();
       const crystal = readCrystalForExtinctions(inputs.spaceGroup);
       const extinctionContext = getExtinctionContext(inputs.spaceGroup);
       renderExtinctionRules(extinctionContext, crystal);
       const basis = makeReciprocalBasis(inputs);
       const plane = makePlane(basis);
+      const atomSites = expandedAtomSites();
+      const scatteringOptions = currentScatteringOptions();
       const peaks = [];
+      updateScatteringModelStatus();
 
       for (let h = -inputs.maxIndex; h <= inputs.maxIndex; h += 1) {
         for (let k = -inputs.maxIndex; k <= inputs.maxIndex; k += 1) {
@@ -534,6 +1097,18 @@
             const qLength = 2 * Math.PI * gLength;
             const angles = angleData(gVector, plane);
             const rotation = plane ? rotationData(angles.inPlane, angles.outOfPlane, twoTheta) : null;
+            const structureFactor = atomSites.length && window.ScatteringFactors ?
+              window.ScatteringFactors.structureFactor(h, k, l, atomSites, {
+                ...scatteringOptions,
+                s: 1 / (2 * dSpacing)
+              }) :
+              null;
+            const neutronStructureFactor = atomSites.length && window.ScatteringFactors ?
+              window.ScatteringFactors.structureFactor(h, k, l, atomSites, {
+                sourceType: "neutron",
+                s: 1 / (2 * dSpacing)
+              }) :
+              null;
 
             if (plane && !inPlanePasses(angles.inPlane)) continue;
 
@@ -541,9 +1116,18 @@
               h,
               k,
               l,
+              gLength,
               dSpacing,
               twoTheta,
               qLength,
+              multiplicity: 1,
+              structureFactor,
+              neutronStructureFactor,
+              fReal: structureFactor ? structureFactor.real : null,
+              fImag: structureFactor ? structureFactor.imag : null,
+              fMagnitude: structureFactor ? structureFactor.magnitude : null,
+              intensity: null,
+              missingElements: structureFactor ? structureFactor.missingElements : [],
               inPlane: angles.inPlane,
               outOfPlane: angles.outOfPlane,
               rotation
@@ -552,7 +1136,11 @@
         }
       }
 
-      return peaks.sort((a, b) => a.twoTheta - b.twoTheta || a.h - b.h || a.k - b.k || a.l - b.l);
+      assignPeakMultiplicities(peaks);
+      updatePeakIntensities(peaks, scatteringOptions);
+      const sortedPeaks = peaks.sort((a, b) => a.twoTheta - b.twoTheta || a.h - b.h || a.k - b.k || a.l - b.l);
+      renderMagneticPeaks(calculateMagneticPeaks(sortedPeaks, inputs, basis));
+      return sortedPeaks;
     }
 
     let cachedPeaks = [];
@@ -563,6 +1151,12 @@
       dSpacing: (peak) => peak.dSpacing,
       twoTheta: (peak) => peak.twoTheta,
       qLength: (peak) => peak.qLength,
+      multiplicity: (peak) => peak.multiplicity,
+      fReal: (peak) => peak.fReal,
+      fImag: (peak) => peak.fImag,
+      fMagnitude: (peak) => peak.fMagnitude,
+      intensity: (peak) => peak.intensity,
+      countRate: (peak) => peak.countRate,
       inPlane: (peak) => peak.inPlane,
       outOfPlane: (peak) => peak.outOfPlane,
       rotation: (peak) => peak.rotation
@@ -573,6 +1167,12 @@
       dSpacing: "d-spacing",
       twoTheta: "2θ",
       qLength: "|Q|",
+      multiplicity: "multiplicity",
+      fReal: "F_real",
+      fImag: "F_imag",
+      fMagnitude: "|F|",
+      intensity: "intensity",
+      countRate: "estimated count rate",
       inPlane: "in-plane angle",
       outOfPlane: "out-of-plane angle",
       rotation: "rotation ω"
@@ -622,7 +1222,7 @@
       updateSortIndicators();
 
       if (!peaks.length) {
-        peakTable.innerHTML = "<tr><td colspan=\"7\">No allowed peaks found in this range.</td></tr>";
+        peakTable.innerHTML = "<tr><td colspan=\"13\">No allowed peaks found in this range.</td></tr>";
         resultSummary.textContent = "No peaks matched the current inputs and filters.";
         return;
       }
@@ -635,6 +1235,12 @@
           <td>${format(peak.dSpacing)}</td>
           <td>${format(peak.twoTheta)}</td>
           <td>${format(peak.qLength)}</td>
+          <td>${Number.isFinite(peak.multiplicity) ? peak.multiplicity : "—"}</td>
+          <td>${Number.isFinite(peak.fReal) ? format(peak.fReal, 5) : "—"}</td>
+          <td>${Number.isFinite(peak.fImag) ? format(peak.fImag, 5) : "—"}</td>
+          <td>${Number.isFinite(peak.fMagnitude) ? format(peak.fMagnitude, 5) : "—"}</td>
+          <td>${Number.isFinite(peak.intensity) ? format(peak.intensity, 5) : "—"}</td>
+          <td>${Number.isFinite(peak.countRate) ? format(peak.countRate, 5) : "—"}</td>
           <td class="plane-column">${Number.isFinite(peak.inPlane) ? format(peak.inPlane) : "—"}</td>
           <td class="plane-column">${Number.isFinite(peak.outOfPlane) ? format(peak.outOfPlane) : "—"}</td>
           <td class="plane-column">${Number.isFinite(peak.rotation) ? format(peak.rotation) : "—"}</td>
@@ -642,7 +1248,65 @@
       `).join("");
 
       const directionLabel = sortState.direction === "asc" ? "ascending" : "descending";
-      resultSummary.textContent = `Showing ${peaks.length} allowed peaks sorted by ${sortLabels[sortState.key]} (${directionLabel}). Click a column header to re-sort.`;
+      const options = currentScatteringOptions();
+      const sourceLabel = options.sourceType === "neutron"
+        ? "neutron"
+        : (options.xrayLine && window.ScatteringFactors && window.ScatteringFactors.XRAY_K_ALPHA_LINES[options.xrayLine]
+          ? window.ScatteringFactors.XRAY_K_ALPHA_LINES[options.xrayLine].label
+          : "custom x-ray");
+      const missingElements = [...new Set(peaks.flatMap((peak) => peak.missingElements || []))];
+      const missingMassElements = [...new Set(peaks.flatMap((peak) => peak.countRateMissingElements || []))];
+      const missingNote = missingElements.length ? ` Missing neutron data for: ${missingElements.join(", ")}.` : "";
+      const massNote = missingMassElements.length ? ` Missing atomic masses for count-rate estimate: ${missingMassElements.join(", ")}.` : "";
+      resultSummary.textContent = `Showing ${peaks.length} allowed peaks with ${options.intensityMode === "powder" ? "powder" : "single-crystal"} ${sourceLabel} intensity, sorted by ${sortLabels[sortState.key]} (${directionLabel}). Click a column header to re-sort.${missingNote}${massNote}`;
+    }
+
+    function renderMagneticPeaks(peaks) {
+      if (!magneticPeakTable || !magneticSummary) return;
+      const magnetic = collectMagneticInputs();
+      if (!magnetic.enabled) {
+        magneticPeakTable.innerHTML = "<tr><td colspan=\"11\">Enable the magnetic estimator to calculate neutron magnetic satellites.</td></tr>";
+        magneticSummary.textContent = "Enable the magnetic estimator and load atom positions to estimate neutron magnetic satellites.";
+        return;
+      }
+      if (!expandedAtomSites().length) {
+        magneticPeakTable.innerHTML = "<tr><td colspan=\"11\">Load atom positions before estimating magnetic peaks.</td></tr>";
+        magneticSummary.textContent = "Magnetic estimates require atomic positions from a preset, CIF, or crystal-viewer config.";
+        return;
+      }
+      const selectedAtoms = selectMagneticAtoms(expandedAtomSites(), magnetic.selector);
+      if (!selectedAtoms.length) {
+        magneticPeakTable.innerHTML = "<tr><td colspan=\"11\">Choose an ordered site or element.</td></tr>";
+        magneticSummary.textContent = "No atoms match the selected magnetic site.";
+        return;
+      }
+      if (!peaks.length) {
+        magneticPeakTable.innerHTML = "<tr><td colspan=\"11\">No magnetic satellites are accessible in the current HKL and wavelength range.</td></tr>";
+        magneticSummary.textContent = "No magnetic peaks matched the current propagation vector, max index, and wavelength.";
+        return;
+      }
+
+      magneticPeakTable.innerHTML = peaks.map((peak) => `
+        <tr>
+          <td>${formatHKLTriplet(peak.hkl)}</td>
+          <td>${formatHKLTriplet(peak.parent)} ${peak.satellite}</td>
+          <td>${format(peak.dSpacing)}</td>
+          <td>${format(peak.twoTheta)}</td>
+          <td>${format(peak.qLength)}</td>
+          <td>${format(peak.fMagnitude, 5)}</td>
+          <td>${format(peak.fImag, 5)}</td>
+          <td>${format(peak.intensity, 5)}</td>
+          <td>${Number.isFinite(peak.relativeToNuclearMax) ? format(peak.relativeToNuclearMax, 5) : "—"}</td>
+          <td>${Number.isFinite(peak.countRate) ? format(peak.countRate, 5) : "—"}</td>
+          <td>${peak.overlap ? "Nuclear position" : "New satellite"}</td>
+        </tr>
+      `).join("");
+
+      const kText = formatHKLTriplet(magnetic.kVector);
+      const modeText = intensityMode === "powder" ? "powder-corrected" : "single-crystal";
+      const missingMassElements = [...new Set(peaks.flatMap((peak) => peak.countRateMissingElements || []))];
+      const massNote = missingMassElements.length ? ` Missing atomic masses for count-rate estimate: ${missingMassElements.join(", ")}.` : "";
+      magneticSummary.textContent = `Showing the strongest ${peaks.length} magnetic estimate${peaks.length === 1 ? "" : "s"} for ${format(magnetic.moment, 4)} μB on ${selectedAtoms.length} selected atom site${selectedAtoms.length === 1 ? "" : "s"} with k = ${kText}; intensities are ${modeText} neutron estimates relative to the strongest nuclear neutron peak.${massNote}`;
     }
 
     document.querySelectorAll(".tool-table th.sortable").forEach((th) => {
@@ -666,15 +1330,67 @@
       });
     });
 
-    form.addEventListener("submit", (event) => {
-      event.preventDefault();
-
+    function recalculateSafely() {
       try {
         renderPeaks(calculatePeaks());
       } catch (error) {
-        peakTable.innerHTML = `<tr><td colspan="7">${error.message}</td></tr>`;
+        peakTable.innerHTML = `<tr><td colspan="13">${error.message}</td></tr>`;
         resultSummary.textContent = "Please fix the highlighted inputs and try again.";
       }
+    }
+
+    if (sourceTypeEl) {
+      sourceTypeEl.addEventListener("change", () => {
+        updateSourceControls(false);
+        recalculateSafely();
+      });
+    }
+
+    if (xrayLineEl) {
+      xrayLineEl.addEventListener("change", () => {
+        updateSourceControls(true);
+        recalculateSafely();
+      });
+    }
+
+    const wavelengthInput = document.getElementById("wavelength");
+    if (wavelengthInput) {
+      wavelengthInput.addEventListener("input", () => {
+        if (sourceTypeEl && sourceTypeEl.value === "xray" && xrayLineEl) xrayLineEl.value = "custom";
+      });
+    }
+
+    document.querySelectorAll("[data-intensity-mode]").forEach((button) => {
+      button.addEventListener("click", () => {
+        intensityMode = button.dataset.intensityMode || "single";
+        document.querySelectorAll("[data-intensity-mode]").forEach((candidate) => {
+          candidate.classList.toggle("active", candidate === button);
+        });
+        recalculateSafely();
+        saveState();
+      });
+    });
+
+    [
+      magneticEnabledEl,
+      magneticSiteEl,
+      magneticMomentEl,
+      magneticKhEl,
+      magneticKkEl,
+      magneticKlEl,
+      magneticFormFactorEl,
+      sampleMassEl,
+      incidentFluxEl
+    ].forEach((input) => {
+      if (!input) return;
+      input.addEventListener("input", recalculateSafely);
+      input.addEventListener("change", recalculateSafely);
+    });
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+
+      recalculateSafely();
     });
 
     function setCifStatus(message, isError) {
@@ -718,15 +1434,116 @@
       setCrystalMeta({
         presetId: "",
         structureModel: "",
-        chemicalFormula: data.chemicalFormula || ""
+        chemicalFormula: data.chemicalFormula || "",
+        atoms: Array.isArray(data.atoms) ? data.atoms : [],
+        symmetryOperations: Array.isArray(data.symmetryOperations) ? data.symmetryOperations : [],
+        spaceGroupSetting: "",
+        atomSource: data.chemicalFormula || data.chemicalName || "CIF"
       });
+      updateSpaceGroupSettingOptions();
       if (crystalPresetSelect) crystalPresetSelect.value = "";
 
       try {
         renderPeaks(calculatePeaks());
       } catch (error) {
-        peakTable.innerHTML = `<tr><td colspan="7">${error.message}</td></tr>`;
+        peakTable.innerHTML = `<tr><td colspan="13">${error.message}</td></tr>`;
         resultSummary.textContent = "Please fix the highlighted inputs and try again.";
+      }
+      saveState();
+    }
+
+    function unwrapCrystalViewerPayload(payload) {
+      if (!payload || typeof payload !== "object") return null;
+      if (payload.format === "paulmneves.crystal-viewer" && payload.state) return payload.state;
+      return payload;
+    }
+
+    function applyViewerState(saved, name, renderNow = true) {
+      if (!saved || !Array.isArray(saved.atoms)) {
+        throw new Error("This does not look like a crystal viewer config.");
+      }
+
+      const controls = saved.controls || {};
+      const viewerControlDefaults = {
+        "crystal-a": "5.431",
+        "crystal-b": "5.431",
+        "crystal-c": "5.431",
+        "crystal-alpha": "90",
+        "crystal-beta": "90",
+        "crystal-gamma": "90",
+        "crystal-spacegroup": "Fd-3m",
+        "crystal-spacegroup-setting": ""
+      };
+      const viewerControlValue = (id) => (
+        Object.prototype.hasOwnProperty.call(controls, id) ? controls[id] : viewerControlDefaults[id]
+      );
+      const controlMap = [
+        ["crystal-a", "a"],
+        ["crystal-b", "b"],
+        ["crystal-c", "c"],
+        ["crystal-alpha", "alpha"],
+        ["crystal-beta", "beta"],
+        ["crystal-gamma", "gamma"]
+      ];
+
+      controlMap.forEach(([controlId, fieldId]) => {
+        const value = Number(viewerControlValue(controlId));
+        if (Number.isFinite(value)) document.getElementById(fieldId).value = String(value);
+      });
+
+      if (viewerControlValue("crystal-spacegroup")) {
+        document.getElementById("spacegroup").value = String(viewerControlValue("crystal-spacegroup"));
+      }
+
+      const matchingPreset = typeof getAllCrystalPresets === "function"
+        ? getAllCrystalPresets().find((preset) => preset.name === saved.lastImportName)
+        : null;
+      setCrystalMeta({
+        presetId: matchingPreset ? matchingPreset.id : "",
+        structureModel: matchingPreset ? matchingPreset.structureModel || "" : "",
+        chemicalFormula: "",
+        atoms: saved.atoms,
+        symmetryOperations: Array.isArray(saved.symmetryOperations) ? saved.symmetryOperations : [],
+        spaceGroupSetting: viewerControlValue("crystal-spacegroup-setting") || "",
+        atomSource: saved.lastImportName || name || "crystal viewer"
+      });
+      updateSpaceGroupSettingOptions();
+      if (crystalPresetSelect) crystalPresetSelect.value = "";
+
+      if (!renderNow) return;
+      try {
+        renderPeaks(calculatePeaks());
+      } catch (error) {
+        peakTable.innerHTML = `<tr><td colspan="13">${error.message}</td></tr>`;
+        resultSummary.textContent = "Please fix the highlighted inputs and try again.";
+      }
+    }
+
+    function importViewerStateFromHash() {
+      const raw = window.location.hash.slice(1);
+      if (!raw || !window.CrystalModel || typeof window.CrystalModel.recipeFromShareToken !== "function") return false;
+      const params = new URLSearchParams(raw);
+      const token = params.get("crystal") || params.get("state") || "";
+      if (!token) return false;
+      try {
+        applyViewerState(window.CrystalModel.recipeFromShareToken(token), "crystal viewer", false);
+        return true;
+      } catch (error) {
+        setCifStatus(`Could not load crystal viewer data: ${error.message}`, true);
+        return false;
+      }
+    }
+
+    async function loadViewerConfigFile(file) {
+      if (!file) return;
+      try {
+        const payload = JSON.parse(await file.text());
+        const saved = unwrapCrystalViewerPayload(payload);
+        applyViewerState(saved, file.name);
+        setCifStatus(`Loaded viewer config ${file.name}.`);
+        saveState();
+      } catch (error) {
+        setCifStatus(`Could not load ${file.name}: ${error.message}`, true);
       }
     }
 
@@ -755,18 +1572,309 @@
       });
     }
 
-    if (rhombohedralSettingEl) {
-      rhombohedralSettingEl.addEventListener("change", () => {
+    if (crystalConfigLoadButton && crystalConfigFileInput) {
+      crystalConfigLoadButton.addEventListener("click", () => crystalConfigFileInput.click());
+      crystalConfigFileInput.addEventListener("change", () => {
+        const file = crystalConfigFileInput.files && crystalConfigFileInput.files[0];
+        crystalConfigFileInput.value = "";
+        loadViewerConfigFile(file);
+      });
+    }
+
+    if (spaceGroupSettingEl) {
+      spaceGroupSettingEl.addEventListener("change", () => {
+        crystalMeta.spaceGroupSetting = spaceGroupSettingEl.value || "";
         try {
           renderPeaks(calculatePeaks());
         } catch (error) {
-          peakTable.innerHTML = `<tr><td colspan="7">${error.message}</td></tr>`;
+          peakTable.innerHTML = `<tr><td colspan="13">${error.message}</td></tr>`;
           resultSummary.textContent = "Please fix the highlighted inputs and try again.";
         }
       });
     }
 
+    function initResizablePanels() {
+      const layout = document.querySelector(".scattering-layout");
+      const splitter = document.getElementById("scattering-panel-splitter");
+      if (!layout || !splitter) return;
+
+      const MIN_PCT = 28;
+      const MAX_PCT = 70;
+
+      function setSplitFromClientX(clientX, rect) {
+        const x = clientX - rect.left;
+        const pct = Math.max(MIN_PCT, Math.min(MAX_PCT, (x / rect.width) * 100));
+        layout.style.setProperty("--scattering-settings-width", `${pct.toFixed(2)}%`);
+      }
+
+      let drag = null;
+      splitter.addEventListener("pointerdown", (event) => {
+        if (window.matchMedia("(max-width: 1100px)").matches) return;
+        splitter.setPointerCapture(event.pointerId);
+        drag = { rect: layout.getBoundingClientRect() };
+        layout.classList.add("scattering-resizing-panels");
+        event.preventDefault();
+      });
+      splitter.addEventListener("pointermove", (event) => {
+        if (!drag) return;
+        setSplitFromClientX(event.clientX, drag.rect);
+      });
+      splitter.addEventListener("keydown", (event) => {
+        if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+        const current = parseFloat(layout.style.getPropertyValue("--scattering-settings-width")) || 46;
+        const delta = event.key === "ArrowLeft" ? -2 : 2;
+        const next = Math.max(MIN_PCT, Math.min(MAX_PCT, current + delta));
+        layout.style.setProperty("--scattering-settings-width", `${next.toFixed(2)}%`);
+        event.preventDefault();
+      });
+      ["pointerup", "pointercancel", "lostpointercapture"].forEach((type) => {
+        splitter.addEventListener(type, () => {
+          drag = null;
+          layout.classList.remove("scattering-resizing-panels");
+        });
+      });
+
+      const resultPane = document.querySelector(".scattering-results-pane");
+      const resultSplitter = document.getElementById("scattering-result-splitter");
+      const nuclearBlock = document.querySelector(".scattering-nuclear-block");
+      const magneticBlock = document.querySelector(".scattering-magnetic-block");
+      const nuclearWrap = nuclearBlock && nuclearBlock.querySelector(".scattering-table-wrap");
+      const magneticWrap = magneticBlock && magneticBlock.querySelector(".scattering-table-wrap");
+      if (resultPane && resultSplitter && nuclearWrap && magneticWrap) {
+        const MIN_H = 120;
+        // Split a fixed budget between the two tables so shrinking one grows the other.
+        function applySplit(nuclearPx, total) {
+          const nuclear = Math.max(MIN_H, Math.min(total - MIN_H, nuclearPx));
+          const magnetic = total - nuclear;
+          resultPane.style.setProperty("--scattering-nuclear-table-height", `${Math.round(nuclear)}px`);
+          resultPane.style.setProperty("--scattering-magnetic-table-height", `${Math.round(magnetic)}px`);
+        }
+        function currentTotal() {
+          return nuclearWrap.getBoundingClientRect().height + magneticWrap.getBoundingClientRect().height;
+        }
+        let resultDrag = null;
+        resultSplitter.addEventListener("pointerdown", (event) => {
+          if (window.matchMedia("(max-width: 1100px)").matches) return;
+          resultSplitter.setPointerCapture(event.pointerId);
+          resultDrag = {
+            startY: event.clientY,
+            startNuclear: nuclearWrap.getBoundingClientRect().height,
+            total: currentTotal()
+          };
+          resultPane.classList.add("scattering-resizing-result");
+          event.preventDefault();
+        });
+        resultSplitter.addEventListener("pointermove", (event) => {
+          if (!resultDrag) return;
+          applySplit(resultDrag.startNuclear + (event.clientY - resultDrag.startY), resultDrag.total);
+        });
+        resultSplitter.addEventListener("keydown", (event) => {
+          if (!["ArrowUp", "ArrowDown"].includes(event.key)) return;
+          const delta = event.key === "ArrowUp" ? -16 : 16;
+          applySplit(nuclearWrap.getBoundingClientRect().height + delta, currentTotal());
+          event.preventDefault();
+        });
+        ["pointerup", "pointercancel", "lostpointercapture"].forEach((type) => {
+          resultSplitter.addEventListener(type, () => {
+            resultDrag = null;
+            resultPane.classList.remove("scattering-resizing-result");
+          });
+        });
+      }
+    }
+
+    function initScatteringNavAutoHide() {
+      const panes = [
+        document.querySelector(".scattering-settings-pane"),
+        document.querySelector(".scattering-results-pane")
+      ].filter(Boolean);
+      let hidden = false;
+      function updateNavHidden() {
+        const winY = window.scrollY || document.documentElement.scrollTop || 0;
+        const paneY = panes.reduce((max, pane) => Math.max(max, pane.scrollTop), 0);
+        const shouldHide = winY > 40 || paneY > 40;
+        if (shouldHide === hidden) return;
+        hidden = shouldHide;
+        document.body.classList.toggle("scattering-nav-hidden", hidden);
+      }
+      window.addEventListener("scroll", updateNavHidden, { passive: true });
+      panes.forEach((pane) => pane.addEventListener("scroll", updateNavHidden, { passive: true }));
+      updateNavHidden();
+    }
+
+    function initScatteringSnap() {
+      const stackedMq = window.matchMedia("(max-width: 1100px)");
+      const reducedMotionMq = window.matchMedia("(prefers-reduced-motion: reduce)");
+      const settings = document.querySelector(".scattering-settings-pane");
+      const results = document.querySelector(".scattering-results-pane");
+      const backLink = document.querySelector(".scattering-layout + .back-link-panel");
+      if (!settings || !results) return;
+
+      let snapLock = false;
+      let scrollTimer = null;
+      const centerBandRatio = 0.075;
+      const maxCenterBand = 88;
+      const edgeGuard = 120;
+
+      const pageScrollY = () => window.scrollY || document.documentElement.scrollTop || 0;
+      const maxPageScrollY = () => Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+
+      function scrollingNearPageEnd(targetY) {
+        if (!backLink) return false;
+        return targetY > maxPageScrollY() - edgeGuard ||
+          backLink.getBoundingClientRect().top < window.innerHeight * 0.68;
+      }
+
+      function getSnapRect() {
+        const rects = [settings, results].map((el) => el.getBoundingClientRect());
+        const top = Math.min(...rects.map((r) => r.top));
+        const bottom = Math.max(...rects.map((r) => r.bottom));
+        return { top, height: bottom - top };
+      }
+
+      function snapIfNear() {
+        if (snapLock || reducedMotionMq.matches || stackedMq.matches) return;
+        const vh = window.innerHeight;
+        const mid = vh * 0.5;
+        const band = Math.min(maxCenterBand, vh * centerBandRatio);
+        const r = getSnapRect();
+        const center = r.top + r.height / 2;
+        if (Math.abs(center - mid) > band) return;
+        const currentY = pageScrollY();
+        const targetY = Math.max(0, Math.min(maxPageScrollY(), currentY + center - mid));
+        if (Math.abs(targetY - currentY) < 2) return;
+        if (currentY < edgeGuard || targetY < edgeGuard || scrollingNearPageEnd(targetY)) return;
+        snapLock = true;
+        window.scrollTo({ top: targetY, behavior: "smooth" });
+        window.setTimeout(() => {
+          snapLock = false;
+        }, 400);
+      }
+
+      function scheduleSnapCheck() {
+        if (scrollTimer) window.clearTimeout(scrollTimer);
+        scrollTimer = window.setTimeout(snapIfNear, 120);
+      }
+
+      window.addEventListener("scroll", scheduleSnapCheck, { passive: true });
+      if ("onscrollend" in window) window.addEventListener("scrollend", snapIfNear, { passive: true });
+    }
+
+    const STORAGE_KEY = "scattering-calculator-state-v1";
+
+    function collectFormFields() {
+      const data = {};
+      form.querySelectorAll("input, select").forEach((el) => {
+        if (!el.id || el.type === "file") return;
+        data[el.id] = el.type === "checkbox" ? el.checked : el.value;
+      });
+      return data;
+    }
+
+    function saveState() {
+      try {
+        const state = {
+          fields: collectFormFields(),
+          intensityMode,
+          crystalMeta: {
+            presetId: crystalMeta.presetId,
+            structureModel: crystalMeta.structureModel,
+            chemicalFormula: crystalMeta.chemicalFormula,
+            atoms: crystalMeta.atoms,
+            symmetryOperations: crystalMeta.symmetryOperations,
+            spaceGroupSetting: crystalMeta.spaceGroupSetting,
+            atomSource: crystalMeta.atomSource
+          }
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      } catch (error) {
+        /* storage unavailable or quota exceeded; persistence is best-effort */
+      }
+    }
+
+    let saveTimer = null;
+    function scheduleSave() {
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(saveState, 300);
+    }
+
+    function setControlValue(id, value) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (el.type === "checkbox") el.checked = Boolean(value);
+      else el.value = value;
+    }
+
+    function restoreSavedState() {
+      let state;
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return false;
+        state = JSON.parse(raw);
+      } catch (error) {
+        return false;
+      }
+      if (!state || typeof state !== "object") return false;
+
+      if (state.crystalMeta && typeof state.crystalMeta === "object") {
+        const meta = state.crystalMeta;
+        crystalMeta.presetId = meta.presetId || "";
+        crystalMeta.structureModel = meta.structureModel || "";
+        crystalMeta.chemicalFormula = meta.chemicalFormula || "";
+        crystalMeta.atoms = Array.isArray(meta.atoms) ? meta.atoms : [];
+        crystalMeta.symmetryOperations = Array.isArray(meta.symmetryOperations) ? meta.symmetryOperations : [];
+        crystalMeta.spaceGroupSetting = meta.spaceGroupSetting || "";
+        crystalMeta.atomSource = meta.atomSource || "";
+      }
+
+      // Defer the dynamically populated selects until their options exist.
+      const deferred = { "magnetic-site": undefined, "spacegroup-setting": undefined };
+      if (state.fields && typeof state.fields === "object") {
+        Object.entries(state.fields).forEach(([id, value]) => {
+          if (id in deferred) { deferred[id] = value; return; }
+          setControlValue(id, value);
+        });
+      }
+
+      if (state.intensityMode === "powder" || state.intensityMode === "single") {
+        intensityMode = state.intensityMode;
+        document.querySelectorAll("[data-intensity-mode]").forEach((button) => {
+          button.classList.toggle("active", button.dataset.intensityMode === intensityMode);
+        });
+      }
+
+      updateSourceControls(false);
+      updateMagneticSiteOptions();
+      if (deferred["magnetic-site"] !== undefined && magneticSiteEl &&
+          [...magneticSiteEl.options].some((option) => option.value === deferred["magnetic-site"])) {
+        magneticSiteEl.value = deferred["magnetic-site"];
+      }
+      updateSpaceGroupSettingOptions();
+      if (deferred["spacegroup-setting"] !== undefined && spaceGroupSettingEl &&
+          [...spaceGroupSettingEl.options].some((option) => option.value === deferred["spacegroup-setting"])) {
+        spaceGroupSettingEl.value = deferred["spacegroup-setting"];
+        crystalMeta.spaceGroupSetting = spaceGroupSettingEl.value;
+      }
+      updateScatteringModelStatus();
+      return true;
+    }
+
+    function bindStatePersistence() {
+      form.addEventListener("input", scheduleSave);
+      form.addEventListener("change", scheduleSave);
+    }
+
+    updateSourceControls(true);
+    const loadedFromHash = importViewerStateFromHash();
+    const restoredFromStorage = !loadedFromHash && restoreSavedState();
+    if (!loadedFromHash && !restoredFromStorage) {
+      updateSpaceGroupSettingOptions();
+    }
     renderPeaks(calculatePeaks());
+    bindStatePersistence();
+    initResizablePanels();
+    initScatteringNavAutoHide();
+    initScatteringSnap();
   </script>
 </body>
 </html>

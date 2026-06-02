@@ -403,7 +403,7 @@
     }
 
     if (context.centering === "R") {
-      lines.push(`Rhombohedral setting: ${context.rhombohedralSetting} (override with :H or :R in the symbol).`);
+      lines.push(`R-centering setting: ${context.rhombohedralSetting}.`);
     }
 
     if (crystal && hasDiamondBasisExtinctions(crystal)) {

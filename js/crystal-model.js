@@ -765,6 +765,30 @@
     return { x: point[0] || 0, y: point[1] || 0, z: point[2] || 0 };
   }
 
+  function exportAtomRadius(item, radiusScale) {
+    return Math.max(0.015, item.style.radius * radiusScale * 0.2);
+  }
+
+  function trimmedBondEndpoints(a, b, radiusScale) {
+    const start = pointArray(a.pos);
+    const end = pointArray(b.pos);
+    const delta = subVec(end, start);
+    const len = lengthVec(delta);
+    if (len < 1e-8) return null;
+    const dir = mulVec(delta, 1 / len);
+    let trimA = Math.min(exportAtomRadius(a, radiusScale) * 0.85, len * 0.45);
+    let trimB = Math.min(exportAtomRadius(b, radiusScale) * 0.85, len * 0.45);
+    if (trimA + trimB > len * 0.9) {
+      const scale = len * 0.9 / (trimA + trimB);
+      trimA *= scale;
+      trimB *= scale;
+    }
+    return {
+      a: objectPoint(addVec(start, mulVec(dir, trimA))),
+      b: objectPoint(addVec(end, mulVec(dir, -trimB)))
+    };
+  }
+
   function recipeToScene(recipe) {
     const controls = recipe.controls || {};
     const vectors = latticeVectorsFromControls(controls);
@@ -803,21 +827,21 @@
         element: item.atom.element,
         pos: objectPoint(item.pos),
         color: item.style.color,
-        radius: Math.max(0.015, item.style.radius * radiusScale * 0.2)
+        radius: exportAtomRadius(item, radiusScale)
       })),
       bonds: [],
       edges: []
     };
     bonds.forEach((bond) => {
-      const start = objectPoint(bond.a.pos);
-      const end = objectPoint(bond.b.pos);
+      const trimmed = trimmedBondEndpoints(bond.a, bond.b, radiusScale);
+      if (!trimmed) return;
       const radius = Math.max(0.005, Math.max(0.01, Number(bond.rule.thickness) || 0.15) * 0.5);
       if (bond.rule.style === "split") {
-        const mid = objectPoint(mulVec(addVec(bond.a.pos, bond.b.pos), 0.5));
-        scene.bonds.push({ a: start, b: mid, colorA: bond.a.style.color, colorB: bond.a.style.color, radius });
-        scene.bonds.push({ a: mid, b: end, colorA: bond.b.style.color, colorB: bond.b.style.color, radius });
+        const mid = objectPoint(mulVec(addVec(pointArray(trimmed.a), pointArray(trimmed.b)), 0.5));
+        scene.bonds.push({ a: trimmed.a, b: mid, colorA: bond.a.style.color, colorB: bond.a.style.color, radius });
+        scene.bonds.push({ a: mid, b: trimmed.b, colorA: bond.b.style.color, colorB: bond.b.style.color, radius });
       } else {
-        scene.bonds.push({ a: start, b: end, color: bond.rule.color || "#6b7280", radius });
+        scene.bonds.push({ a: trimmed.a, b: trimmed.b, color: bond.rule.color || "#6b7280", radius });
       }
     });
     outlineCells.forEach((cell) => {

@@ -194,3 +194,132 @@ function applyCrystalPresetToFields(preset, fieldMap) {
     fieldMap.spaceGroup.value = preset.spaceGroup;
   }
 }
+
+function wrapCrystalPresetFraction(value) {
+  const wrapped = Number(value) - Math.floor(Number(value));
+  return Math.abs(wrapped - 1) < 1e-9 || Math.abs(wrapped) < 1e-9 ? 0 : wrapped;
+}
+
+function crystalPresetDirectPositions(points) {
+  return points.map(([fractX, fractY, fractZ]) => ({
+    fractX: wrapCrystalPresetFraction(fractX),
+    fractY: wrapCrystalPresetFraction(fractY),
+    fractZ: wrapCrystalPresetFraction(fractZ)
+  }));
+}
+
+function crystalPresetTranslatedPositions(basis, translations) {
+  return basis.flatMap((base) =>
+    translations.map((shift) => ({
+      fractX: wrapCrystalPresetFraction(base[0] + shift[0]),
+      fractY: wrapCrystalPresetFraction(base[1] + shift[1]),
+      fractZ: wrapCrystalPresetFraction(base[2] + shift[2])
+    }))
+  );
+}
+
+const CRYSTAL_PRESET_FACE_CENTER_TRANSLATIONS = [
+  [0, 0, 0],
+  [0, 0.5, 0.5],
+  [0.5, 0, 0.5],
+  [0.5, 0.5, 0]
+];
+
+const CRYSTAL_PRESET_RHOMBOHEDRAL_HEX_TRANSLATIONS = [
+  [0, 0, 0],
+  [2 / 3, 1 / 3, 1 / 3],
+  [1 / 3, 2 / 3, 2 / 3]
+];
+
+function crystalPresetWyckoffAtom(label, element, fract, wyckoff, positions) {
+  return {
+    label,
+    element,
+    fractX: fract[0],
+    fractY: fract[1],
+    fractZ: fract[2],
+    occupancy: 1,
+    wyckoff,
+    wyckoffPositions: positions
+  };
+}
+
+function atomsForCrystalPreset(preset) {
+  if (!preset) return null;
+  if (preset.structureModel === "diamond") {
+    const element = preset.id && preset.id.startsWith("ge-") ? "Ge" : "Si";
+    return [
+      crystalPresetWyckoffAtom(
+        `${element}1`,
+        element,
+        [0, 0, 0],
+        "8a",
+        crystalPresetTranslatedPositions([[0, 0, 0], [0.25, 0.25, 0.25]], CRYSTAL_PRESET_FACE_CENTER_TRANSLATIONS)
+      )
+    ];
+  }
+  const elementMatch = String(preset.name || "").match(/[A-Z][a-z]?/);
+  if (elementMatch && ["al-", "cu-"].some((prefix) => preset.id && preset.id.startsWith(prefix))) {
+    const element = elementMatch[0].charAt(0).toUpperCase() + elementMatch[0].slice(1).toLowerCase();
+    return [
+      crystalPresetWyckoffAtom(
+        `${element}1`,
+        element,
+        [0, 0, 0],
+        "4a",
+        crystalPresetTranslatedPositions([[0, 0, 0]], CRYSTAL_PRESET_FACE_CENTER_TRANSLATIONS)
+      )
+    ];
+  }
+  const heusler = {
+    co2mnga: ["Co", "Mn", "Ga"],
+    co2mnsi: ["Co", "Mn", "Si"],
+    ni2mnga: ["Ni", "Mn", "Ga"],
+    cu2mnal: ["Cu", "Mn", "Al"]
+  }[preset.id];
+  if (heusler) {
+    const [x, y, z] = heusler;
+    return [
+      crystalPresetWyckoffAtom(`${x}1`, x, [0.25, 0.25, 0.25], "8c", crystalPresetTranslatedPositions([[0.25, 0.25, 0.25], [0.75, 0.75, 0.75]], CRYSTAL_PRESET_FACE_CENTER_TRANSLATIONS)),
+      crystalPresetWyckoffAtom(`${y}1`, y, [0, 0, 0], "4a", crystalPresetTranslatedPositions([[0, 0, 0]], CRYSTAL_PRESET_FACE_CENTER_TRANSLATIONS)),
+      crystalPresetWyckoffAtom(`${z}1`, z, [0.5, 0.5, 0.5], "4b", crystalPresetTranslatedPositions([[0.5, 0.5, 0.5]], CRYSTAL_PRESET_FACE_CENTER_TRANSLATIONS))
+    ];
+  }
+  if (preset.id === "graphite") {
+    return [
+      crystalPresetWyckoffAtom(
+        "C1",
+        "C",
+        [1 / 3, 2 / 3, 0.25],
+        "4f",
+        crystalPresetDirectPositions([
+          [1 / 3, 2 / 3, 0.25],
+          [2 / 3, 1 / 3, 0.75],
+          [2 / 3, 1 / 3, 0.25],
+          [1 / 3, 2 / 3, 0.75]
+        ])
+      )
+    ];
+  }
+  if (preset.id === "sapphire") {
+    const alZ = 0.3522;
+    const oX = 0.306;
+    return [
+      crystalPresetWyckoffAtom(
+        "Al1",
+        "Al",
+        [0, 0, alZ],
+        "12c",
+        crystalPresetTranslatedPositions([[0, 0, alZ], [0, 0, -alZ], [0, 0, 0.5 + alZ], [0, 0, 0.5 - alZ]], CRYSTAL_PRESET_RHOMBOHEDRAL_HEX_TRANSLATIONS)
+      ),
+      crystalPresetWyckoffAtom(
+        "O1",
+        "O",
+        [oX, 0, 0.25],
+        "18e",
+        crystalPresetTranslatedPositions([[oX, 0, 0.25], [0, oX, 0.25], [-oX, -oX, 0.25], [-oX, 0, 0.75], [0, -oX, 0.75], [oX, oX, 0.75]], CRYSTAL_PRESET_RHOMBOHEDRAL_HEX_TRANSLATIONS)
+      )
+    ];
+  }
+  return null;
+}
