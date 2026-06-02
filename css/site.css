@@ -399,6 +399,17 @@ section {
   transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
+.card-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 5 / 3;
+  object-fit: cover;
+  border-radius: 0.6rem;
+  border: 1px solid var(--border);
+  background: #eef1f4;
+  margin-bottom: 1rem;
+}
+
 .card-link:hover,
 .card-link:focus-visible {
   border-color: var(--accent);
@@ -921,6 +932,10 @@ body.scattering-page.scattering-nav-hidden .scattering-panel-splitter {
   background: var(--panel-strong);
 }
 
+.scattering-result-block > .tool-collapsible-summary {
+  min-height: 2.75rem;
+}
+
 .scattering-result-block .tool-collapsible-body {
   padding: 0.85rem;
 }
@@ -974,6 +989,7 @@ body.scattering-page.scattering-nav-hidden .scattering-panel-splitter {
 .scattering-rules-panel,
 .scattering-rotation-note {
   margin: 0;
+  min-height: 2.75rem;
 }
 
 .scattering-rules-panel {

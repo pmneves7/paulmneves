@@ -88,22 +88,23 @@
               <table class="tool-table scattering-table">
                 <thead>
                   <tr>
-                    <th>Magnetic HKL</th>
-                    <th>Parent τ</th>
+                    <th>HKL</th>
                     <th>d (Å)</th>
                     <th>2θ (deg)</th>
                     <th>|Q| (Å⁻¹)</th>
-                    <th>|Fmag| (fm)</th>
-                    <th>Imag</th>
-                    <th>Intensity</th>
-                    <th>Rel. nuclear max</th>
+                    <th>F_real <span class="col-unit">(fm)</span></th>
+                    <th>F_imag <span class="col-unit">(fm)</span></th>
+                    <th>|F| <span class="col-unit">(fm)</span></th>
+                    <th>Intensity <span class="col-unit">(fm²)</span></th>
                     <th>Rate est. (s⁻¹)</th>
+                    <th>Parent τ</th>
+                    <th>Rel. nuclear max</th>
                     <th>Overlap</th>
                   </tr>
                 </thead>
                 <tbody id="magnetic-peak-table">
                   <tr>
-                    <td colspan="11">No magnetic estimate calculated yet.</td>
+                    <td colspan="12">No magnetic estimate calculated yet.</td>
                   </tr>
                 </tbody>
               </table>
@@ -256,7 +257,7 @@
             </p>
           </section>
 
-          <section class="tool-section">
+          <section class="tool-section scattering-magnetic-controls">
             <h2>Magnetic order estimator</h2>
             <p class="tool-note">
               Simple collinear estimate for neutron satellites at τ ± k. Moments are taken equal and in phase
@@ -381,6 +382,9 @@
     const magneticFormFactorEl = document.getElementById("magnetic-form-factor");
     const magneticPeakTable = document.getElementById("magnetic-peak-table");
     const magneticSummary = document.getElementById("magnetic-summary");
+    const magneticBlock = document.querySelector(".scattering-magnetic-block");
+    const magneticControls = document.querySelector(".scattering-magnetic-controls");
+    const resultSplitter = document.getElementById("scattering-result-splitter");
 
     const crystalMeta = {
       presetId: "",
@@ -547,6 +551,9 @@
     function updateSourceControls(forcePreset) {
       const isXray = sourceTypeEl && sourceTypeEl.value === "xray";
       if (xrayLineField) xrayLineField.hidden = !isXray;
+      if (magneticBlock) magneticBlock.hidden = isXray;
+      if (magneticControls) magneticControls.hidden = isXray;
+      if (resultSplitter) resultSplitter.hidden = isXray;
       updateColumnUnits();
       if (!isXray || !window.ScatteringFactors || !xrayLineEl) return;
       const line = window.ScatteringFactors.XRAY_K_ALPHA_LINES[xrayLineEl.value];
@@ -625,8 +632,17 @@
         : ["Extinction module failed to load."];
       const items = lines.slice(1);
       extinctionRulesEl.innerHTML = items.length
-        ? items.map((line) => `<li>${line}</li>`).join("")
+        ? items.map((line) => `<li>${line.replace(/^\d+\.\s+/, "")}</li>`).join("")
         : "<li>No extinction rules inferred.</li>";
+    }
+
+    function refreshExtinctionRulesFromInputs() {
+      try {
+        const spaceGroup = document.getElementById("spacegroup").value || "P";
+        renderExtinctionRules(getExtinctionContext(spaceGroup), readCrystalForExtinctions(spaceGroup));
+      } catch (error) {
+        if (extinctionRulesEl) extinctionRulesEl.innerHTML = "<li>Extinction rules could not be evaluated for the current inputs.</li>";
+      }
     }
 
     function isAllowedBySpaceGroup(h, k, l, context, crystal) {
@@ -1139,7 +1155,9 @@
       assignPeakMultiplicities(peaks);
       updatePeakIntensities(peaks, scatteringOptions);
       const sortedPeaks = peaks.sort((a, b) => a.twoTheta - b.twoTheta || a.h - b.h || a.k - b.k || a.l - b.l);
-      renderMagneticPeaks(calculateMagneticPeaks(sortedPeaks, inputs, basis));
+      if (scatteringOptions.sourceType === "neutron") {
+        renderMagneticPeaks(calculateMagneticPeaks(sortedPeaks, inputs, basis));
+      }
       return sortedPeaks;
     }
 
@@ -1265,23 +1283,23 @@
       if (!magneticPeakTable || !magneticSummary) return;
       const magnetic = collectMagneticInputs();
       if (!magnetic.enabled) {
-        magneticPeakTable.innerHTML = "<tr><td colspan=\"11\">Enable the magnetic estimator to calculate neutron magnetic satellites.</td></tr>";
+        magneticPeakTable.innerHTML = "<tr><td colspan=\"12\">Enable the magnetic estimator to calculate neutron magnetic satellites.</td></tr>";
         magneticSummary.textContent = "Enable the magnetic estimator and load atom positions to estimate neutron magnetic satellites.";
         return;
       }
       if (!expandedAtomSites().length) {
-        magneticPeakTable.innerHTML = "<tr><td colspan=\"11\">Load atom positions before estimating magnetic peaks.</td></tr>";
+        magneticPeakTable.innerHTML = "<tr><td colspan=\"12\">Load atom positions before estimating magnetic peaks.</td></tr>";
         magneticSummary.textContent = "Magnetic estimates require atomic positions from a preset, CIF, or crystal-viewer config.";
         return;
       }
       const selectedAtoms = selectMagneticAtoms(expandedAtomSites(), magnetic.selector);
       if (!selectedAtoms.length) {
-        magneticPeakTable.innerHTML = "<tr><td colspan=\"11\">Choose an ordered site or element.</td></tr>";
+        magneticPeakTable.innerHTML = "<tr><td colspan=\"12\">Choose an ordered site or element.</td></tr>";
         magneticSummary.textContent = "No atoms match the selected magnetic site.";
         return;
       }
       if (!peaks.length) {
-        magneticPeakTable.innerHTML = "<tr><td colspan=\"11\">No magnetic satellites are accessible in the current HKL and wavelength range.</td></tr>";
+        magneticPeakTable.innerHTML = "<tr><td colspan=\"12\">No magnetic satellites are accessible in the current HKL and wavelength range.</td></tr>";
         magneticSummary.textContent = "No magnetic peaks matched the current propagation vector, max index, and wavelength.";
         return;
       }
@@ -1289,15 +1307,16 @@
       magneticPeakTable.innerHTML = peaks.map((peak) => `
         <tr>
           <td>${formatHKLTriplet(peak.hkl)}</td>
-          <td>${formatHKLTriplet(peak.parent)} ${peak.satellite}</td>
           <td>${format(peak.dSpacing)}</td>
           <td>${format(peak.twoTheta)}</td>
           <td>${format(peak.qLength)}</td>
-          <td>${format(peak.fMagnitude, 5)}</td>
+          <td>${format(peak.fReal, 5)}</td>
           <td>${format(peak.fImag, 5)}</td>
+          <td>${format(peak.fMagnitude, 5)}</td>
           <td>${format(peak.intensity, 5)}</td>
-          <td>${Number.isFinite(peak.relativeToNuclearMax) ? format(peak.relativeToNuclearMax, 5) : "—"}</td>
           <td>${Number.isFinite(peak.countRate) ? format(peak.countRate, 5) : "—"}</td>
+          <td>${formatHKLTriplet(peak.parent)} ${peak.satellite}</td>
+          <td>${Number.isFinite(peak.relativeToNuclearMax) ? format(peak.relativeToNuclearMax, 5) : "—"}</td>
           <td>${peak.overlap ? "Nuclear position" : "New satellite"}</td>
         </tr>
       `).join("");
@@ -1332,8 +1351,11 @@
 
     function recalculateSafely() {
       try {
+        refreshExtinctionRulesFromInputs();
         renderPeaks(calculatePeaks());
+        refreshExtinctionRulesFromInputs();
       } catch (error) {
+        refreshExtinctionRulesFromInputs();
         peakTable.innerHTML = `<tr><td colspan="13">${error.message}</td></tr>`;
         resultSummary.textContent = "Please fix the highlighted inputs and try again.";
       }
@@ -1638,19 +1660,31 @@
       const resultSplitter = document.getElementById("scattering-result-splitter");
       const nuclearBlock = document.querySelector(".scattering-nuclear-block");
       const magneticBlock = document.querySelector(".scattering-magnetic-block");
+      const rulesBlock = document.querySelector(".scattering-rules-panel");
+      const rotationBlock = document.querySelector(".scattering-rotation-note");
       const nuclearWrap = nuclearBlock && nuclearBlock.querySelector(".scattering-table-wrap");
       const magneticWrap = magneticBlock && magneticBlock.querySelector(".scattering-table-wrap");
       if (resultPane && resultSplitter && nuclearWrap && magneticWrap) {
         const MIN_H = 120;
+        const MIN_LOWER_PANELS_H = 112;
         // Split a fixed budget between the two tables so shrinking one grows the other.
         function applySplit(nuclearPx, total) {
-          const nuclear = Math.max(MIN_H, Math.min(total - MIN_H, nuclearPx));
-          const magnetic = total - nuclear;
+          const budget = Math.max(MIN_H * 2, Math.min(total, tableBudget()));
+          const nuclear = Math.max(MIN_H, Math.min(budget - MIN_H, nuclearPx));
+          const magnetic = budget - nuclear;
           resultPane.style.setProperty("--scattering-nuclear-table-height", `${Math.round(nuclear)}px`);
           resultPane.style.setProperty("--scattering-magnetic-table-height", `${Math.round(magnetic)}px`);
         }
+        function tableBudget() {
+          const paneHeight = resultPane.getBoundingClientRect().height || window.innerHeight;
+          const rulesHeight = rulesBlock ? rulesBlock.getBoundingClientRect().height : 0;
+          const rotationHeight = rotationBlock ? rotationBlock.getBoundingClientRect().height : 0;
+          const splitterHeight = resultSplitter.getBoundingClientRect().height || 0;
+          const reserved = Math.max(MIN_LOWER_PANELS_H, rulesHeight + rotationHeight + splitterHeight + 36);
+          return Math.max(MIN_H * 2, paneHeight - reserved);
+        }
         function currentTotal() {
-          return nuclearWrap.getBoundingClientRect().height + magneticWrap.getBoundingClientRect().height;
+          return Math.min(tableBudget(), nuclearWrap.getBoundingClientRect().height + magneticWrap.getBoundingClientRect().height);
         }
         let resultDrag = null;
         resultSplitter.addEventListener("pointerdown", (event) => {
@@ -1798,6 +1832,14 @@
       saveTimer = setTimeout(saveState, 300);
     }
 
+    function flushSave() {
+      if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+      }
+      saveState();
+    }
+
     function setControlValue(id, value) {
       const el = document.getElementById(id);
       if (!el) return;
@@ -1862,6 +1904,13 @@
     function bindStatePersistence() {
       form.addEventListener("input", scheduleSave);
       form.addEventListener("change", scheduleSave);
+      // Flush any pending debounced save before the page is unloaded or hidden,
+      // so a quick refresh after an edit still retains the latest settings.
+      window.addEventListener("pagehide", flushSave);
+      window.addEventListener("beforeunload", flushSave);
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") flushSave();
+      });
     }
 
     updateSourceControls(true);
