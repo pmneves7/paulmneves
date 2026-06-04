@@ -233,6 +233,36 @@
                 <dd id="scattering-cell-density">—</dd>
               </div>
             </dl>
+
+            <div class="scattering-atom-editor">
+              <div class="crystal-table-header">
+                <h3 class="laue-subheading">Atomic positions</h3>
+                <button type="button" class="button secondary" id="scattering-add-atom">Add atom</button>
+              </div>
+              <label class="crystal-inline-check crystal-generated-toggle">
+                <input type="checkbox" id="scattering-show-generated-atoms" /> Show generated positions
+              </label>
+              <details class="crystal-nested-collapsible" open>
+                <summary class="crystal-nested-summary">Atom list</summary>
+                <div class="tool-table-wrap crystal-table-wrap">
+                  <table class="tool-table crystal-edit-table" aria-label="Editable scattering atom positions">
+                    <thead>
+                      <tr>
+                        <th>Label</th>
+                        <th>Element</th>
+                        <th>x</th>
+                        <th>y</th>
+                        <th>z</th>
+                        <th>Occ.</th>
+                        <th>Wyckoff</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody id="scattering-atom-table"></tbody>
+                  </table>
+                </div>
+              </details>
+            </div>
           </section>
 
           <section class="tool-section">
@@ -303,7 +333,7 @@
               Enter two non-collinear HKLs in the scattering plane to calculate a signed out-of-plane angle.
               The in-plane angle is measured from the first HKL toward the second. HKL 1 defines the in-plane reference axis used for φ and ω (not the incident beam direction).
             </p>
-            <div class="tool-grid">
+            <div class="tool-grid scattering-plane-grid">
               <div class="tool-field">
                 <label for="plane-hkl-1">Plane HKL 1</label>
                 <input
@@ -385,6 +415,9 @@
     const magneticBlock = document.querySelector(".scattering-magnetic-block");
     const magneticControls = document.querySelector(".scattering-magnetic-controls");
     const resultSplitter = document.getElementById("scattering-result-splitter");
+    const atomTableBody = document.getElementById("scattering-atom-table");
+    const addAtomButton = document.getElementById("scattering-add-atom");
+    const showGeneratedAtomsEl = document.getElementById("scattering-show-generated-atoms");
 
     const crystalMeta = {
       presetId: "",
@@ -421,16 +454,46 @@
       };
     }
 
+    function sanitizeAtomElement(value) {
+      if (window.ScatteringFactors && typeof window.ScatteringFactors.sanitizeElement === "function") {
+        return window.ScatteringFactors.sanitizeElement(value);
+      }
+      const text = String(value || "X").trim();
+      return text ? text.charAt(0).toUpperCase() + text.slice(1).toLowerCase() : "X";
+    }
+
+    function numericAtomValue(value, fallback) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
+    function normalizeEditableAtom(atom, index) {
+      const source = atom && typeof atom === "object" ? atom : {};
+      return {
+        ...source,
+        label: String(source.label || `Atom${index + 1}`),
+        element: sanitizeAtomElement(source.element || source.typeSymbol || source.label || "X"),
+        fractX: numericAtomValue(source.fractX, 0),
+        fractY: numericAtomValue(source.fractY, 0),
+        fractZ: numericAtomValue(source.fractZ, 0),
+        occupancy: source.occupancy == null ? 1 : numericAtomValue(source.occupancy, 1),
+        wyckoff: source.wyckoff || source.wyckoffSymbol || ""
+      };
+    }
+
     function setCrystalMeta(meta) {
       if (Object.prototype.hasOwnProperty.call(meta, "presetId")) crystalMeta.presetId = meta.presetId || "";
       if (Object.prototype.hasOwnProperty.call(meta, "structureModel")) crystalMeta.structureModel = meta.structureModel || "";
       if (Object.prototype.hasOwnProperty.call(meta, "chemicalFormula")) crystalMeta.chemicalFormula = meta.chemicalFormula || "";
-      if (Object.prototype.hasOwnProperty.call(meta, "atoms")) crystalMeta.atoms = Array.isArray(meta.atoms) ? meta.atoms : [];
+      if (Object.prototype.hasOwnProperty.call(meta, "atoms")) {
+        crystalMeta.atoms = Array.isArray(meta.atoms) ? meta.atoms.map(normalizeEditableAtom) : [];
+      }
       if (Object.prototype.hasOwnProperty.call(meta, "symmetryOperations")) {
         crystalMeta.symmetryOperations = Array.isArray(meta.symmetryOperations) ? meta.symmetryOperations : [];
       }
       if (Object.prototype.hasOwnProperty.call(meta, "spaceGroupSetting")) crystalMeta.spaceGroupSetting = meta.spaceGroupSetting || "";
       if (Object.prototype.hasOwnProperty.call(meta, "atomSource")) crystalMeta.atomSource = meta.atomSource || "";
+      renderAtomicBasisEditor();
       updateMagneticSiteOptions();
       updateScatteringModelStatus();
     }
@@ -459,6 +522,7 @@
         spaceGroupSettingField.hidden = true;
         spaceGroupSettingEl.value = "";
         crystalMeta.spaceGroupSetting = "";
+        renderAtomicBasisEditor();
         updateMagneticSiteOptions();
         updateScatteringModelStatus();
         return;
@@ -476,6 +540,7 @@
         ? previous
         : preferred.hallSymbol;
       crystalMeta.spaceGroupSetting = spaceGroupSettingEl.value || "";
+      renderAtomicBasisEditor();
       updateMagneticSiteOptions();
       updateScatteringModelStatus();
     }
@@ -487,6 +552,89 @@
         spaceGroup: document.getElementById("spacegroup").value || "P 1",
         spaceGroupSetting: currentSpaceGroupSetting(),
         symmetryOperations: crystalMeta.symmetryOperations
+      });
+    }
+
+    function atomRowsForEditor() {
+      return showGeneratedAtomsEl && showGeneratedAtomsEl.checked ? expandedAtomSites() : crystalMeta.atoms;
+    }
+
+    function afterAtomicBasisEdit() {
+      if (crystalPresetSelect) crystalPresetSelect.value = "";
+      crystalMeta.presetId = "";
+      crystalMeta.structureModel = "";
+      crystalMeta.atomSource = crystalMeta.atoms.length ? "manual editor" : "";
+      renderAtomicBasisEditor();
+      updateMagneticSiteOptions();
+      updateScatteringModelStatus();
+      recalculateSafely();
+      scheduleSave();
+    }
+
+    function updateAtomFromEditor(index, field, value) {
+      const atom = crystalMeta.atoms[index];
+      if (!atom) return;
+      if (["fractX", "fractY", "fractZ", "occupancy"].includes(field)) {
+        atom[field] = numericAtomValue(value, atom[field]);
+      } else if (field === "element") {
+        atom[field] = sanitizeAtomElement(value);
+      } else if (field === "wyckoff") {
+        atom[field] = String(value || "").trim();
+      } else {
+        atom[field] = String(value || "").trim() || `Atom${index + 1}`;
+      }
+      afterAtomicBasisEdit();
+    }
+
+    function renderAtomicBasisEditor() {
+      if (!atomTableBody) return;
+      const showGenerated = Boolean(showGeneratedAtomsEl && showGeneratedAtomsEl.checked);
+      const rows = atomRowsForEditor();
+      atomTableBody.innerHTML = "";
+      if (!rows.length) {
+        atomTableBody.innerHTML = '<tr><td colspan="8">No atom positions loaded yet.</td></tr>';
+        return;
+      }
+
+      rows.forEach((atom, index) => {
+        const row = document.createElement("tr");
+        [
+          ["label", atom.label, "text"],
+          ["element", atom.element, "text"],
+          ["fractX", atom.fractX, "number"],
+          ["fractY", atom.fractY, "number"],
+          ["fractZ", atom.fractZ, "number"],
+          ["occupancy", atom.occupancy, "number"],
+          ["wyckoff", atom.wyckoff || "", "text"]
+        ].forEach(([field, value, type]) => {
+          const cell = document.createElement("td");
+          const input = document.createElement("input");
+          input.type = type;
+          input.value = value == null ? "" : String(value);
+          if (type === "number") input.step = "any";
+          if (showGenerated) {
+            input.disabled = true;
+          } else {
+            input.addEventListener("change", () => updateAtomFromEditor(index, field, input.value));
+          }
+          cell.appendChild(input);
+          row.appendChild(cell);
+        });
+
+        const action = document.createElement("td");
+        if (!showGenerated) {
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.className = "laue-mode-btn";
+          remove.textContent = "Remove";
+          remove.addEventListener("click", () => {
+            crystalMeta.atoms.splice(index, 1);
+            afterAtomicBasisEdit();
+          });
+          action.appendChild(remove);
+        }
+        row.appendChild(action);
+        atomTableBody.appendChild(row);
       });
     }
 
@@ -1603,6 +1751,29 @@
       });
     }
 
+    if (addAtomButton) {
+      addAtomButton.addEventListener("click", () => {
+        crystalMeta.atoms.push({
+          label: `Atom${crystalMeta.atoms.length + 1}`,
+          element: "X",
+          fractX: 0,
+          fractY: 0,
+          fractZ: 0,
+          occupancy: 1,
+          wyckoff: ""
+        });
+        afterAtomicBasisEdit();
+      });
+    }
+
+    if (showGeneratedAtomsEl) {
+      showGeneratedAtomsEl.addEventListener("change", () => {
+        renderAtomicBasisEditor();
+        updateMagneticSiteOptions();
+        updateScatteringModelStatus();
+      });
+    }
+
     if (spaceGroupSettingEl) {
       spaceGroupSettingEl.addEventListener("change", () => {
         crystalMeta.spaceGroupSetting = spaceGroupSettingEl.value || "";
@@ -1863,7 +2034,7 @@
         crystalMeta.presetId = meta.presetId || "";
         crystalMeta.structureModel = meta.structureModel || "";
         crystalMeta.chemicalFormula = meta.chemicalFormula || "";
-        crystalMeta.atoms = Array.isArray(meta.atoms) ? meta.atoms : [];
+        crystalMeta.atoms = Array.isArray(meta.atoms) ? meta.atoms.map(normalizeEditableAtom) : [];
         crystalMeta.symmetryOperations = Array.isArray(meta.symmetryOperations) ? meta.symmetryOperations : [];
         crystalMeta.spaceGroupSetting = meta.spaceGroupSetting || "";
         crystalMeta.atomSource = meta.atomSource || "";
@@ -1898,6 +2069,7 @@
         crystalMeta.spaceGroupSetting = spaceGroupSettingEl.value;
       }
       updateScatteringModelStatus();
+      renderAtomicBasisEditor();
       return true;
     }
 
@@ -1919,6 +2091,7 @@
     if (!loadedFromHash && !restoredFromStorage) {
       updateSpaceGroupSettingOptions();
     }
+    renderAtomicBasisEditor();
     renderPeaks(calculatePeaks());
     bindStatePersistence();
     initResizablePanels();

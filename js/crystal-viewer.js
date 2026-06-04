@@ -115,10 +115,17 @@
     scene: null,
     root: null,
     camera: null,
+    ambientLight: null,
+    directionalLight: null,
+    lightTarget: null,
+    compassGroup: null,
+    compassVectors: null,
+    compassFit: null,
     activeProjection: "",
     canvas: null,
     xrSession: null
   };
+  let viewRenderFrame = 0;
 
   function $(id) {
     return document.getElementById(id);
@@ -818,14 +825,16 @@
     });
 
     list.querySelectorAll("input[data-element]").forEach((input) => {
-      input.addEventListener("input", () => {
+      const apply = () => {
         const style = state.elementStyles[input.dataset.element];
         if (!style) return;
         if (input.dataset.field === "visible") style.visible = input.checked;
         else if (input.dataset.field === "radius") style.radius = Math.max(0.05, Number(input.value) || style.radius);
         else style.color = input.value;
         render();
-      });
+      };
+      input.addEventListener(input.type === "color" ? "change" : "input", apply);
+      if (input.type !== "color") input.addEventListener("change", apply);
     });
     list.querySelectorAll("input[data-override]").forEach((input) => {
       input.addEventListener("change", () => {
@@ -841,14 +850,16 @@
       });
     });
     list.querySelectorAll("input[data-atom]").forEach((input) => {
-      input.addEventListener("input", () => {
+      const apply = () => {
         const override = state.atomOverrides[input.dataset.atom];
         if (!override) return;
         if (input.dataset.field === "visible") override.visible = input.checked;
         else if (input.dataset.field === "radius") override.radius = Math.max(0.05, Number(input.value) || override.radius);
         else override.color = input.value;
         render();
-      });
+      };
+      input.addEventListener(input.type === "color" ? "change" : "input", apply);
+      if (input.type !== "color") input.addEventListener("change", apply);
     });
   }
 
@@ -886,8 +897,46 @@
     if (!rule) return;
     if (field === "cutoff") rule.cutoff = Math.max(0, Number(value) || 0);
     else if (field === "thickness") rule.thickness = Math.max(0.01, Number(value) || rule.thickness);
+    else if (field === "faceOpacity") rule.faceOpacity = Math.max(0, Math.min(1, Number(value) || 0));
+    else if (field === "edgeThickness") rule.edgeThickness = Math.max(0.001, Number(value) || rule.edgeThickness || 0.06);
+    else if (field === "boundaryMode") rule.boundaryMode = value === "inside" ? "inside" : "search";
     else rule[field] = value;
     render();
+  }
+
+  function normalizeBondRule(rule) {
+    return {
+      selectorA: rule && rule.selectorA || "",
+      selectorB: rule && rule.selectorB || "",
+      cutoff: Math.max(0, Number(rule && rule.cutoff) || 0),
+      thickness: Math.max(0.01, Number(rule && rule.thickness) || 0.15),
+      style: rule && rule.style === "single" ? "single" : (rule && rule.style === "polyhedra" ? "polyhedra" : "split"),
+      boundaryMode: rule && rule.boundaryMode === "inside" ? "inside" : "search",
+      color: rule && rule.color || "#6b7280",
+      faceColor: rule && rule.faceColor || rule && rule.color || "#6b7280",
+      faceOpacity: Math.max(0, Math.min(1, Number(rule && rule.faceOpacity) || 0.32)),
+      edgeColor: rule && rule.edgeColor || rule && rule.color || "#374151",
+      edgeThickness: Math.max(0.001, Number(rule && rule.edgeThickness) || 0.06)
+    };
+  }
+
+  function polyFaceColor(rule) {
+    return rule && (rule.faceColor || rule.color) || "#6b7280";
+  }
+
+  function polyFaceOpacity(rule) {
+    return Math.max(0, Math.min(1, Number(rule && rule.faceOpacity) || 0.32));
+  }
+
+  function polyEdgeColor(rule) {
+    return rule && (rule.edgeColor || rule.color) || "#374151";
+  }
+
+  function polyEdgeRadius(rule) {
+    if (rule && rule.edgeThickness != null) {
+      return Math.max(0.001, Number(rule.edgeThickness) || 0.06) * 0.5;
+    }
+    return Math.max(0.002, Math.max(0.01, Number(rule && rule.thickness) || 0.15) * 0.18);
   }
 
   function renderBondRules() {
@@ -919,11 +968,35 @@
           <select data-rule="${index}" data-field="style">
             <option value="split" ${rule.style === "split" ? "selected" : ""}>Split atom colors</option>
             <option value="single" ${rule.style === "single" ? "selected" : ""}>Single color</option>
+            <option value="polyhedra" ${rule.style === "polyhedra" ? "selected" : ""}>Polyhedra</option>
+          </select>
+        </div>
+        <div class="tool-field">
+          <label>Boundary mode</label>
+          <select data-rule="${index}" data-field="boundaryMode">
+            <option value="inside" ${rule.boundaryMode === "inside" ? "selected" : ""}>Stay within boundary</option>
+            <option value="search" ${rule.boundaryMode !== "inside" ? "selected" : ""}>Search outside boundary</option>
           </select>
         </div>
         <div class="tool-field">
           <label>Color</label>
           <input type="color" value="${rule.color}" data-rule="${index}" data-field="color">
+        </div>
+        <div class="tool-field">
+          <label>Poly face color</label>
+          <input type="color" value="${polyFaceColor(rule)}" data-rule="${index}" data-field="faceColor">
+        </div>
+        <div class="tool-field">
+          <label>Face opacity</label>
+          <input type="number" step="0.05" min="0" max="1" value="${polyFaceOpacity(rule)}" data-rule="${index}" data-field="faceOpacity">
+        </div>
+        <div class="tool-field">
+          <label>Poly edge color</label>
+          <input type="color" value="${polyEdgeColor(rule)}" data-rule="${index}" data-field="edgeColor">
+        </div>
+        <div class="tool-field">
+          <label>Edge thickness (Å)</label>
+          <input type="number" step="any" min="0.001" value="${Math.max(0.001, Number(rule.edgeThickness) || 0.06)}" data-rule="${index}" data-field="edgeThickness">
         </div>
         <button type="button" class="laue-mode-btn crystal-rule-remove">Remove</button>
       `;
@@ -933,8 +1006,13 @@
       });
       row.querySelectorAll("input, select").forEach((input) => {
         if (input.dataset.field === "selectorA" || input.dataset.field === "selectorB") return;
-        input.addEventListener("input", () => updateBondRule(index, input.dataset.field, input.value));
-        input.addEventListener("change", () => updateBondRule(index, input.dataset.field, input.value));
+        const apply = () => updateBondRule(index, input.dataset.field, input.value);
+        if (input.tagName === "INPUT" && (input.type === "range" || input.type === "color")) {
+          input.addEventListener("change", apply);
+        } else {
+          input.addEventListener("input", apply);
+          input.addEventListener("change", apply);
+        }
       });
       row.querySelector(".crystal-rule-remove").addEventListener("click", () => {
         state.bondRules.splice(index, 1);
@@ -996,28 +1074,55 @@
       frac.z >= ranges.cMin - eps && frac.z <= ranges.cMax + eps;
   }
 
-  function expandedAtoms(vectors) {
+  function paddedCellRanges(ranges, vectors, padding) {
+    const distancePadding = Math.max(0, Number(padding) || 0);
+    if (!distancePadding) return ranges;
+    const axisPadding = (axis) => distancePadding / Math.max(1e-6, length(axis));
+    const aPad = axisPadding(vectors.a);
+    const bPad = axisPadding(vectors.b);
+    const cPad = axisPadding(vectors.c);
+    return {
+      aMin: ranges.aMin - aPad,
+      aMax: ranges.aMax + aPad,
+      bMin: ranges.bMin - bPad,
+      bMax: ranges.bMax + bPad,
+      cMin: ranges.cMin - cPad,
+      cMax: ranges.cMax + cPad
+    };
+  }
+
+  function maxBoundarySearchCutoff() {
+    return state.bondRules.reduce((max, rule) => (
+      rule.boundaryMode === "inside" ? max : Math.max(max, Number(rule.cutoff) || 0)
+    ), 0);
+  }
+
+  function expandedAtoms(vectors, options = {}) {
     const ranges = cellRanges();
+    const searchRanges = paddedCellRanges(ranges, vectors, options.boundaryPadding);
+    const includeHidden = Boolean(options.includeHidden);
     const expanded = [];
     generatedAtomSites().forEach((atom) => {
-      const iMin = Math.floor(ranges.aMin - atom.fractX);
-      const iMax = Math.ceil(ranges.aMax - atom.fractX);
-      const jMin = Math.floor(ranges.bMin - atom.fractY);
-      const jMax = Math.ceil(ranges.bMax - atom.fractY);
-      const kMin = Math.floor(ranges.cMin - atom.fractZ);
-      const kMax = Math.ceil(ranges.cMax - atom.fractZ);
+      const iMin = Math.floor(searchRanges.aMin - atom.fractX);
+      const iMax = Math.ceil(searchRanges.aMax - atom.fractX);
+      const jMin = Math.floor(searchRanges.bMin - atom.fractY);
+      const jMax = Math.ceil(searchRanges.bMax - atom.fractY);
+      const kMin = Math.floor(searchRanges.cMin - atom.fractZ);
+      const kMax = Math.ceil(searchRanges.cMax - atom.fractZ);
       for (let i = iMin; i <= iMax; i += 1) {
         for (let j = jMin; j <= jMax; j += 1) {
           for (let k = kMin; k <= kMax; k += 1) {
             const frac = { x: atom.fractX + i, y: atom.fractY + j, z: atom.fractZ + k };
-            if (!insideCellBoundaries(frac, ranges)) continue;
+            const inBoundary = insideCellBoundaries(frac, ranges);
+            if (!inBoundary && !insideCellBoundaries(frac, searchRanges)) continue;
             const style = getAtomStyle(atom);
-            if (!style || !style.visible) return;
+            if (!style || (!includeHidden && !style.visible)) return;
             expanded.push({
               atom,
               style,
               shift: { i, j, k },
               frac,
+              inBoundary,
               pos: fractionalToCartesian(atom, vectors, { i, j, k })
             });
           }
@@ -1027,24 +1132,109 @@
     return expanded;
   }
 
-  function computeBonds(atoms) {
+  function computeBonds(atoms, allAtoms = atoms) {
     const bonds = [];
+    const itemKey = (item) => [item.atom.label, item.shift.i, item.shift.j, item.shift.k].join("|");
+    const atomKeys = new Set(atoms.map(itemKey));
+    const uniqueVertices = (items) => {
+      const seen = new Set();
+      return items.filter((item) => {
+        const key = [item.pos.x, item.pos.y, item.pos.z].map((value) => value.toFixed(6)).join("|");
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
     state.bondRules.forEach((rule) => {
+      const candidateAtoms = rule.boundaryMode === "inside" ? atoms : allAtoms;
+      if (rule.style === "polyhedra") {
+        atoms.forEach((center) => {
+          if (!selectorMatches(center, rule.selectorA)) return;
+          const vertices = uniqueVertices(candidateAtoms.filter((candidate) => {
+            if (candidate === center || !selectorMatches(candidate, rule.selectorB)) return false;
+            const separation = distance(center.pos, candidate.pos);
+            return separation > 1e-6 && separation <= rule.cutoff;
+          }));
+          if (vertices.length >= 3) bonds.push({ type: "polyhedron", center, vertices, rule });
+        });
+        return;
+      }
+      const seenPairs = new Set();
+      const visibleCandidates = candidateAtoms.filter((item) => item.style && item.style.visible);
       for (let i = 0; i < atoms.length; i += 1) {
-        for (let j = i + 1; j < atoms.length; j += 1) {
+        for (let j = 0; j < visibleCandidates.length; j += 1) {
           const a = atoms[i];
-          const b = atoms[j];
+          const b = visibleCandidates[j];
+          if (a === b) continue;
+          const aKey = itemKey(a);
+          const bKey = itemKey(b);
+          if (atomKeys.has(bKey) && bKey <= aKey) continue;
+          const pairKey = [aKey, bKey].sort().join("::");
+          if (seenPairs.has(pairKey)) continue;
           const matches =
             (selectorMatches(a, rule.selectorA) && selectorMatches(b, rule.selectorB)) ||
             (selectorMatches(a, rule.selectorB) && selectorMatches(b, rule.selectorA));
           if (!matches) continue;
           if (distance(a.pos, b.pos) <= rule.cutoff) {
+            seenPairs.add(pairKey);
             bonds.push({ a, b, rule });
           }
         }
       }
     });
     return bonds;
+  }
+
+  function atomsWithBondedBoundaryExtras(atoms, bonds) {
+    const byKey = new Map(atoms.map((atom) => [[atom.atom.label, atom.shift.i, atom.shift.j, atom.shift.k].join("|"), atom]));
+    const addAtom = (atom) => {
+      if (!atom || atom.inBoundary || !atom.style || !atom.style.visible) return;
+      byKey.set([atom.atom.label, atom.shift.i, atom.shift.j, atom.shift.k].join("|"), atom);
+    };
+    bonds.forEach((bond) => {
+      if (bond.type === "polyhedron") {
+        addAtom(bond.center);
+        bond.vertices.forEach(addAtom);
+      } else {
+        addAtom(bond.a);
+        addAtom(bond.b);
+      }
+    });
+    return [...byKey.values()];
+  }
+
+  function polyhedronFaces(points, center) {
+    const faces = [];
+    const seen = new Set();
+    const eps = 1e-6;
+    for (let i = 0; i < points.length - 2; i += 1) {
+      for (let j = i + 1; j < points.length - 1; j += 1) {
+        for (let k = j + 1; k < points.length; k += 1) {
+          const ab = sub(points[j], points[i]);
+          const ac = sub(points[k], points[i]);
+          const normal = cross(ab, ac);
+          if (length(normal) < eps) continue;
+          let positive = false;
+          let negative = false;
+          for (let n = 0; n < points.length; n += 1) {
+            if (n === i || n === j || n === k) continue;
+            const side = dot(normal, sub(points[n], points[i]));
+            if (side > eps) positive = true;
+            if (side < -eps) negative = true;
+            if (positive && negative) break;
+          }
+          if (positive && negative) continue;
+          let face = [i, j, k];
+          const centroid = mul(add(add(points[i], points[j]), points[k]), 1 / 3);
+          if (dot(normal, sub(centroid, center)) < 0) face = [i, k, j];
+          const key = face.slice().sort((a, b) => a - b).join("|");
+          if (seen.has(key)) continue;
+          seen.add(key);
+          faces.push(face);
+        }
+      }
+    }
+    return faces;
   }
 
   function rotationBasis() {
@@ -1428,6 +1618,9 @@
       const child = threeState.root.children.pop();
       disposeThreeObject(child);
     }
+    threeState.compassGroup = null;
+    threeState.compassVectors = null;
+    threeState.compassFit = null;
   }
 
   function ensureThreeRenderer(canvas) {
@@ -1514,6 +1707,48 @@
     root.add(mesh);
   }
 
+  function addThreePolyhedron(root, item, fit) {
+    const THREE = window.THREE;
+    const vertices = item.vertices.map((vertex) => vectorToThree(vertex.pos, fit));
+    if (vertices.length < 3) return;
+    const center = vectorToThree(item.center.pos, fit);
+    const faces = polyhedronFaces(vertices, center);
+    if (!faces.length) return;
+    const positions = [];
+    faces.forEach((face) => {
+      face.forEach((index) => {
+        const point = vertices[index];
+        positions.push(point.x, point.y, point.z);
+      });
+    });
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geometry.computeVertexNormals();
+    const material = new THREE.MeshStandardMaterial({
+      color: threeColor(polyFaceColor(item.rule)),
+      roughness: Math.max(0, Math.min(1, num("material-roughness", 0.9))),
+      metalness: 0,
+      transparent: true,
+      opacity: polyFaceOpacity(item.rule),
+      depthTest: true,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    root.add(mesh);
+
+    const edgeRadius = Math.max(0.003, polyEdgeRadius(item.rule) * fit.scale);
+    const edgeKeys = new Set();
+    faces.forEach((face) => {
+      [[face[0], face[1]], [face[1], face[2]], [face[2], face[0]]].forEach(([a, b]) => {
+        const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+        if (edgeKeys.has(key)) return;
+        edgeKeys.add(key);
+        addThreeCylinder(root, vertices[a], vertices[b], edgeRadius, polyEdgeColor(item.rule), "line");
+      });
+    });
+  }
+
   function addThreeCone(root, baseCenter, tip, radius, color) {
     const THREE = window.THREE;
     const start = baseCenter.clone();
@@ -1544,6 +1779,17 @@
     const ambient = new THREE.AmbientLight(0xffffff, 0.25);
     threeState.root.add(ambient);
     const directional = new THREE.DirectionalLight(threeColor(text("light-color", "#ffffff")), num("light-intensity", 2));
+    threeState.ambientLight = ambient;
+    threeState.directionalLight = directional;
+    threeState.lightTarget = directional.target;
+    updateThreeLights();
+    threeState.root.add(directional.target);
+    threeState.root.add(directional);
+  }
+
+  function updateThreeLights() {
+    const THREE = window.THREE;
+    if (!threeState.directionalLight || !threeState.lightTarget) return;
     const target = threeState.cameraTarget || new THREE.Vector3();
     const lightDir = window.CrystalModel && typeof window.CrystalModel.cameraRelativeLightDirection === "function" ?
       window.CrystalModel.cameraRelativeLightDirection({
@@ -1552,10 +1798,11 @@
       }, ensureRotationMatrix()) :
       [0, 0, 1];
     const cameraRelativeLight = new THREE.Vector3(lightDir[0], lightDir[1], lightDir[2]);
-    directional.position.copy(target).addScaledVector(cameraRelativeLight, 5);
-    directional.target.position.copy(target);
-    threeState.root.add(directional.target);
-    threeState.root.add(directional);
+    threeState.directionalLight.position.copy(target).addScaledVector(cameraRelativeLight, 5);
+    threeState.lightTarget.position.copy(target);
+    threeState.directionalLight.intensity = num("light-intensity", 2);
+    threeState.directionalLight.color.set(text("light-color", "#ffffff"));
+    if (threeState.ambientLight) threeState.ambientLight.intensity = 0.25;
   }
 
   function configureThreeDepthFade() {
@@ -1626,6 +1873,11 @@
   function addThreeCompass(vectors, fit) {
     if (!checked("show-lattice-vectors")) return;
     const THREE = window.THREE;
+    const group = new THREE.Group();
+    threeState.compassGroup = group;
+    threeState.compassVectors = vectors;
+    threeState.compassFit = fit;
+    threeState.root.add(group);
     const bottomLeft = text("lattice-compass-position", "cell") === "bottom-left";
     const origin = bottomLeft ? lowerLeftCompassOrigin() : vectorToThree({ x: 0, y: 0, z: 0 }, fit);
     [
@@ -1636,13 +1888,25 @@
       const dir = new THREE.Vector3(vector.x, vector.y, vector.z).multiplyScalar(fit.scale);
       const len = bottomLeft ? 0.42 : Math.min(0.8, Math.max(0.25, dir.length() * 0.35));
       const direction = dir.normalize();
-      const arrowEnd = addThreeArrow(threeState.root, origin, direction, len, color, fit, bottomLeft);
+      const arrowEnd = addThreeArrow(group, origin, direction, len, color, fit, bottomLeft);
       if (checked("show-vector-labels")) {
         const sprite = createThreeTextSprite(label, color);
         sprite.position.copy(arrowEnd).addScaledVector(direction, len * 0.18);
-        threeState.root.add(sprite);
+        group.add(sprite);
       }
     });
+  }
+
+  function refreshThreeCompass() {
+    if (!threeState.root) return;
+    if (threeState.compassGroup) {
+      threeState.root.remove(threeState.compassGroup);
+      disposeThreeObject(threeState.compassGroup);
+      threeState.compassGroup = null;
+    }
+    if (threeState.compassVectors && threeState.compassFit) {
+      addThreeCompass(threeState.compassVectors, threeState.compassFit);
+    }
   }
 
   function renderThreeScene(canvas, vectors, atoms, bonds, ranges) {
@@ -1657,9 +1921,16 @@
       (checked("show-all-outlines") ? unitCellsWithinBoundaries(ranges) : [{ aMin: 0, aMax: 1, bMin: 0, bMax: 1, cMin: 0, cMax: 1 }]) :
       [];
     const fitPoints = scenePoints(vectors, atoms);
+    bonds.filter((bond) => bond.type === "polyhedron").forEach((polyhedron) => {
+      polyhedron.vertices.forEach((vertex) => fitPoints.push(vertex.pos));
+    });
     outlineCells.forEach((cell) => fitPoints.push(...cellCorners(vectors, cell)));
     const fit = sceneFit(fitPoints);
     const THREE = window.THREE;
+
+    bonds.filter((bond) => bond.type === "polyhedron").forEach((polyhedron) => {
+      addThreePolyhedron(threeState.root, polyhedron, fit);
+    });
 
     atoms.forEach((item) => {
       const radius = Math.max(0.015, item.style.radius * displayRadiusScale() * 0.2 * fit.scale);
@@ -1670,6 +1941,7 @@
     });
 
     bonds.forEach((bond) => {
+      if (bond.type === "polyhedron") return;
       const start = vectorToThree(bond.a.pos, fit);
       const end = vectorToThree(bond.b.pos, fit);
       const radius = Math.max(0.006, Math.max(0.01, Number(bond.rule.thickness) || 0.15) * 0.5 * fit.scale);
@@ -1714,7 +1986,12 @@
     ensureStyles();
     const vectors = latticeVectors(cellParams());
     const atoms = expandedAtoms(vectors);
-    const bonds = computeBonds(atoms);
+    const allAtoms = expandedAtoms(vectors, {
+      boundaryPadding: maxBoundarySearchCutoff(),
+      includeHidden: true
+    });
+    const bonds = computeBonds(atoms, allAtoms);
+    const displayAtoms = atomsWithBondedBoundaryExtras(atoms, bonds);
     const ranges = cellRanges();
     const outlineCells = checked("show-cell-outline") ?
       (checked("show-all-outlines") ? unitCellsWithinBoundaries(ranges) : [{ aMin: 0, aMax: 1, bMin: 0, bMax: 1, cMin: 0, cMax: 1 }]) :
@@ -1745,7 +2022,7 @@
         metallic: 0,
         unlit: text("atom-lighting-mode", "realistic") === "cartoon"
       },
-      atoms: atoms.map((item) => ({
+        atoms: displayAtoms.map((item) => ({
         label: item.atom.label,
         element: item.atom.element,
         pos: item.pos,
@@ -1753,9 +2030,21 @@
         radius: exportAtomRadius(item)
       })),
       bonds: [],
+      polyhedra: [],
       edges: []
     };
     bonds.forEach((bond) => {
+      if (bond.type === "polyhedron") {
+        scene.polyhedra.push({
+          center: bond.center.pos,
+          vertices: bond.vertices.map((vertex) => vertex.pos),
+          color: polyFaceColor(bond.rule),
+          opacity: polyFaceOpacity(bond.rule),
+          edgeColor: polyEdgeColor(bond.rule),
+          edgeRadius: polyEdgeRadius(bond.rule)
+        });
+        return;
+      }
       const trimmed = trimBondEndpoints(bond.a, bond.b);
       if (!trimmed) return;
       const radius = Math.max(0.005, Math.max(0.01, Number(bond.rule.thickness) || 0.15) * 0.5);
@@ -1778,10 +2067,6 @@
       });
     });
     return scene;
-  }
-
-  function glbFilename() {
-    return `${(state.lastImportName || "crystal").replace(/\.cif$/i, "").replace(/[^A-Za-z0-9_-]+/g, "-") || "crystal"}.glb`;
   }
 
   function modelFilename(format) {
@@ -1845,19 +2130,6 @@
         rotation: ensureRotationMatrix()
       }
     };
-  }
-
-  function downloadGlbModel() {
-    if (!window.CrystalModel || typeof window.CrystalModel.downloadGlb !== "function") {
-      logLine("GLB export is unavailable because the model exporter did not load.");
-      return;
-    }
-    try {
-      window.CrystalModel.downloadGlb(currentPortableScene(), glbFilename());
-      logLine(`Downloaded ${glbFilename()}.`);
-    } catch (error) {
-      logLine(`GLB export failed: ${error.message || error}`);
-    }
   }
 
   function downloadSelectedModelFormat() {
@@ -1944,7 +2216,7 @@
     }
     try {
       const filename = `${(state.lastImportName || "crystal").replace(/\.cif$/i, "").replace(/[^A-Za-z0-9_-]+/g, "-") || "crystal"}.usdz`;
-      window.CrystalModel.openUsdzQuickLook(currentPortableScene(), filename);
+      window.CrystalModel.openUsdzQuickLook(currentPortableScene(), filename, { modelScale: 0.4 });
       logLine("Opening iOS AR Quick Look…");
       return true;
     } catch (error) {
@@ -2078,6 +2350,7 @@
     }
 
     bonds.forEach((bond) => {
+      if (bond.type === "polyhedron") return;
       const pa = projectedByKey.get(projectedAtomKey(bond.a));
       const pb = projectedByKey.get(projectedAtomKey(bond.b));
       if (!pa || !pb) return;
@@ -2124,6 +2397,10 @@
   }
 
   function render() {
+    if (viewRenderFrame) {
+      window.cancelAnimationFrame(viewRenderFrame);
+      viewRenderFrame = 0;
+    }
     const canvas = $("crystal-canvas");
     if (!canvas) return;
 
@@ -2132,11 +2409,16 @@
     const vectors = latticeVectors(params);
     updateCellMetrics(vectors);
     const atoms = expandedAtoms(vectors);
+    const allAtoms = expandedAtoms(vectors, {
+      boundaryPadding: maxBoundarySearchCutoff(),
+      includeHidden: true
+    });
     const ranges = cellRanges();
-    const bonds = computeBonds(atoms);
+    const bonds = computeBonds(atoms, allAtoms);
+    const displayAtoms = atomsWithBondedBoundaryExtras(atoms, bonds);
     let renderedWithThree = false;
     try {
-      renderedWithThree = renderThreeScene(canvas, vectors, atoms, bonds, ranges);
+      renderedWithThree = renderThreeScene(canvas, vectors, displayAtoms, bonds, ranges);
     } catch (error) {
       renderedWithThree = false;
       if (window.console && typeof window.console.warn === "function") {
@@ -2144,9 +2426,38 @@
       }
     }
     if (!renderedWithThree) {
-      renderCanvasScene(canvas, vectors, atoms, bonds, ranges);
+      renderCanvasScene(canvas, vectors, displayAtoms, bonds, ranges);
     }
     saveViewerState();
+  }
+
+  function renderViewOnly() {
+    const canvas = $("crystal-canvas");
+    if (!canvas) return;
+    if (
+      threeState.renderer &&
+      threeState.scene &&
+      threeState.camera &&
+      threeState.root &&
+      threeState.canvas === canvas &&
+      !threeState.xrSession
+    ) {
+      updateThreeCamera(canvas);
+      updateThreeLights();
+      refreshThreeCompass();
+      threeState.renderer.render(threeState.scene, threeState.camera);
+      saveViewerState();
+      return;
+    }
+    render();
+  }
+
+  function scheduleViewRender() {
+    if (viewRenderFrame) return;
+    viewRenderFrame = window.requestAnimationFrame(() => {
+      viewRenderFrame = 0;
+      renderViewOnly();
+    });
   }
 
   function addBondRule() {
@@ -2159,12 +2470,23 @@
       cutoff: num("bond-cutoff", 2.6),
       thickness: num("bond-thickness", 0.15),
       style: text("bond-style", "split"),
-      color: text("bond-color", "#6b7280")
+      boundaryMode: text("bond-boundary-mode", "search") === "inside" ? "inside" : "search",
+      color: text("bond-color", "#6b7280"),
+      faceColor: text("poly-face-color", "#6b7280"),
+      faceOpacity: Math.max(0, Math.min(1, num("poly-face-opacity", 0.32))),
+      edgeColor: text("poly-edge-color", "#374151"),
+      edgeThickness: Math.max(0.001, num("poly-edge-thickness", 0.06))
     };
     state.bondRules.push(rule);
     renderBondRules();
-    const bonds = computeBonds(expandedAtoms(latticeVectors(cellParams())));
-    logLine(`Calculated bonds: ${bonds.length} shown across ${state.bondRules.length} rule${state.bondRules.length === 1 ? "" : "s"}.`);
+    const vectors = latticeVectors(cellParams());
+    const bonds = computeBonds(expandedAtoms(vectors), expandedAtoms(vectors, {
+      boundaryPadding: maxBoundarySearchCutoff(),
+      includeHidden: true
+    }));
+    const cylinders = bonds.filter((bond) => bond.type !== "polyhedron").length;
+    const polyhedra = bonds.filter((bond) => bond.type === "polyhedron").length;
+    logLine(`Calculated ${cylinders} bond${cylinders === 1 ? "" : "s"} and ${polyhedra} polyhed${polyhedra === 1 ? "ron" : "ra"} across ${state.bondRules.length} rule${state.bondRules.length === 1 ? "" : "s"}.`);
     render();
   }
 
@@ -2435,7 +2757,8 @@
       "lattice-arrow-head-width", "lattice-arrow-head-length", "lattice-label-font-size",
       "cell-line-thickness", "cell-line-color", "projection-mode", "background-color",
       "depth-fade-enabled", "depth-fade-start", "depth-fade-end",
-      "bond-cutoff", "bond-thickness", "bond-style", "bond-color"
+      "bond-cutoff", "bond-thickness", "bond-style", "bond-boundary-mode", "bond-color",
+      "poly-face-color", "poly-face-opacity", "poly-edge-color", "poly-edge-thickness"
     ];
   }
 
@@ -2483,7 +2806,7 @@
     state.colorScheme = COLOR_SCHEMES[saved.colorScheme] ? saved.colorScheme : text("color-scheme", "jmol");
     state.elementStyles = saved.elementStyles && typeof saved.elementStyles === "object" ? saved.elementStyles : {};
     state.atomOverrides = saved.atomOverrides && typeof saved.atomOverrides === "object" ? saved.atomOverrides : {};
-    state.bondRules = Array.isArray(saved.bondRules) ? saved.bondRules : [];
+    state.bondRules = Array.isArray(saved.bondRules) ? saved.bondRules.map(normalizeBondRule) : [];
     state.symmetryOperations = Array.isArray(saved.symmetryOperations) ? saved.symmetryOperations : [];
     state.lastImportName = saved.lastImportName || "";
     state.view = saved.view && typeof saved.view === "object" ? { ...state.view, ...saved.view } : state.view;
@@ -2530,7 +2853,7 @@
       reciprocal[kind];
     if (!target) return;
     state.view.rotation = matrixFromLookDirection(target);
-    render();
+    renderViewOnly();
   }
 
   function bindEvents() {
@@ -2585,12 +2908,10 @@
         loadConfigFile(file);
       });
     }
-    const downloadGlbButton = $("download-glb");
     const openScatteringButton = $("open-scattering-calculator");
     const copyShareButton = $("copy-share-link");
     const enterVrButton = $("enter-vr");
     const enterArButton = $("enter-ar");
-    if (downloadGlbButton) downloadGlbButton.addEventListener("click", downloadGlbModel);
     if (openScatteringButton) openScatteringButton.addEventListener("click", openScatteringCalculator);
     if (copyShareButton) copyShareButton.addEventListener("click", copyShareLink);
     if (enterVrButton) enterVrButton.addEventListener("click", () => startXrSession("vr").catch((error) => logLine(error.message || "VR failed to start.")));
@@ -2636,7 +2957,7 @@
     });
     $("view-reset").addEventListener("click", () => {
       state.view = { rotation: initialRotationMatrix(), zoom: 1, panX: 0, panY: 0, tool: state.view.tool };
-      render();
+      renderViewOnly();
     });
 
     document.querySelectorAll("[data-look]").forEach((button) => {
@@ -2647,7 +2968,7 @@
         const step = num("view-step-degrees", 10) * Number(button.dataset.rotateSign || 1);
         const axis = button.dataset.rotateAxis;
         rotateView(axis, step);
-        render();
+        renderViewOnly();
       });
     });
     document.querySelectorAll("[data-tool]").forEach((button) => {
@@ -2660,8 +2981,12 @@
     document.querySelectorAll("input, select").forEach((el) => {
       if (el.closest("#crystal-atom-table") || el.closest("#crystal-atom-style-list") || ["cif-file", "crystal-config-file"].includes(el.id)) return;
       if (["show-generated-atoms", "crystal-spacegroup", "crystal-spacegroup-setting", "model-export-format"].includes(el.id)) return;
-      el.addEventListener("input", render);
-      el.addEventListener("change", render);
+      if (el.tagName === "INPUT" && (el.type === "range" || el.type === "color")) {
+        el.addEventListener("change", render);
+      } else {
+        el.addEventListener("input", render);
+        el.addEventListener("change", render);
+      }
     });
 
     const canvas = $("crystal-canvas");
@@ -2702,7 +3027,7 @@
         const distance = pointerDistance();
         if (distance > 0) {
           state.view.zoom = Math.max(0.15, Math.min(12, pinch.zoom * distance / pinch.distance));
-          render();
+          scheduleViewRender();
         }
         return;
       }
@@ -2720,7 +3045,7 @@
       } else {
         state.view.zoom = Math.max(0.15, drag.zoom * Math.exp(-dy / 180));
       }
-      render();
+      scheduleViewRender();
     });
     ["pointerup", "pointercancel", "pointerleave"].forEach((type) => {
       canvas.addEventListener(type, (event) => {
@@ -2735,7 +3060,7 @@
     canvas.addEventListener("wheel", (event) => {
       event.preventDefault();
       state.view.zoom = Math.max(0.15, state.view.zoom * Math.exp(-event.deltaY / 600));
-      render();
+      scheduleViewRender();
     }, { passive: false });
 
     window.addEventListener("resize", render);

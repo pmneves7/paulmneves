@@ -1045,9 +1045,21 @@ body.scattering-page.scattering-nav-hidden .scattering-panel-splitter {
   font-size: 1.02rem;
 }
 
+.scattering-atom-editor {
+  margin-top: 1rem;
+}
+
+.scattering-atom-editor .crystal-table-header {
+  margin-bottom: 0.25rem;
+}
+
 .scattering-experiment-grid {
   grid-template-columns: repeat(2, minmax(220px, 1fr));
   max-width: 720px;
+}
+
+.scattering-plane-grid {
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
 }
 
 .scattering-grid-break {
@@ -1057,7 +1069,8 @@ body.scattering-page.scattering-nav-hidden .scattering-panel-splitter {
 @media (max-width: 760px) {
   .scattering-crystal-grid,
   .scattering-magnetic-grid,
-  .scattering-experiment-grid {
+  .scattering-experiment-grid,
+  .scattering-plane-grid {
     grid-template-columns: 1fr;
   }
 

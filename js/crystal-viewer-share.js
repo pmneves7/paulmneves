@@ -64,6 +64,10 @@
       points.push(vec(bond.a));
       points.push(vec(bond.b));
     });
+    (data.polyhedra || []).forEach((polyhedron) => {
+      points.push(vec(polyhedron.center));
+      (polyhedron.vertices || []).forEach((vertex) => points.push(vec(vertex)));
+    });
     (data.edges || []).forEach((edge) => {
       points.push(vec(edge.a));
       points.push(vec(edge.b));
@@ -133,6 +137,83 @@
     parent.add(mesh);
   }
 
+  function polyhedronFaces(points, center) {
+    const faces = [];
+    const seen = new Set();
+    const eps = 1e-6;
+    for (let i = 0; i < points.length - 2; i += 1) {
+      for (let j = i + 1; j < points.length - 1; j += 1) {
+        for (let k = j + 1; k < points.length; k += 1) {
+          const ab = points[j].clone().sub(points[i]);
+          const ac = points[k].clone().sub(points[i]);
+          const normal = new THREE.Vector3().crossVectors(ab, ac);
+          if (normal.length() < eps) continue;
+          let positive = false;
+          let negative = false;
+          for (let n = 0; n < points.length; n += 1) {
+            if (n === i || n === j || n === k) continue;
+            const side = normal.dot(points[n].clone().sub(points[i]));
+            if (side > eps) positive = true;
+            if (side < -eps) negative = true;
+            if (positive && negative) break;
+          }
+          if (positive && negative) continue;
+          let face = [i, j, k];
+          const centroid = points[i].clone().add(points[j]).add(points[k]).multiplyScalar(1 / 3);
+          if (normal.dot(centroid.sub(center)) < 0) face = [i, k, j];
+          const key = face.slice().sort((a, b) => a - b).join("|");
+          if (seen.has(key)) continue;
+          seen.add(key);
+          faces.push(face);
+        }
+      }
+    }
+    return faces;
+  }
+
+  function addPolyhedron(parent, polyhedron, fit) {
+    const vertices = (polyhedron.vertices || []).map((vertex) => fitPoint(vertex, fit));
+    if (vertices.length < 3) return;
+    const center = fitPoint(polyhedron.center, fit);
+    const faces = polyhedronFaces(vertices, center);
+    if (!faces.length) return;
+    const positions = [];
+    faces.forEach((face) => {
+      face.forEach((index) => {
+        const point = vertices[index];
+        positions.push(point.x, point.y, point.z);
+      });
+    });
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geometry.computeVertexNormals();
+    const mesh = new THREE.Mesh(
+      geometry,
+      new THREE.MeshStandardMaterial({
+        color: new THREE.Color(polyhedron.color || "#6b7280"),
+        roughness: 0.9,
+        metalness: 0,
+        transparent: true,
+        opacity: Math.max(0.05, Math.min(1, Number(polyhedron.opacity) || 0.32)),
+        depthTest: true,
+        depthWrite: false,
+        side: THREE.DoubleSide
+      })
+    );
+    parent.add(mesh);
+
+    const edgeRadius = Math.max(0.002, (Number(polyhedron.edgeRadius) || 0.027) * fit.scale);
+    const edgeKeys = new Set();
+    faces.forEach((face) => {
+      [[face[0], face[1]], [face[1], face[2]], [face[2], face[0]]].forEach(([a, b]) => {
+        const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+        if (edgeKeys.has(key)) return;
+        edgeKeys.add(key);
+        addCylinder(parent, vertices[a], vertices[b], edgeRadius, polyhedron.edgeColor || polyhedron.color || "#374151");
+      });
+    });
+  }
+
   function buildScene(data) {
     renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     renderer.setPixelRatio(window.devicePixelRatio || 1);
@@ -154,6 +235,10 @@
     directionalLight.target = lightTarget;
     scene.add(directionalLight);
     const fit = sceneFit(data);
+
+    (data.polyhedra || []).forEach((polyhedron) => {
+      addPolyhedron(root, polyhedron, fit);
+    });
 
     (data.atoms || []).forEach((atom) => {
       const mesh = new THREE.Mesh(
@@ -289,7 +374,7 @@
       return false;
     }
     const filename = `${(sceneData.name || "crystal").replace(/[^A-Za-z0-9_-]+/g, "-")}.usdz`;
-    window.CrystalModel.openUsdzQuickLook(sceneData, filename);
+    window.CrystalModel.openUsdzQuickLook(sceneData, filename, { modelScale: 0.4 });
     setStatus("Opening iOS AR Quick Look…");
     return true;
   }

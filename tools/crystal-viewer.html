@@ -233,11 +233,35 @@
                   <select id="bond-style">
                     <option value="split">Split atom colors</option>
                     <option value="single">Single color</option>
+                    <option value="polyhedra">Polyhedra</option>
+                  </select>
+                </div>
+                <div class="tool-field">
+                  <label for="bond-boundary-mode">Boundary mode</label>
+                  <select id="bond-boundary-mode">
+                    <option value="inside">Stay within boundary</option>
+                    <option value="search" selected>Search outside boundary</option>
                   </select>
                 </div>
                 <div class="tool-field">
                   <label for="bond-color">Bond color</label>
                   <input type="color" id="bond-color" value="#6b7280" />
+                </div>
+                <div class="tool-field">
+                  <label for="poly-face-color">Poly face color</label>
+                  <input type="color" id="poly-face-color" value="#6b7280" />
+                </div>
+                <div class="tool-field">
+                  <label for="poly-face-opacity">Face opacity</label>
+                  <input type="number" id="poly-face-opacity" step="0.05" min="0" max="1" value="0.32" />
+                </div>
+                <div class="tool-field">
+                  <label for="poly-edge-color">Poly edge color</label>
+                  <input type="color" id="poly-edge-color" value="#374151" />
+                </div>
+                <div class="tool-field">
+                  <label for="poly-edge-thickness">Edge thickness (Å)</label>
+                  <input type="number" id="poly-edge-thickness" step="any" min="0.001" value="0.06" />
                 </div>
               </div>
               <div class="laue-action-row">
@@ -358,7 +382,7 @@
               <div class="tool-grid crystal-form-grid">
                 <div class="tool-field">
                   <label for="light-intensity">Light intensity</label>
-                  <input type="range" id="light-intensity" min="0" max="2" step="0.05" value="2" />
+                  <input type="range" id="light-intensity" min="0" max="5" step="0.05" value="2" />
                 </div>
                 <div class="tool-field">
                   <label for="light-color">Light color</label>
@@ -393,7 +417,6 @@
             </div>
             <span class="crystal-tool-divider" aria-hidden="true">|</span>
             <div class="crystal-control-group crystal-control-group-right" role="toolbar" aria-label="Share, XR, and model export">
-              <button type="button" class="laue-mode-btn" id="download-glb">Download GLB</button>
               <button type="button" class="laue-mode-btn" id="open-scattering-calculator">Scattering</button>
               <button type="button" class="laue-mode-btn" id="copy-share-link">Copy sharable link</button>
               <button type="button" class="laue-mode-btn" id="enter-vr">VR</button>

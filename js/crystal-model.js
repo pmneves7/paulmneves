@@ -127,6 +127,14 @@
         compactColor(bond.colorA || bond.color, "#6b7280"),
         compactColor(bond.colorB || bond.colorA || bond.color, "#6b7280")
       ]),
+      p: (scene.polyhedra || []).map((polyhedron) => [
+        compactPoint(polyhedron.center),
+        (polyhedron.vertices || []).map(compactPoint),
+        compactColor(polyhedron.color, "#6b7280"),
+        compactNumber(polyhedron.opacity || 0.32, 4),
+        compactNumber(polyhedron.edgeRadius || 0.027, 4),
+        compactColor(polyhedron.edgeColor || polyhedron.color, "#374151")
+      ]),
       e: (scene.edges || []).map((edge) => [
         compactPoint(edge.a),
         compactPoint(edge.b),
@@ -154,6 +162,14 @@
         radius: Number(bond[2]) || 0.03,
         colorA: expandColor(bond[3], "#6b7280"),
         colorB: expandColor(bond[4], "#6b7280")
+      })),
+      polyhedra: (compact.p || []).map((polyhedron) => ({
+        center: expandPoint(polyhedron[0]),
+        vertices: (polyhedron[1] || []).map(expandPoint),
+        color: expandColor(polyhedron[2], "#6b7280"),
+        opacity: Number(polyhedron[3]) || 0.32,
+        edgeRadius: Number(polyhedron[4]) || 0.027,
+        edgeColor: expandColor(polyhedron[5] || polyhedron[2], "#374151")
       })),
       edges: (compact.e || []).map((edge) => ({
         a: expandPoint(edge[0]),
@@ -302,7 +318,12 @@
   }
 
   function compactBondRule(rule) {
-    const style = rule.style === "single" ? 1 : 0;
+    const style = rule.style === "single" ? 1 : (rule.style === "polyhedra" ? 2 : 0);
+    const insideBoundary = rule.boundaryMode === "inside";
+    const faceColor = rule.faceColor || rule.color || "#6b7280";
+    const edgeColor = rule.edgeColor || rule.color || "#374151";
+    const faceOpacity = Math.max(0, Math.min(1, Number(rule.faceOpacity) || 0.32));
+    const edgeThickness = Math.max(0.001, Number(rule.edgeThickness) || 0.06);
     const row = [
       rule.selectorA || "",
       rule.selectorB || "",
@@ -311,6 +332,17 @@
       style
     ];
     if (style && rule.color) row.push(compactColor(rule.color, "#6b7280"));
+    else if (insideBoundary || style === 2) row.push("");
+    if (insideBoundary) row.push(1);
+    else if (style === 2) row.push(0);
+    if (style === 2) {
+      row.push(
+        compactColor(faceColor, "#6b7280"),
+        compactNumber(faceOpacity, 4),
+        compactColor(edgeColor, "#374151"),
+        compactNumber(edgeThickness, 5)
+      );
+    }
     return row;
   }
 
@@ -321,8 +353,13 @@
       selectorB: row[1] || "",
       cutoff: Number(row[2]) || 0,
       thickness: Number(row[3]) || 0,
-      style: row[4] ? "single" : "split",
-      color: row[5] ? expandColor(row[5], "#6b7280") : "#6b7280"
+      style: row[4] === 2 ? "polyhedra" : (row[4] ? "single" : "split"),
+      color: row[5] ? expandColor(row[5], "#6b7280") : "#6b7280",
+      boundaryMode: row[6] ? "inside" : "search",
+      faceColor: row[7] ? expandColor(row[7], "#6b7280") : (row[5] ? expandColor(row[5], "#6b7280") : "#6b7280"),
+      faceOpacity: row[8] == null ? 0.32 : Math.max(0, Math.min(1, Number(row[8]) || 0)),
+      edgeColor: row[9] ? expandColor(row[9], "#374151") : (row[5] ? expandColor(row[5], "#6b7280") : "#374151"),
+      edgeThickness: Math.max(0.001, Number(row[10]) || 0.06)
     };
   }
 
@@ -664,6 +701,29 @@
       frac.z >= ranges.cMin - eps && frac.z <= ranges.cMax + eps;
   }
 
+  function paddedCellRanges(ranges, vectors, padding) {
+    const distancePadding = Math.max(0, Number(padding) || 0);
+    if (!distancePadding) return ranges;
+    const axisPadding = (axis) => distancePadding / Math.max(1e-6, lengthVec(axis));
+    const aPad = axisPadding(vectors.a);
+    const bPad = axisPadding(vectors.b);
+    const cPad = axisPadding(vectors.c);
+    return {
+      aMin: ranges.aMin - aPad,
+      aMax: ranges.aMax + aPad,
+      bMin: ranges.bMin - bPad,
+      bMax: ranges.bMax + bPad,
+      cMin: ranges.cMin - cPad,
+      cMax: ranges.cMax + cPad
+    };
+  }
+
+  function maxBoundarySearchCutoff(recipe) {
+    return (recipe.bondRules || []).reduce((max, rule) => (
+      rule.boundaryMode === "inside" ? max : Math.max(max, Number(rule.cutoff) || 0)
+    ), 0);
+  }
+
   function styleForAtom(recipe, atom) {
     const elementStyle = recipe.elementStyles && recipe.elementStyles[sanitizeElement(atom.element)] || {};
     const override = recipe.atomOverrides && recipe.atomOverrides[atom.label] || {};
@@ -674,23 +734,26 @@
     };
   }
 
-  function expandedRecipeAtoms(recipe, vectors, ranges) {
+  function expandedRecipeAtoms(recipe, vectors, ranges, options = {}) {
+    const includeHidden = Boolean(options.includeHidden);
+    const searchRanges = paddedCellRanges(ranges, vectors, options.boundaryPadding);
     const expanded = [];
     generatedAtomSites(recipe).forEach((atom) => {
-      const iMin = Math.floor(ranges.aMin - atom.fractX);
-      const iMax = Math.ceil(ranges.aMax - atom.fractX);
-      const jMin = Math.floor(ranges.bMin - atom.fractY);
-      const jMax = Math.ceil(ranges.bMax - atom.fractY);
-      const kMin = Math.floor(ranges.cMin - atom.fractZ);
-      const kMax = Math.ceil(ranges.cMax - atom.fractZ);
+      const iMin = Math.floor(searchRanges.aMin - atom.fractX);
+      const iMax = Math.ceil(searchRanges.aMax - atom.fractX);
+      const jMin = Math.floor(searchRanges.bMin - atom.fractY);
+      const jMax = Math.ceil(searchRanges.bMax - atom.fractY);
+      const kMin = Math.floor(searchRanges.cMin - atom.fractZ);
+      const kMax = Math.ceil(searchRanges.cMax - atom.fractZ);
       for (let i = iMin; i <= iMax; i += 1) {
         for (let j = jMin; j <= jMax; j += 1) {
           for (let k = kMin; k <= kMax; k += 1) {
             const frac = { x: atom.fractX + i, y: atom.fractY + j, z: atom.fractZ + k };
-            if (!insideCellBoundaries(frac, ranges)) continue;
+            const inBoundary = insideCellBoundaries(frac, ranges);
+            if (!inBoundary && !insideCellBoundaries(frac, searchRanges)) continue;
             const style = styleForAtom(recipe, atom);
-            if (!style.visible) continue;
-            expanded.push({ atom, style, frac, pos: fractionalToCartesian(atom, vectors, { i, j, k }) });
+            if (!includeHidden && !style.visible) continue;
+            expanded.push({ atom, style, shift: { i, j, k }, frac, inBoundary, pos: fractionalToCartesian(atom, vectors, { i, j, k }) });
           }
         }
       }
@@ -705,22 +768,128 @@
     return item.atom.label === selector;
   }
 
-  function recipeBonds(recipe, atoms) {
+  function ruleFaceColor(rule) {
+    return rule && (rule.faceColor || rule.color) || "#6b7280";
+  }
+
+  function ruleFaceOpacity(rule) {
+    return Math.max(0, Math.min(1, Number(rule && rule.faceOpacity) || 0.32));
+  }
+
+  function ruleEdgeColor(rule) {
+    return rule && (rule.edgeColor || rule.color) || "#374151";
+  }
+
+  function ruleEdgeRadius(rule) {
+    if (rule && rule.edgeThickness != null) {
+      return Math.max(0.001, Number(rule.edgeThickness) || 0.06) * 0.5;
+    }
+    return Math.max(0.002, Math.max(0.01, Number(rule && rule.thickness) || 0.15) * 0.18);
+  }
+
+  function recipeBonds(recipe, atoms, allAtoms = atoms) {
     const bonds = [];
+    const itemKey = (item) => [item.atom.label, item.shift.i, item.shift.j, item.shift.k].join("|");
+    const atomKeys = new Set(atoms.map(itemKey));
+    const uniqueVertices = (items) => {
+      const seen = new Set();
+      return items.filter((item) => {
+        const point = pointArray(item.pos);
+        const key = point.map((value) => value.toFixed(6)).join("|");
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
     (recipe.bondRules || []).forEach((rule) => {
+      const candidateAtoms = rule.boundaryMode === "inside" ? atoms : allAtoms;
+      if (rule.style === "polyhedra") {
+        atoms.forEach((center) => {
+          if (!selectorMatches(center, rule.selectorA)) return;
+          const vertices = uniqueVertices(candidateAtoms.filter((candidate) => {
+            if (candidate === center || !selectorMatches(candidate, rule.selectorB)) return false;
+            const separation = lengthVec(subVec(pointArray(center.pos), pointArray(candidate.pos)));
+            return separation > 1e-6 && separation <= Number(rule.cutoff || 0);
+          }));
+          if (vertices.length >= 3) bonds.push({ type: "polyhedron", center, vertices, rule });
+        });
+        return;
+      }
+      const seenPairs = new Set();
+      const visibleCandidates = candidateAtoms.filter((item) => item.style && item.style.visible);
       for (let i = 0; i < atoms.length; i += 1) {
-        for (let j = i + 1; j < atoms.length; j += 1) {
+        for (let j = 0; j < visibleCandidates.length; j += 1) {
           const a = atoms[i];
-          const b = atoms[j];
+          const b = visibleCandidates[j];
+          if (a === b) continue;
+          const aKey = itemKey(a);
+          const bKey = itemKey(b);
+          if (atomKeys.has(bKey) && bKey <= aKey) continue;
+          const pairKey = [aKey, bKey].sort().join("::");
+          if (seenPairs.has(pairKey)) continue;
           const matches =
             (selectorMatches(a, rule.selectorA) && selectorMatches(b, rule.selectorB)) ||
             (selectorMatches(a, rule.selectorB) && selectorMatches(b, rule.selectorA));
           if (!matches || lengthVec(subVec(pointArray(a.pos), pointArray(b.pos))) > Number(rule.cutoff || 0)) continue;
+          seenPairs.add(pairKey);
           bonds.push({ a, b, rule });
         }
       }
     });
     return bonds;
+  }
+
+  function atomsWithBondedBoundaryExtras(atoms, bonds) {
+    const itemKey = (item) => [item.atom.label, item.shift.i, item.shift.j, item.shift.k].join("|");
+    const byKey = new Map(atoms.map((atom) => [itemKey(atom), atom]));
+    const addAtom = (atom) => {
+      if (!atom || atom.inBoundary || !atom.style || !atom.style.visible) return;
+      byKey.set(itemKey(atom), atom);
+    };
+    bonds.forEach((bond) => {
+      if (bond.type === "polyhedron") {
+        addAtom(bond.center);
+        bond.vertices.forEach(addAtom);
+      } else {
+        addAtom(bond.a);
+        addAtom(bond.b);
+      }
+    });
+    return [...byKey.values()];
+  }
+
+  function polyhedronFaces(points, center) {
+    const faces = [];
+    const seen = new Set();
+    const eps = 1e-6;
+    for (let i = 0; i < points.length - 2; i += 1) {
+      for (let j = i + 1; j < points.length - 1; j += 1) {
+        for (let k = j + 1; k < points.length; k += 1) {
+          const ab = subVec(points[j], points[i]);
+          const ac = subVec(points[k], points[i]);
+          const normal = crossVec(ab, ac);
+          if (lengthVec(normal) < eps) continue;
+          let positive = false;
+          let negative = false;
+          for (let n = 0; n < points.length; n += 1) {
+            if (n === i || n === j || n === k) continue;
+            const side = dotVec(normal, subVec(points[n], points[i]));
+            if (side > eps) positive = true;
+            if (side < -eps) negative = true;
+            if (positive && negative) break;
+          }
+          if (positive && negative) continue;
+          let face = [i, j, k];
+          const centroid = mulVec(addVec(addVec(points[i], points[j]), points[k]), 1 / 3);
+          if (dotVec(normal, subVec(centroid, center)) < 0) face = [i, k, j];
+          const key = face.slice().sort((a, b) => a - b).join("|");
+          if (seen.has(key)) continue;
+          seen.add(key);
+          faces.push(face);
+        }
+      }
+    }
+    return faces;
   }
 
   function cellCorners(vectors, cell) {
@@ -794,7 +963,12 @@
     const vectors = latticeVectorsFromControls(controls);
     const ranges = cellRangesFromControls(controls);
     const atoms = expandedRecipeAtoms(recipe, vectors, ranges);
-    const bonds = recipeBonds(recipe, atoms);
+    const allAtoms = expandedRecipeAtoms(recipe, vectors, ranges, {
+      boundaryPadding: maxBoundarySearchCutoff(recipe),
+      includeHidden: true
+    });
+    const bonds = recipeBonds(recipe, atoms, allAtoms);
+    const displayAtoms = atomsWithBondedBoundaryExtras(atoms, bonds);
     const radiusScale = Math.max(0, numberControl(controls, "radius-scale", 1));
     const outlineCells = boolControl(controls, "show-cell-outline", true) ?
       (boolControl(controls, "show-all-outlines", false) ? unitCellsWithinBoundaries(ranges) : [{ aMin: 0, aMax: 1, bMin: 0, bMax: 1, cMin: 0, cMax: 1 }]) :
@@ -822,7 +996,7 @@
         start: numberControl(controls, "depth-fade-start", 5),
         end: numberControl(controls, "depth-fade-end", 8)
       },
-      atoms: atoms.map((item) => ({
+      atoms: displayAtoms.map((item) => ({
         label: item.atom.label,
         element: item.atom.element,
         pos: objectPoint(item.pos),
@@ -830,9 +1004,21 @@
         radius: exportAtomRadius(item, radiusScale)
       })),
       bonds: [],
+      polyhedra: [],
       edges: []
     };
     bonds.forEach((bond) => {
+      if (bond.type === "polyhedron") {
+        scene.polyhedra.push({
+          center: objectPoint(bond.center.pos),
+          vertices: bond.vertices.map((vertex) => objectPoint(vertex.pos)),
+          color: ruleFaceColor(bond.rule),
+          opacity: ruleFaceOpacity(bond.rule),
+          edgeColor: ruleEdgeColor(bond.rule),
+          edgeRadius: ruleEdgeRadius(bond.rule)
+        });
+        return;
+      }
       const trimmed = trimmedBondEndpoints(bond.a, bond.b, radiusScale);
       if (!trimmed) return;
       const radius = Math.max(0.005, Math.max(0.01, Number(bond.rule.thickness) || 0.15) * 0.5);
@@ -884,6 +1070,10 @@
     ];
   }
 
+  function dotVec(a, b) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  }
+
   function lengthVec(a) {
     return Math.hypot(a[0], a[1], a[2]);
   }
@@ -904,6 +1094,10 @@
     (scene.bonds || []).forEach((bond) => {
       points.push(pointArray(bond.a));
       points.push(pointArray(bond.b));
+    });
+    (scene.polyhedra || []).forEach((polyhedron) => {
+      points.push(pointArray(polyhedron.center));
+      (polyhedron.vertices || []).forEach((vertex) => points.push(pointArray(vertex)));
     });
     (scene.edges || []).forEach((edge) => {
       points.push(pointArray(edge.a));
@@ -1001,11 +1195,12 @@
     ];
   }
 
-  function solidGroup(groups, color, options) {
-    const key = colorGroupKey(color);
+  function solidGroup(groups, color, options, role = "") {
+    const key = `${colorGroupKey(color)}${options && options.separateGeometryRoles ? `|${role}` : ""}`;
     if (!groups.has(key)) {
       groups.set(key, {
         color,
+        role,
         positions: [],
         normals: [],
         colors: options && options.colorProfile === "powerpoint" ? [] : null,
@@ -1067,14 +1262,47 @@
     }
   }
 
-  function addColoredCylinder(groups, start, end, radius, colorStart, colorEnd, segments, options) {
+  function addColoredCylinder(groups, start, end, radius, colorStart, colorEnd, segments, options, role = "bond") {
     if (colorsMatch(colorStart, colorEnd)) {
-      addSolidCylinder(solidGroup(groups, colorStart, options), start, end, radius, segments);
+      addSolidCylinder(solidGroup(groups, colorStart, options, role), start, end, radius, segments);
       return;
     }
     const mid = mulVec(addVec(start, end), 0.5);
-    addSolidCylinder(solidGroup(groups, colorStart, options), start, mid, radius, segments);
-    addSolidCylinder(solidGroup(groups, colorEnd, options), mid, end, radius, segments);
+    addSolidCylinder(solidGroup(groups, colorStart, options, role), start, mid, radius, segments);
+    addSolidCylinder(solidGroup(groups, colorEnd, options, role), mid, end, radius, segments);
+  }
+
+  function addSolidPolyhedron(groups, polyhedron, fit, options) {
+    const vertices = (polyhedron.vertices || []).map((vertex) => transformPoint(vertex, fit));
+    if (vertices.length < 3) return;
+    const center = transformPoint(polyhedron.center, fit);
+    const faces = polyhedronFaces(vertices, center);
+    if (!faces.length) return;
+    const faceColor = exportColor(hexToRgb(polyhedron.color || "#6b7280"), options);
+    faceColor[3] = Math.max(0.05, Math.min(1, Number(polyhedron.opacity) || 0.32));
+    const mesh = solidGroup(groups, faceColor, options, "polyhedron");
+    faces.forEach((face) => {
+      const a = vertices[face[0]];
+      const b = vertices[face[1]];
+      const c = vertices[face[2]];
+      const normal = normalizeVec(crossVec(subVec(b, a), subVec(c, a)));
+      const ia = pushSolidVertex(mesh, a, normal);
+      const ib = pushSolidVertex(mesh, b, normal);
+      const ic = pushSolidVertex(mesh, c, normal);
+      mesh.indices.push(ia, ib, ic);
+    });
+
+    const edgeColor = exportColor(hexToRgb(polyhedron.edgeColor || polyhedron.color || "#374151"), options);
+    const edgeRadius = Math.max(0.001, (Number(polyhedron.edgeRadius) || 0.027) * fit.scale);
+    const edgeKeys = new Set();
+    faces.forEach((face) => {
+      [[face[0], face[1]], [face[1], face[2]], [face[2], face[0]]].forEach(([a, b]) => {
+        const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+        if (edgeKeys.has(key)) return;
+        edgeKeys.add(key);
+        addSolidCylinder(solidGroup(groups, edgeColor, options, "polyhedron-edge"), vertices[a], vertices[b], edgeRadius, 10);
+      });
+    });
   }
 
   function exportMaterial(scene) {
@@ -1088,38 +1316,57 @@
 
   function sceneToSolidGroups(scene, options) {
     const fit = fitScene(scene);
+    const modelScale = options && options.modelScale != null ?
+      Math.max(0.001, Number(options.modelScale) || 1) :
+      1;
+    const exportFit = { center: fit.center, scale: fit.scale * modelScale };
     const groups = new Map();
-    (scene.atoms || []).forEach((atom) => {
+    const addAtoms = () => (scene.atoms || []).forEach((atom) => {
       addSolidSphere(
-        solidGroup(groups, exportColor(hexToRgb(atom.color), options), options),
-        transformPoint(atom.pos, fit),
-        Math.max(0.01, atom.radius || 0.08) * fit.scale,
+        solidGroup(groups, exportColor(hexToRgb(atom.color), options), options, "atom"),
+        transformPoint(atom.pos, exportFit),
+        Math.max(0.01, atom.radius || 0.08) * exportFit.scale,
         24,
         16
       );
     });
-    (scene.bonds || []).forEach((bond) => {
+    const addBonds = () => (scene.bonds || []).forEach((bond) => {
       addColoredCylinder(
         groups,
-        transformPoint(bond.a, fit),
-        transformPoint(bond.b, fit),
-        Math.max(0.004, bond.radius || 0.03) * fit.scale,
+        transformPoint(bond.a, exportFit),
+        transformPoint(bond.b, exportFit),
+        Math.max(0.004, bond.radius || 0.03) * exportFit.scale,
         exportColor(hexToRgb(bond.colorA || bond.color || "#6b7280"), options),
         exportColor(hexToRgb(bond.colorB || bond.colorA || bond.color || "#6b7280"), options),
         18,
-        options
+        options,
+        "bond"
       );
     });
-    (scene.edges || []).forEach((edge) => {
+    const addPolyhedra = () => (scene.polyhedra || []).forEach((polyhedron) => {
+      addSolidPolyhedron(groups, polyhedron, exportFit, options);
+    });
+    const addEdges = () => (scene.edges || []).forEach((edge) => {
       const color = exportColor(hexToRgb(edge.color || "#111827"), options);
       addSolidCylinder(
-        solidGroup(groups, color, options),
-        transformPoint(edge.a, fit),
-        transformPoint(edge.b, fit),
-        Math.max(0.002, edge.radius || 0.01) * fit.scale,
+        solidGroup(groups, color, options, "edge"),
+        transformPoint(edge.a, exportFit),
+        transformPoint(edge.b, exportFit),
+        Math.max(0.002, edge.radius || 0.01) * exportFit.scale,
         8
       );
     });
+    if (options && options.atomOcclusionPassLast) {
+      addBonds();
+      addPolyhedra();
+      addEdges();
+      addAtoms();
+    } else {
+      addAtoms();
+      addBonds();
+      addPolyhedra();
+      addEdges();
+    }
     return {
       groups: [...groups.values()].filter((group) => group.indices.length),
       material: exportMaterial(scene)
@@ -1226,6 +1473,9 @@
         emissiveFactor: [0, 0, 0],
         doubleSided: true
       };
+      if ((group.color[3] == null ? 1 : group.color[3]) < 0.999) {
+        entry.alphaMode = "BLEND";
+      }
       if (material.unlit || powerpointProfile) {
         entry.extensions = { KHR_materials_unlit: {} };
       }
@@ -1291,8 +1541,8 @@
     return `(${usdNumber(values[0])}, ${usdNumber(values[1])}, ${usdNumber(values[2])})`;
   }
 
-  function createUsda(scene) {
-    const { groups, material } = sceneToSolidGroups(scene);
+  function createUsda(scene, options) {
+    const { groups, material } = sceneToSolidGroups(scene, options);
     if (!groups.length) throw new Error("Nothing to export.");
     const lines = [
       "#usda 1.0",
@@ -1427,9 +1677,14 @@
     return new Uint8Array(out);
   }
 
-  function createUsdz(scene) {
+  function createUsdz(scene, options) {
+    const usdzOptions = {
+      ...(options || {}),
+      separateGeometryRoles: true,
+      atomOcclusionPassLast: true
+    };
     const name = `${usdName(scene && scene.name, "crystal")}.usda`;
-    const bytes = encoder.encode(createUsda(scene));
+    const bytes = encoder.encode(createUsda(scene, usdzOptions));
     return new Blob([createStoredZip([{ name, bytes }])], { type: "model/vnd.usdz+zip" });
   }
 
@@ -1531,8 +1786,8 @@
     downloadBlob(createStl(scene), filename || "crystal.stl");
   }
 
-  function openUsdzQuickLook(scene, filename) {
-    const url = URL.createObjectURL(createUsdz(scene));
+  function openUsdzQuickLook(scene, filename, options) {
+    const url = URL.createObjectURL(createUsdz(scene, options));
     const link = document.createElement("a");
     link.rel = "ar";
     link.href = url;
