@@ -2231,11 +2231,45 @@
       logLine("Share links are unavailable because the model exporter did not load.");
       return;
     }
+    const fallbackCopy = () => {
+      const textarea = document.createElement("textarea");
+      textarea.value = url;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.top = "0";
+      textarea.style.left = "-9999px";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      textarea.setSelectionRange(0, textarea.value.length);
+      let copied = false;
+      try {
+        copied = document.execCommand("copy");
+      } catch (_) {
+        copied = false;
+      }
+      textarea.remove();
+      return copied;
+    };
+    const iosLike = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    if (iosLike && fallbackCopy()) {
+      logLine("Copied sharable crystal viewer link to clipboard.");
+      return;
+    }
     try {
+      if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") {
+        throw new Error("Clipboard API unavailable.");
+      }
       await navigator.clipboard.writeText(url);
       logLine("Copied sharable crystal viewer link to clipboard.");
     } catch (error) {
-      logLine(`Shareable viewer link: ${url}`);
+      if (fallbackCopy()) {
+        logLine("Copied sharable crystal viewer link to clipboard.");
+      } else {
+        logLine(`Shareable viewer link: ${url}`);
+      }
     }
   }
 
@@ -3250,19 +3284,21 @@
   }
 
   function initCrystalNavAutoHide() {
-    const toolsScroll = document.querySelector(".laue-tools-scroll");
     let hidden = false;
+
+    function setHidden(nextHidden) {
+      if (nextHidden === hidden) return;
+      hidden = nextHidden;
+      document.body.classList.toggle("laue-nav-hidden", hidden);
+      requestAnimationFrame(renderViewOnly);
+    }
+
     function updateNavHidden() {
       const winY = window.scrollY || document.documentElement.scrollTop || 0;
-      const toolsY = toolsScroll ? toolsScroll.scrollTop : 0;
-      const shouldHide = winY > 40 || toolsY > 40;
-      if (shouldHide === hidden) return;
-      hidden = shouldHide;
-      document.body.classList.toggle("laue-nav-hidden", hidden);
-      requestAnimationFrame(render);
+      setHidden(winY > 4);
     }
+
     window.addEventListener("scroll", updateNavHidden, { passive: true });
-    if (toolsScroll) toolsScroll.addEventListener("scroll", updateNavHidden, { passive: true });
     updateNavHidden();
   }
 

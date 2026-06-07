@@ -279,18 +279,23 @@
     return limit;
   }
 
+  const HKL_CACHE = new Map();
+
   function enumerateHKL(maxHklSq) {
-    const limit = hklIndexLimit(maxHklSq);
+    const key = Math.max(0, Math.floor(maxHklSq || 0));
+    if (HKL_CACHE.has(key)) return HKL_CACHE.get(key);
+    const limit = hklIndexLimit(key);
     const list = [];
     for (let h = -limit; h <= limit; h += 1) {
       for (let k = -limit; k <= limit; k += 1) {
         for (let l = -limit; l <= limit; l += 1) {
           if (h === 0 && k === 0 && l === 0) continue;
           const sq = h * h + k * k + l * l;
-          if (sq <= maxHklSq) list.push([h, k, l, sq]);
+          if (sq <= key) list.push([h, k, l, sq]);
         }
       }
     }
+    HKL_CACHE.set(key, list);
     return list;
   }
 
@@ -375,7 +380,22 @@
    * Project a diffracted ray onto the detector plane.
    * Returns pixel coordinates or null if not visible.
    */
-  function projectReflection(gLab, config, imageSize) {
+  function projectionGeometry(config, imageSize) {
+    const n = detectorNormal(config.detOmega, config.detChi, config.laueMode);
+    const basis = detectorBasis(n);
+    const detWidth = Math.max(config.detWidth, 1e-6);
+    const detHeight = Math.max(config.detHeight, 1e-6);
+    return {
+      basis,
+      planePoint: scale(basis.normal, config.detDistance),
+      pxPerMmX: imageSize.width / detWidth,
+      pxPerMmY: imageSize.height / detHeight,
+      beamX: config.beamX,
+      beamY: config.beamY
+    };
+  }
+
+  function projectReflectionWithGeometry(gLab, config, imageSize, geom) {
     const beam = [1, 0, 0];
     const gDot = dot(gLab, beam);
     const gSq = dot(gLab, gLab);
@@ -396,31 +416,26 @@
     const towardDetector = config.laueMode === "backscatter" ? direction[0] < 0 : direction[0] > 0;
     if (!towardDetector) return null;
 
-    const n = detectorNormal(config.detOmega, config.detChi, config.laueMode);
-    const basis = detectorBasis(n);
-    const planePoint = scale(basis.normal, config.detDistance);
+    const geomData = geom || projectionGeometry(config, imageSize);
 
-    const denom = dot(direction, basis.normal);
+    const denom = dot(direction, geomData.basis.normal);
     if (Math.abs(denom) < 1e-10) return null;
-    const t = dot(subtract(planePoint, [0, 0, 0]), basis.normal) / denom;
+    const t = dot(subtract(geomData.planePoint, [0, 0, 0]), geomData.basis.normal) / denom;
     if (t <= 0) return null;
 
     const hit = scale(direction, t);
-    const rel = subtract(hit, planePoint);
-    const xLab = dot(rel, basis.u);
-    const yLab = dot(rel, basis.v);
+    const rel = subtract(hit, geomData.planePoint);
+    const xLab = dot(rel, geomData.basis.u);
+    const yLab = dot(rel, geomData.basis.v);
 
-    const detWidth = Math.max(config.detWidth, 1e-6);
-    const detHeight = Math.max(config.detHeight, 1e-6);
-    const pxPerMmX = imageSize.width / detWidth;
-    const pxPerMmY = imageSize.height / detHeight;
-    const beamCx = config.beamX;
-    const beamCy = config.beamY;
-
-    const cx = beamCx + xLab * pxPerMmX;
-    const cy = beamCy + yLab * pxPerMmY;
+    const cx = geomData.beamX + xLab * geomData.pxPerMmX;
+    const cy = geomData.beamY + yLab * geomData.pxPerMmY;
 
     return { x: cx, y: cy, q: qMag, lambda, xLab, yLab };
+  }
+
+  function projectReflection(gLab, config, imageSize) {
+    return projectReflectionWithGeometry(gLab, config, imageSize, null);
   }
 
   function projectHKL(params, hkl, config, imageSize) {
@@ -448,12 +463,13 @@
       config.sampleSigns
     );
     const hkls = enumerateHKL(config.maxHklSq);
+    const geom = projectionGeometry(config, imageSize);
     const peaks = [];
 
     for (const [h, k, l, sq] of hkls) {
       if (isAllowed && !isAllowed(h, k, l)) continue;
       const g = reciprocalVector([h, k, l], ub);
-      const proj = projectReflection(g, config, imageSize);
+      const proj = projectReflectionWithGeometry(g, config, imageSize, geom);
       if (!proj) continue;
       peaks.push({
         h, k, l,

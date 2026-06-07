@@ -379,23 +379,38 @@
     }
   }
 
-  function imageDataFromImage(img) {
+  function imageDataFromCanvasSource(source, width, height) {
     const canvas = document.createElement("canvas");
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(img, 0, 0);
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(source, 0, 0);
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const n = canvas.width * canvas.height;
     const intensities = new Float32Array(n);
     let maxVal = 0;
-    for (let i = 0; i < n; i += 1) {
-      const r = imageData.data[i * 4];
-      const g = imageData.data[i * 4 + 1];
-      const b = imageData.data[i * 4 + 2];
-      const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-      intensities[i] = lum;
-      if (lum > maxVal) maxVal = lum;
+    const pixels = imageData.data;
+    let grayscale = true;
+    const sampleStep = Math.max(1, Math.floor(n / 4096));
+    for (let i = 0; i < n; i += sampleStep) {
+      const off = i * 4;
+      if (pixels[off] !== pixels[off + 1] || pixels[off] !== pixels[off + 2]) {
+        grayscale = false;
+        break;
+      }
+    }
+    if (grayscale) {
+      for (let i = 0, off = 0; i < n; i += 1, off += 4) {
+        const val = pixels[off];
+        intensities[i] = val;
+        if (val > maxVal) maxVal = val;
+      }
+    } else {
+      for (let i = 0, off = 0; i < n; i += 1, off += 4) {
+        const lum = 0.299 * pixels[off] + 0.587 * pixels[off + 1] + 0.114 * pixels[off + 2];
+        intensities[i] = lum;
+        if (lum > maxVal) maxVal = lum;
+      }
     }
     return {
       width: canvas.width,
@@ -405,6 +420,14 @@
       meta: {},
       source: "image"
     };
+  }
+
+  function imageDataFromImage(img) {
+    return imageDataFromCanvasSource(img, img.naturalWidth, img.naturalHeight);
+  }
+
+  function imageDataFromBitmap(bitmap) {
+    return imageDataFromCanvasSource(bitmap, bitmap.width, bitmap.height);
   }
 
   function loadImageFromUrl(url) {
@@ -422,7 +445,19 @@
     });
   }
 
-  function loadImageFile(file) {
+  async function loadImageFile(file) {
+    if (global.createImageBitmap) {
+      try {
+        const bitmap = await createImageBitmap(file);
+        try {
+          return imageDataFromBitmap(bitmap);
+        } finally {
+          if (bitmap.close) bitmap.close();
+        }
+      } catch (_) {
+        // Fall back to HTMLImageElement decoding below.
+      }
+    }
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(file);
       const img = new Image();
@@ -439,6 +474,7 @@
         reject(new Error("Could not decode image file."));
       };
       img.src = url;
+      if (img.decode) img.decode().catch(() => { /* onerror handles decode failures */ });
     });
   }
 
@@ -507,12 +543,29 @@
   }
 
   function evaluateCurve(points, t) {
-    if (!points || points.length === 0) return t;
+    return evaluatePreparedCurve(prepareCurve(points), t);
+  }
+
+  function prepareCurve(points) {
+    if (!points || points.length === 0) return null;
     const sorted = [...points].sort((a, b) => a.x - b.x);
-    if (sorted.length === 1) return sorted[0].y;
+    if (sorted.length === 1) return { sorted, xs: [sorted[0].x], ys: [sorted[0].y], slopes: [0] };
 
     const xs = sorted.map((p) => p.x);
     const ys = sorted.map((p) => p.y);
+    return {
+      sorted,
+      xs,
+      ys,
+      slopes: sorted.length > 2 ? pchipSlopes(xs, ys) : null
+    };
+  }
+
+  function evaluatePreparedCurve(prepared, t) {
+    if (!prepared) return t;
+    const { sorted, slopes } = prepared;
+    if (sorted.length === 1) return sorted[0].y;
+
     const first = sorted[0];
     const last = sorted[sorted.length - 1];
 
@@ -535,7 +588,6 @@
       return a.y + u * (b.y - a.y);
     }
 
-    const slopes = pchipSlopes(xs, ys);
     for (let i = 0; i < sorted.length - 1; i += 1) {
       if (t >= sorted[i].x && t <= sorted[i + 1].x) {
         const h = sorted[i + 1].x - sorted[i].x || 1;
@@ -565,14 +617,59 @@
     return { min: minVal, max: maxVal };
   }
 
+  function partition3(values, left, right, pivotIndex) {
+    const pivotValue = values[pivotIndex];
+    let tmp = values[pivotIndex];
+    values[pivotIndex] = values[left];
+    values[left] = tmp;
+
+    let lt = left;
+    let i = left;
+    let gt = right;
+    while (i <= gt) {
+      if (values[i] < pivotValue) {
+        tmp = values[lt];
+        values[lt] = values[i];
+        values[i] = tmp;
+        lt += 1;
+        i += 1;
+      } else if (values[i] > pivotValue) {
+        tmp = values[i];
+        values[i] = values[gt];
+        values[gt] = tmp;
+        gt -= 1;
+      } else {
+        i += 1;
+      }
+    }
+    return { lt, gt };
+  }
+
+  function quickselect(values, k) {
+    let left = 0;
+    let right = values.length - 1;
+    while (left < right) {
+      const { lt, gt } = partition3(values, left, right, Math.floor((left + right) / 2));
+      if (k < lt) right = lt - 1;
+      else if (k > gt) left = gt + 1;
+      else return values[k];
+    }
+    return values[k];
+  }
+
   function intensityPercentileRange(intensities, loFrac, hiFrac) {
     const lo = clamp01(loFrac ?? 0.02);
     const hi = clamp01(hiFrac ?? 0.98);
     if (!intensities.length) return { min: 0, max: 1 };
-    const sorted = Array.from(intensities).sort((a, b) => a - b);
-    const pick = (frac) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.floor(frac * (sorted.length - 1))))];
-    const minVal = pick(Math.min(lo, hi));
-    const maxVal = pick(Math.max(lo, hi));
+    const values = Float32Array.from(intensities);
+    const pickIndex = (frac) => Math.min(
+      values.length - 1,
+      Math.max(0, Math.floor(frac * (values.length - 1)))
+    );
+    const loIndex = pickIndex(Math.min(lo, hi));
+    const hiIndex = pickIndex(Math.max(lo, hi));
+    const minVal = quickselect(values, loIndex);
+    const maxVal = quickselect(values, hiIndex);
     if (!Number.isFinite(minVal) || !Number.isFinite(maxVal) || maxVal <= minVal) {
       return intensityRange(intensities);
     }
@@ -623,6 +720,35 @@
     return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
   }
 
+  function buildDisplayLut(display, colormap, size = 4096) {
+    const lut = new Uint8ClampedArray(size * 3);
+    const curve = prepareCurve(display && display.curvePoints);
+    const reverse = !!(display && display.reverseColormap);
+    const denom = Math.max(size - 1, 1);
+    for (let i = 0; i < size; i += 1) {
+      const rawT = i / denom;
+      const mapped = clamp01(evaluatePreparedCurve(curve, rawT));
+      const lutT = reverse ? 1 - mapped : mapped;
+      const [r, g, b] = colorForMappedT(lutT, colormap);
+      const off = i * 3;
+      lut[off] = r;
+      lut[off + 1] = g;
+      lut[off + 2] = b;
+    }
+    return { lut, size };
+  }
+
+  function writeLutColor(lutInfo, rawT, out, off) {
+    const idx = Math.min(
+      lutInfo.size - 1,
+      Math.max(0, Math.round(clamp01(rawT) * (lutInfo.size - 1)))
+    ) * 3;
+    out[off] = lutInfo.lut[idx];
+    out[off + 1] = lutInfo.lut[idx + 1];
+    out[off + 2] = lutInfo.lut[idx + 2];
+    out[off + 3] = 255;
+  }
+
   function sampleAt(intensities, width, height, x, y, flipH, flipV) {
     let sx = flipH ? width - 1 - x : x;
     let sy = flipV ? height - 1 - y : y;
@@ -635,6 +761,7 @@
     const { width, height, intensities } = data;
     const { rotate90 = 0, flipH = false, flipV = false } = transform || {};
     const rot = ((rotate90 % 4) + 4) % 4;
+    if (rot === 0 && !flipH && !flipV) return data;
     const outW = rot % 2 === 1 ? height : width;
     const outH = rot % 2 === 1 ? width : height;
     const out = new Float32Array(outW * outH);
@@ -674,17 +801,30 @@
     } = display || {};
 
     const { width, height, intensities } = data;
-    const range = intensityRange(intensities);
-    const maxI = vmax ?? range.max ?? 1;
-    const minI = vmin ?? range.min ?? 0;
+    let range = null;
+    if (vmin == null || vmax == null) range = intensityRange(intensities);
+    const maxI = vmax ?? range?.max ?? 1;
+    const minI = vmin ?? range?.min ?? 0;
+    const span = Math.max(maxI - minI, 1e-12);
+    const invert = !!(display && display.invertIntensity);
+    const lutInfo = buildDisplayLut(display, colormap);
+    const lut = lutInfo.lut;
+    const lutMax = lutInfo.size - 1;
 
     const imageData = new ImageData(width, height);
+    const out = imageData.data;
     for (let i = 0; i < intensities.length; i += 1) {
-      const [r, g, b] = intensityToRgb(intensities[i], minI, maxI, display, colormap);
-      imageData.data[i * 4] = r;
-      imageData.data[i * 4 + 1] = g;
-      imageData.data[i * 4 + 2] = b;
-      imageData.data[i * 4 + 3] = 255;
+      const v = invert ? minI + maxI - intensities[i] : intensities[i];
+      const rawT = (v - minI) / span;
+      const lutIndex = rawT <= 0
+        ? 0
+        : (rawT >= 1 ? lutMax : Math.round(rawT * lutMax));
+      const lutOff = lutIndex * 3;
+      const outOff = i * 4;
+      out[outOff] = lut[lutOff];
+      out[outOff + 1] = lut[lutOff + 1];
+      out[outOff + 2] = lut[lutOff + 2];
+      out[outOff + 3] = 255;
     }
     return imageData;
   }
@@ -701,15 +841,16 @@
     } = display || {};
     const maxI = vmax ?? dataMax ?? 1;
     const minI = vmin;
-    const barDisplay = { ...display, invertIntensity: false };
+    const lutInfo = buildDisplayLut({ ...display, invertIntensity: false }, colormap);
+    const imageData = new ImageData(w, h);
 
     for (let row = 0; row < h; row += 1) {
       const frac = 1 - row / Math.max(h - 1, 1);
-      const intensity = minI + frac * (maxI - minI);
-      const [r, g, b] = intensityToRgb(intensity, minI, maxI, barDisplay, colormap);
-      ctx.fillStyle = `rgb(${r},${g},${b})`;
-      ctx.fillRect(0, row, w, 1);
+      for (let x = 0; x < w; x += 1) {
+        writeLutColor(lutInfo, frac, imageData.data, (row * w + x) * 4);
+      }
     }
+    ctx.putImageData(imageData, 0, 0);
 
     ctx.strokeStyle = "#888";
     ctx.lineWidth = 1;
@@ -787,8 +928,6 @@
 
   function radialNormalize(intensities, width, height, centerX, centerY, nBins) {
     const bins = Math.max(4, Math.round(nBins));
-    const sectors = 96;
-    const minCoverage = 0.55;
     const n = width * height;
     const out = new Float32Array(n);
     const maxR = Math.max(
@@ -799,34 +938,36 @@
       1e-6
     );
     const sum = new Float64Array(bins);
-    const count = new Float64Array(bins);
+    const count = new Uint32Array(bins);
     const avg = new Float32Array(bins);
-    const sectorMask = Array.from({ length: bins }, () => new Uint8Array(sectors));
+    const radialCoord = new Float32Array(n);
+    const invBinWidth = bins / maxR;
+    const dx = new Float32Array(width);
+    const dxSq = new Float32Array(width);
+    const dy = new Float32Array(height);
+    const dySq = new Float32Array(height);
+    for (let x = 0; x < width; x += 1) {
+      dx[x] = x - centerX;
+      dxSq[x] = dx[x] * dx[x];
+    }
+    for (let y = 0; y < height; y += 1) {
+      dy[y] = y - centerY;
+      dySq[y] = dy[y] * dy[y];
+    }
 
     for (let y = 0; y < height; y += 1) {
       for (let x = 0; x < width; x += 1) {
-        const r = Math.hypot(x - centerX, y - centerY);
         const idx = y * width + x;
-        const bin = Math.min(bins - 1, Math.floor((r / maxR) * bins));
-        const theta = Math.atan2(y - centerY, x - centerX);
-        const sector = Math.min(
-          sectors - 1,
-          Math.floor(((theta + Math.PI) / (Math.PI * 2)) * sectors)
-        );
+        const f = Math.sqrt(dxSq[x] + dySq[y]) * invBinWidth;
+        const bin = Math.min(bins - 1, Math.max(0, Math.floor(f)));
+        radialCoord[idx] = f - 0.5;
         sum[bin] += intensities[idx];
         count[bin] += 1;
-        sectorMask[bin][sector] = 1;
       }
     }
 
     for (let b = 0; b < bins; b += 1) {
-      let covered = 0;
-      for (let s = 0; s < sectors; s += 1) covered += sectorMask[b][s];
-      const coverage = covered / sectors;
-      avg[b] = count[b] > 0 && coverage >= minCoverage
-        ? sum[b] / count[b]
-        : NaN;
-      if (!Number.isFinite(avg[b])) count[b] = 0;
+      avg[b] = count[b] > 0 ? sum[b] / count[b] : NaN;
     }
     fillEmptyRadialBins(avg, count, bins);
 
@@ -842,13 +983,19 @@
 
     for (let y = 0; y < height; y += 1) {
       for (let x = 0; x < width; x += 1) {
-        const r = Math.hypot(x - centerX, y - centerY);
         const idx = y * width + x;
-        const f = Math.min(bins - 1, Math.max(0, (r / maxR) * bins));
-        const b0 = Math.floor(f);
-        const b1 = Math.min(bins - 1, b0 + 1);
-        const t = f - b0;
-        const mean = avg[b0] * (1 - t) + avg[b1] * t;
+        const f = radialCoord[idx];
+        let mean;
+        if (f <= 0) {
+          mean = avg[0];
+        } else if (f >= bins - 1) {
+          mean = avg[bins - 1];
+        } else {
+          const b0 = Math.floor(f);
+          const b1 = b0 + 1;
+          const t = f - b0;
+          mean = avg[b0] * (1 - t) + avg[b1] * t;
+        }
         out[idx] = intensities[idx] / Math.max(mean, meanFloor);
       }
     }

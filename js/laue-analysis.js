@@ -97,7 +97,7 @@
     },
     predictedPeaks: [],
     observedPeaks: [],
-    mode: "view",
+    mode: "pan-orientation",
     view: { zoom: 1, fitScale: 1, centerX: null, centerY: null, tx: 0, ty: 0, totalScale: 1 },
     drag: null,
     curveDrag: null,
@@ -106,6 +106,7 @@
   };
 
   let imagePersistTimer = null;
+  let reprocessTimer = null;
 
   const modeButtons = Array.from(document.querySelectorAll(".laue-mode-btn[data-mode]"));
 
@@ -240,6 +241,10 @@
   function isAllowed(h, k, l) {
     const crystal = readCrystal();
     const ctx = extinctionContext();
+    return isAllowedWithContext(h, k, l, crystal, ctx);
+  }
+
+  function isAllowedWithContext(h, k, l, crystal, ctx) {
     if (typeof isReflectionAllowedWithCrystal === "function") {
       return isReflectionAllowedWithCrystal(h, k, l, crystal, ctx);
     }
@@ -249,6 +254,18 @@
     }
     if (h === 0 && k === 0 && l === 0) return false;
     return true;
+  }
+
+  function allowedPredicateForCrystal(crystal) {
+    let ctx = null;
+    if (window.resolveExtinctionContext) {
+      try {
+        ctx = resolveExtinctionContext(crystal.spaceGroup);
+      } catch (_) {
+        ctx = null;
+      }
+    }
+    return (h, k, l) => isAllowedWithContext(h, k, l, crystal, ctx);
   }
 
   function migratePatternRotationIntoSampleAngles(inst) {
@@ -486,11 +503,32 @@
     if (!state.displayData) {
       return { min: display.vmin ?? 0, max: display.vmax ?? 1 };
     }
+    if (display.vmin != null && display.vmax != null) {
+      return { min: display.vmin, max: display.vmax };
+    }
     const range = LaueFormats.intensityRange(state.displayData.intensities);
     return {
       min: display.vmin ?? range.min,
       max: display.vmax ?? range.max
     };
+  }
+
+  function renderDisplayOnly() {
+    if (!state.displayData) return;
+    const display = readDisplaySettings();
+    const limits = displayIntensityLimits();
+    state.imageData = LaueFormats.renderToImageData(state.displayData, {
+      ...display,
+      vmin: limits.min,
+      vmax: limits.max
+    });
+    canvas.width = state.displayData.width;
+    canvas.height = state.displayData.height;
+    viewerPlaceholder.hidden = true;
+    viewerFrame.hidden = false;
+    updateColorbar();
+    drawCurveEditor();
+    redraw();
   }
 
   function refreshCorrectedDisplay(rescaleIntensity) {
@@ -512,33 +550,27 @@
       if (corrections.radialNormalize) autoScaleForRadialNorm();
       else restoreRawIntensityRange();
     }
-    const display = readDisplaySettings();
-    const limits = displayIntensityLimits();
-    state.imageData = LaueFormats.renderToImageData(state.displayData, {
-      ...display,
-      vmin: limits.min,
-      vmax: limits.max
-    });
-    canvas.width = state.displayData.width;
-    canvas.height = state.displayData.height;
-    viewerPlaceholder.hidden = true;
-    viewerFrame.hidden = false;
-    updateColorbar();
+    renderDisplayOnly();
     applyViewTransform();
     updatePredictions();
-    drawCurveEditor();
-    redraw();
   }
 
-  function onBeamCenterChanged() {
-    if (readCorrections().radialNormalize) refreshCorrectedDisplay();
+  function onBeamCenterChanged(options = {}) {
+    const radialNormalize = readCorrections().radialNormalize;
+    if (radialNormalize && options.deferRadialNormalize) {
+      redraw();
+      return;
+    }
+    if (radialNormalize) refreshCorrectedDisplay();
     else updatePredictions();
   }
 
   function applyIntensityRangeFromData() {
     const source = state.transformedData || state.displayData;
     if (!source) return;
-    const range = LaueFormats.intensityRange(source.intensities);
+    const range = source === state.transformedData && state.rawIntensityRange
+      ? state.rawIntensityRange
+      : LaueFormats.intensityRange(source.intensities);
     state.rawIntensityRange = range;
     if (!readCorrections().radialNormalize) {
       document.getElementById("laue-vmin").value = range.min;
@@ -562,7 +594,7 @@
     if (!readCorrections().radialNormalize) {
       state.rawIntensityRange = range;
     }
-    reprocessImage({ rescaleIntensity: false });
+    renderDisplayOnly();
     persistConfig();
     setStatus(`Intensity limits set to ${formatIntensity(range.min)} – ${formatIntensity(range.max)}.`);
   }
@@ -578,17 +610,13 @@
     document.getElementById("laue-vmax").value = range.max;
     state.display.vmin = range.min;
     state.display.vmax = range.max;
-    reprocessImage({ rescaleIntensity: false });
+    renderDisplayOnly();
     persistConfig();
     setStatus(`Intensity limits set to 1/99 percentiles: ${formatIntensity(range.min)} – ${formatIntensity(range.max)}.`);
   }
 
-  function reprocessImage(options) {
-    if (!state.rawData) return;
-    const data = {
-      ...state.rawData,
-      intensities: state.rawData.intensities.slice()
-    };
+  function updateTransformedDataFromRaw() {
+    if (!state.rawData) return false;
     const inst = readInstrument();
     state.instrument = { ...state.instrument, ...inst };
     const t = {
@@ -596,7 +624,7 @@
       flipH: Boolean(state.transform.flipH) !== Boolean(inst.autoFlipH),
       flipV: Boolean(state.transform.flipV) !== Boolean(inst.autoFlipV)
     };
-    state.transformedData = LaueFormats.applyDisplayTransform(data, t);
+    state.transformedData = LaueFormats.applyDisplayTransform(state.rawData, t);
     if (!state.rawIntensityRange) {
       state.rawIntensityRange = LaueFormats.intensityRange(state.transformedData.intensities);
     }
@@ -604,13 +632,25 @@
       state.instrument.beamX = state.transformedData.width / 2;
       state.instrument.beamY = state.transformedData.height / 2;
     }
+    return true;
+  }
+
+  function reprocessImage(options) {
+    if (!updateTransformedDataFromRaw()) return;
     refreshCorrectedDisplay(options?.rescaleIntensity);
+  }
+
+  function scheduleReprocessImage(options) {
+    if (reprocessTimer) window.clearTimeout(reprocessTimer);
+    reprocessTimer = window.setTimeout(() => {
+      reprocessTimer = null;
+      reprocessImage(options);
+    }, 80);
   }
 
   function resetCurve() {
     state.display.curvePoints = defaultCurvePoints();
-    drawCurveEditor();
-    reprocessImage();
+    renderDisplayOnly();
     persistConfig();
   }
 
@@ -810,13 +850,14 @@
         document.getElementById("laue-det-distance").value = meta.detDistanceMm;
       }
     }
-    reprocessImage();
     if (!preserveSession) {
+      updateTransformedDataFromRaw();
       applyIntensityRangeFromData();
-      reprocessImage();
+      refreshCorrectedDisplay();
       resetViewToFit();
       requestAnimationFrame(() => resetViewToFit());
     } else {
+      reprocessImage();
       applyViewTransform();
     }
     if (!state.displayData) {
@@ -969,12 +1010,13 @@
     state.instrument = { ...state.instrument, ...inst };
     const config = buildConfig(state.instrument);
     const imageSize = { width: state.displayData.width, height: state.displayData.height };
+    const allowed = allowedPredicateForCrystal(state.crystal);
     try {
       state.predictedPeaks = LaueMath.computePredictedPeaks(
         state.crystal,
         config,
         imageSize,
-        isAllowed
+        allowed
       );
       renderPeaksTable();
       const onImage = state.predictedPeaks.filter((p) => p.onImage).length;
@@ -1197,6 +1239,9 @@
 
   function curveIntensityRange() {
     const display = state.display;
+    if (display.vmin != null && display.vmax != null) {
+      return { min: display.vmin, max: display.vmax };
+    }
     if (state.displayData) {
       const range = LaueFormats.intensityRange(state.displayData.intensities);
       return {
@@ -1583,18 +1628,20 @@
       return;
     }
     const before = snapshotRefinementInstrument();
+    const crystal = readCrystal();
+    const allowed = allowedPredicateForCrystal(crystal);
     if (refineBtn) refineBtn.disabled = true;
     refineResult.textContent = `${matchMsg} Refining… starting from current fit.`;
     await nextPaint();
     let result;
     try {
       result = await LaueMath.refineOrientation(
-        readCrystal(),
+        crystal,
         buildConfig(readInstrument()),
         { width: state.displayData.width, height: state.displayData.height },
         state.observedPeaks,
         flags,
-        isAllowed,
+        allowed,
         30,
         {
           onProgress: (progress) => {
@@ -1723,6 +1770,21 @@
     return best;
   }
 
+  function beamHandleHit(pos) {
+    const beam = beamCenterPosition();
+    const beamX = beam.x;
+    const beamY = beam.y;
+    const beamR = state.instrument.beamRadius;
+    const hitR = screenPxToCanvas(10);
+    if (Math.hypot(pos.x - (beamX + beamR), pos.y - beamY) < hitR) {
+      return { type: "beam-center", dx: pos.x - beamX, dy: pos.y - beamY };
+    }
+    if (Math.hypot(pos.x - beamX, pos.y - beamY) < hitR) {
+      return { type: "beam-center", dx: pos.x - beamX, dy: pos.y - beamY };
+    }
+    return null;
+  }
+
   function clearObservedPeakSelection() {
     for (const p of state.observedPeaks) {
       p.selected = false;
@@ -1758,15 +1820,10 @@
     const beam = beamCenterPosition();
     const beamX = beam.x;
     const beamY = beam.y;
-    const beamR = state.instrument.beamRadius;
-    const hitR = screenPxToCanvas(10);
 
-    if (state.mode === "beam") {
-      const onRadius = Math.hypot(pos.x - (beamX + beamR), pos.y - beamY) < hitR;
-      const onCenter = Math.hypot(pos.x - beamX, pos.y - beamY) < hitR;
-      if (onRadius) state.drag = { type: "beam-radius", startR: beamR, cx: beamX, cy: beamY };
-      else if (onCenter) state.drag = { type: "beam-center", dx: pos.x - beamX, dy: pos.y - beamY };
-      else state.drag = { type: "beam-center", dx: 0, dy: 0 };
+    const beamDrag = beamHandleHit(pos);
+    if (beamDrag) {
+      state.drag = beamDrag;
       return;
     }
 
@@ -1850,10 +1907,7 @@
 
     if (state.drag.type === "beam-center") {
       setBeamCenterPosition(pos.x - (state.drag.dx || 0), pos.y - (state.drag.dy || 0));
-      onBeamCenterChanged();
-    } else if (state.drag.type === "beam-radius") {
-      state.instrument.beamRadius = Math.max(5, Math.hypot(pos.x - state.drag.cx, pos.y - state.drag.cy));
-      redraw();
+      onBeamCenterChanged({ deferRadialNormalize: true });
     } else if (state.drag.type === "pan-orient") {
       const signs = {
         omega: document.getElementById("laue-sign-omega").value === "-1" ? -1 : 1,
@@ -1929,11 +1983,17 @@
     }
     if (state.drag) {
       const wasMovePeak = state.drag.type === "move-peak";
+      const wasBeamCenter = state.drag.type === "beam-center";
       if (wasMovePeak || state.drag.type === "pan-view") {
         clearObservedPeakSelection();
         if (canvasViewport) canvasViewport.classList.remove("laue-dragging");
       }
       state.drag = null;
+      if (wasBeamCenter) {
+        onBeamCenterChanged();
+        persistConfig();
+        return;
+      }
       if (wasMovePeak) rematchObservedPeaksIfAny();
       redraw();
       persistConfig();
@@ -1966,8 +2026,7 @@
       view: "View mode — scroll wheel to zoom; right-click resets zoom",
       "zoom-area": "Drag a rectangle to zoom; right-click resets zoom",
       "pan-view": "Drag to pan the image view",
-      beam: "Drag beam center; drag orange handle to scale circle",
-      "pan-orientation": "Drag to pan — the point under the cursor stays under the cursor",
+      "pan-orientation": "Drag to pan orientation; drag beam-center handles directly when needed",
       "rotate-pattern": "Drag to rotate sample orientation about the direct beam",
       "add-peak": "Click to add observed peak",
       "move-peak": "Click and drag detected peaks to reposition them",
@@ -2011,24 +2070,40 @@
     document.getElementById("laue-intensity-autoscale").addEventListener("click", setIntensityLimitsToDataRange);
     document.getElementById("laue-intensity-percentile").addEventListener("click", setIntensityLimitsToPercentiles);
 
-    document.getElementById("laue-colormap").addEventListener("change", () => reprocessImage());
-    document.getElementById("laue-vmin").addEventListener("input", () => reprocessImage({ rescaleIntensity: false }));
-    document.getElementById("laue-vmax").addEventListener("input", () => reprocessImage({ rescaleIntensity: false }));
-    document.getElementById("laue-reverse-colormap").addEventListener("change", () => reprocessImage());
-    document.getElementById("laue-invert-intensity").addEventListener("change", () => reprocessImage());
+    document.getElementById("laue-colormap").addEventListener("change", () => { renderDisplayOnly(); persistConfig(); });
+    document.getElementById("laue-vmin").addEventListener("input", () => { renderDisplayOnly(); persistConfig(); });
+    document.getElementById("laue-vmax").addEventListener("input", () => { renderDisplayOnly(); persistConfig(); });
+    document.getElementById("laue-reverse-colormap").addEventListener("change", () => { renderDisplayOnly(); persistConfig(); });
+    document.getElementById("laue-invert-intensity").addEventListener("change", () => { renderDisplayOnly(); persistConfig(); });
 
     ["laue-correction-blur", "laue-blur-radius"].forEach((id) => {
       const el = document.getElementById(id);
+      const onBlurInput = () => {
+        scheduleReprocessImage({ rescaleIntensity: false });
+        persistConfig();
+      };
       const onBlurChange = () => {
+        if (reprocessTimer) {
+          window.clearTimeout(reprocessTimer);
+          reprocessTimer = null;
+        }
         reprocessImage({ rescaleIntensity: false });
         persistConfig();
       };
-      el.addEventListener("input", onBlurChange);
+      el.addEventListener("input", onBlurInput);
       el.addEventListener("change", onBlurChange);
     });
     ["laue-correction-radial", "laue-radial-bins"].forEach((id) => {
-      document.getElementById(id).addEventListener("input", () => { reprocessImage(); persistConfig(); });
-      document.getElementById(id).addEventListener("change", () => { reprocessImage(); persistConfig(); });
+      const el = document.getElementById(id);
+      el.addEventListener("input", () => { scheduleReprocessImage(); persistConfig(); });
+      el.addEventListener("change", () => {
+        if (reprocessTimer) {
+          window.clearTimeout(reprocessTimer);
+          reprocessTimer = null;
+        }
+        reprocessImage();
+        persistConfig();
+      });
     });
 
     document.getElementById("laue-curve-reset").addEventListener("click", resetCurve);
@@ -2097,8 +2172,8 @@
       const pt = curvePointFromEvent(e);
       state.display.curvePoints.push(pt);
       ensureCurveEndpoints();
-      drawCurveEditor();
-      reprocessImage();
+      renderDisplayOnly();
+      persistConfig();
     });
     curveCanvas.addEventListener("contextmenu", (e) => {
       e.preventDefault();
@@ -2108,8 +2183,7 @@
       if (Math.abs(pt.x) < 1e-6 || Math.abs(pt.x - 1) < 1e-6) return;
       state.display.curvePoints.splice(idx, 1);
       ensureCurveEndpoints();
-      drawCurveEditor();
-      reprocessImage();
+      renderDisplayOnly();
       persistConfig();
     });
     curveCanvas.addEventListener("mousemove", (e) => {
@@ -2127,8 +2201,7 @@
       if (state.curveDrag < 0) {
         state.curveDrag = state.display.curvePoints.findIndex((p) => Math.abs(p.x - lockX) < 1e-6);
       }
-      drawCurveEditor();
-      reprocessImage();
+      renderDisplayOnly();
     });
     window.addEventListener("mouseup", () => {
       state.curveDrag = null;
@@ -2352,25 +2425,23 @@
   }
 
   function initLaueNavAutoHide() {
-    const toolsScroll = document.querySelector(".laue-tools-scroll");
     let hidden = false;
 
-    function updateNavHidden() {
-      const winY = window.scrollY || document.documentElement.scrollTop || 0;
-      const toolsY = toolsScroll ? toolsScroll.scrollTop : 0;
-      const shouldHide = winY > 40 || toolsY > 40;
-      if (shouldHide === hidden) return;
-      hidden = shouldHide;
+    function setHidden(nextHidden) {
+      if (nextHidden === hidden) return;
+      hidden = nextHidden;
       document.body.classList.toggle("laue-nav-hidden", hidden);
       if (state.displayData) {
         requestAnimationFrame(() => applyViewTransform());
       }
     }
 
-    window.addEventListener("scroll", updateNavHidden, { passive: true });
-    if (toolsScroll) {
-      toolsScroll.addEventListener("scroll", updateNavHidden, { passive: true });
+    function updateNavHidden() {
+      const winY = window.scrollY || document.documentElement.scrollTop || 0;
+      setHidden(winY > 4);
     }
+
+    window.addEventListener("scroll", updateNavHidden, { passive: true });
     updateNavHidden();
   }
 
@@ -2387,7 +2458,7 @@
         redraw();
       }
     } catch (_) { /* ignore cache read errors */ }
-    setMode("view");
+    setMode("pan-orientation");
   }
 
   bootstrap();

@@ -311,7 +311,8 @@
         x: point.x,
         y: point.y,
         yaw,
-        pitch
+        pitch,
+        intent: ""
       };
     };
     canvas.addEventListener("pointerdown", (event) => {
@@ -330,8 +331,14 @@
         return;
       }
       if (!drag) return;
-      yaw = drag.yaw + (event.clientX - drag.x) * 0.01;
-      pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, drag.pitch + (event.clientY - drag.y) * 0.01));
+      const dx = event.clientX - drag.x;
+      const dy = event.clientY - drag.y;
+      if (!drag.intent && Math.hypot(dx, dy) > 8) {
+        drag.intent = Math.abs(dy) > Math.abs(dx) * 1.2 ? "scroll" : "rotate";
+      }
+      if (drag.intent === "scroll") return;
+      yaw = drag.yaw + dx * 0.01;
+      pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, drag.pitch + dy * 0.01));
     });
     ["pointerup", "pointercancel", "pointerleave"].forEach((type) => {
       canvas.addEventListener(type, (event) => {

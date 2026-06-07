@@ -1157,32 +1157,41 @@
                 s: 1 / (2 * dSpacing),
                 useFormFactor: magnetic.useFormFactor
               });
-              const intensity = intensityMode === "powder"
-                ? factor.intensity * window.ScatteringFactors.powderCorrection(twoTheta, "neutron")
-                : factor.intensity;
-              const rate = estimateCountRate(intensity, "neutron", allAtoms);
               const overlap = vectorNearlyInteger(hkl) && overlapMap.has(magneticPeakKey(hkl));
 
               peaks.push({
                 hkl,
                 parent: [h, k, l],
                 satellite: label,
+                gLength,
                 dSpacing,
                 twoTheta,
                 qLength,
+                multiplicity: 1,
                 fReal: factor.real,
                 fImag: factor.imag,
                 fMagnitude: factor.magnitude,
-                intensity,
-                relativeToNuclearMax: nuclearMax > 0 ? intensity / nuclearMax : null,
-                countRate: rate.rate,
-                countRateMissingElements: rate.missingElements || [],
+                baseIntensity: factor.intensity,
                 overlap
               });
             });
           }
         }
       }
+
+      // Group satellites by |Q| so powder intensities carry the same multiplicity
+      // weighting as the nuclear peaks; single-crystal mode leaves multiplicity at 1.
+      assignPeakMultiplicities(peaks);
+      peaks.forEach((peak) => {
+        const intensity = intensityMode === "powder"
+          ? peak.baseIntensity * Math.max(1, peak.multiplicity) * window.ScatteringFactors.powderCorrection(peak.twoTheta, "neutron")
+          : peak.baseIntensity;
+        peak.intensity = intensity;
+        peak.relativeToNuclearMax = nuclearMax > 0 ? intensity / nuclearMax : null;
+        const rate = estimateCountRate(intensity, "neutron", allAtoms);
+        peak.countRate = rate.rate;
+        peak.countRateMissingElements = rate.missingElements || [];
+      });
 
       return peaks.sort((a, b) => b.intensity - a.intensity || a.twoTheta - b.twoTheta).slice(0, 500);
     }

@@ -456,13 +456,14 @@
 
       <aside class="laue-viewer-panel" aria-label="Laue image viewer">
         <div class="laue-mode-bar" role="toolbar" aria-label="Canvas interaction modes">
-          <button type="button" class="laue-mode-btn active" data-mode="view">View</button>
+          <button type="button" class="laue-mode-btn" data-mode="view">View</button>
           <button type="button" class="laue-mode-btn" data-mode="zoom-area">Zoom</button>
           <button type="button" class="laue-mode-btn" data-mode="pan-view">Pan view</button>
           <button type="button" class="laue-mode-btn laue-mode-action" id="laue-zoom-reset">Reset zoom</button>
-          <button type="button" class="laue-mode-btn" data-mode="beam">Move beam center</button>
-          <button type="button" class="laue-mode-btn" data-mode="pan-orientation">Pan orientation</button>
+          <span class="laue-mode-separator" role="separator" aria-hidden="true"></span>
+          <button type="button" class="laue-mode-btn active" data-mode="pan-orientation">Pan orientation</button>
           <button type="button" class="laue-mode-btn" data-mode="rotate-pattern">Rotate pattern</button>
+          <span class="laue-mode-separator" role="separator" aria-hidden="true"></span>
           <button type="button" class="laue-mode-btn" data-mode="add-peak">Add peak</button>
           <button type="button" class="laue-mode-btn" data-mode="move-peak">Move peak</button>
           <button type="button" class="laue-mode-btn" data-mode="remove-peak">Remove peak</button>
