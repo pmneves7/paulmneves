@@ -119,6 +119,11 @@
             <ol id="extinction-rules" class="tool-extinction-rules">
               <li>Enter a space group and calculate to see the active rules.</li>
             </ol>
+            <div id="extinction-twins" class="scattering-twin-rules" hidden>
+              <h3 class="laue-subheading">Alternative twin domains</h3>
+              <p class="tool-note">Twins the lattice permits for this space group. Obverse/reverse twins fill in otherwise-absent reflections; merohedral twins keep the same reflection conditions but overlap reflections (biasing intensities). Pseudo-merohedral twins from accidental metric coincidences are not considered.</p>
+              <ol id="extinction-twin-rules" class="tool-extinction-rules"></ol>
+            </div>
           </div>
         </details>
 
@@ -285,6 +290,11 @@
               Count-rate estimates use ideal coherent scattering from the loaded unit cell and do not include
               absorption, sample shape, detector solid angle, efficiency, resolution, mosaicity, or extinction.
             </p>
+            <p class="tool-note">
+              Structure factors use room-temperature atomic scattering factors and neutron scattering lengths with
+              no Debye–Waller (thermal) factor and no anomalous dispersion — so X-ray F_imag is always 0. The
+              reported |F| and intensities are ideal-lattice estimates.
+            </p>
           </section>
 
           <section class="tool-section scattering-magnetic-controls">
@@ -395,6 +405,8 @@
     const cifStatusEl = document.getElementById("cif-status");
     const crystalPresetSelect = document.getElementById("crystal-preset");
     const extinctionRulesEl = document.getElementById("extinction-rules");
+    const extinctionTwinsEl = document.getElementById("extinction-twins");
+    const extinctionTwinRulesEl = document.getElementById("extinction-twin-rules");
     const spaceGroupSettingField = document.getElementById("scattering-setting-field");
     const spaceGroupSettingEl = document.getElementById("spacegroup-setting");
     const sourceTypeEl = document.getElementById("source-type");
@@ -782,6 +794,83 @@
       extinctionRulesEl.innerHTML = items.length
         ? items.map((line) => `<li>${line.replace(/^\d+\.\s+/, "")}</li>`).join("")
         : "<li>No extinction rules inferred.</li>";
+      renderTwinRules(context);
+    }
+
+    function linearPartKey(expression) {
+      const source = String(expression).replace(/\s+/g, "");
+      const normalized = /^[+-]/.test(source) ? source : `+${source}`;
+      const terms = normalized.match(/[+-][^+-]+/g) || [];
+      const coeff = { x: 0, y: 0, z: 0 };
+      terms.forEach((term) => {
+        const variable = term.slice(1);
+        if (variable === "x" || variable === "y" || variable === "z") {
+          coeff[variable] += term.charAt(0) === "-" ? -1 : 1;
+        }
+      });
+      return `${coeff.x},${coeff.y},${coeff.z}`;
+    }
+
+    // Resolve the space group through the symmetry engine to get both its IT
+    // number (for an exact crystal system) and its point group order (the count
+    // of distinct rotation/mirror parts), which drives merohedry detection.
+    function currentSpaceGroupResolution() {
+      if (!window.SpaceGroupEngine || typeof window.SpaceGroupEngine.lookupSpaceGroup !== "function") return null;
+      const spaceGroup = document.getElementById("spacegroup").value || "P 1";
+      let group;
+      try {
+        group = window.SpaceGroupEngine.lookupSpaceGroup(spaceGroup, currentSpaceGroupSetting() || "");
+      } catch (error) {
+        return null;
+      }
+      if (!group || !Array.isArray(group.operations) || !group.operations.length) return null;
+      const linearParts = new Set();
+      group.operations.forEach((operation) => {
+        const rows = String(operation).split(",");
+        if (rows.length === 3) linearParts.add(rows.map(linearPartKey).join(";"));
+      });
+      return { id: group.id, pointGroupOrder: linearParts.size || null };
+    }
+
+    function renderTwinRules(context) {
+      if (!extinctionTwinsEl || !extinctionTwinRulesEl) return;
+      const lines = [];
+
+      const obverseReverse = typeof twinExtinctionAlternatives === "function"
+        ? twinExtinctionAlternatives(context)
+        : [];
+      obverseReverse.forEach((alternative) => lines.push(alternative.label));
+
+      const resolution = currentSpaceGroupResolution();
+      const pointGroupOrder = resolution ? resolution.pointGroupOrder : null;
+      let merohedryContext = context;
+      if (resolution && resolution.id && typeof crystalSystemFromNumber === "function") {
+        merohedryContext = Object.assign({}, context, { system: crystalSystemFromNumber(resolution.id) });
+      }
+      const merohedry = pointGroupOrder && typeof merohedralTwinInfo === "function"
+        ? merohedralTwinInfo(merohedryContext, pointGroupOrder)
+        : null;
+
+      if (merohedry && merohedry.possible) {
+        lines.push(
+          `Merohedral twinning — up to ${merohedry.index} orientation states ` +
+          `(point group order ${merohedry.pointGroupOrder} is a subgroup of the ${merohedry.holohedry.symbol} lattice holohedry, order ${merohedry.holohedry.order}); ` +
+          "twin domains share the lattice, so the reflection conditions above are unchanged and twin-related reflections overlap."
+        );
+      } else if (!obverseReverse.length && merohedry && merohedry.holohedry) {
+        lines.push(
+          `No lattice-preserving twin changes the reflection conditions: the point group already matches the ${merohedry.holohedry.symbol} lattice holohedry, so merohedral twinning is not possible.`
+        );
+      }
+
+      if (!lines.length) {
+        lines.push(pointGroupOrder
+          ? "No alternative twin domains were inferred for this space group."
+          : "Twin analysis is unavailable: the symmetry engine did not recognise this space group (try its International Tables number).");
+      }
+
+      extinctionTwinsEl.hidden = false;
+      extinctionTwinRulesEl.innerHTML = lines.map((line) => `<li>${line}</li>`).join("");
     }
 
     function refreshExtinctionRulesFromInputs() {

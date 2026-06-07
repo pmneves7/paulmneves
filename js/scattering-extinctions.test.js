@@ -14,7 +14,11 @@ const {
   resolveExtinctionContext,
   isReflectionAllowed,
   isReflectionAllowedWithCrystal,
-  diamondBasisAllowed
+  diamondBasisAllowed,
+  twinExtinctionAlternatives,
+  latticeHolohedry,
+  merohedralTwinInfo,
+  crystalSystemFromNumber
 } = sandbox.window;
 
 function context(spaceGroup, options = {}) {
@@ -65,3 +69,47 @@ assert.equal(diamondBasisAllowed(2, 2, 0), true);
 const silicon = { presetId: "si-diamond", structureModel: "diamond", spaceGroup: "Fd-3m" };
 assert.equal(isReflectionAllowedWithCrystal(2, 0, 0, silicon, context("Fd-3m")), false);
 assert.equal(isReflectionAllowedWithCrystal(2, 2, 0, silicon, context("Fd-3m")), true);
+
+// Alternative twin domains: only rhombohedral R lattices have a distinct obverse/reverse pair.
+assert.equal(twinExtinctionAlternatives(context("Pm-3m")).length, 0);
+assert.equal(twinExtinctionAlternatives(context("Fm-3m")).length, 0);
+
+const obverseTwin = twinExtinctionAlternatives(context("R-3m"));
+assert.equal(obverseTwin.length, 2);
+assert.equal(obverseTwin[0].setting, "obverse");
+assert.equal(obverseTwin[1].setting, "reverse");
+assert.ok(obverseTwin[1].label.includes("h − k + l = 3n"));
+
+const reverseTwin = twinExtinctionAlternatives(context("R-3m", { rhombohedralSetting: "reverse" }));
+assert.equal(reverseTwin[0].setting, "reverse");
+assert.equal(reverseTwin[1].setting, "obverse");
+assert.ok(reverseTwin[1].label.includes("−h + k + l = 3n"));
+
+// Lattice holohedry orders, including the trigonal R (−3m) vs P (6/mmm) split.
+assert.equal(latticeHolohedry("cubic").order, 48);
+assert.equal(latticeHolohedry("orthorhombic").order, 8);
+assert.equal(latticeHolohedry("trigonal", "R").order, 12);
+assert.equal(latticeHolohedry("trigonal", "P").order, 24);
+assert.ok(latticeHolohedry("trigonal", "R").symbol.includes("3m"));
+
+// Merohedral twinning = point group is a proper subgroup of the lattice holohedry.
+const cubicHolohedral = merohedralTwinInfo(context("Pm-3m"), 48);
+assert.equal(cubicHolohedral.index, 1);
+assert.equal(cubicHolohedral.possible, false);
+
+const monoclinicP21 = merohedralTwinInfo(context("P2_1"), 2);
+assert.equal(monoclinicP21.index, 2);
+assert.equal(monoclinicP21.possible, true);
+
+const trigonalR3 = merohedralTwinInfo(context("R3"), 3);
+assert.equal(trigonalR3.index, 4);
+assert.equal(trigonalR3.possible, true);
+
+assert.equal(merohedralTwinInfo(context("Pm-3m"), 0), null);
+
+// Crystal system from IT number (exact; used to pick the lattice holohedry).
+assert.equal(crystalSystemFromNumber(4), "monoclinic");
+assert.equal(crystalSystemFromNumber(75), "tetragonal");
+assert.equal(crystalSystemFromNumber(143), "trigonal");
+assert.equal(crystalSystemFromNumber(168), "hexagonal");
+assert.equal(crystalSystemFromNumber(221), "cubic");

@@ -930,6 +930,10 @@ body.scattering-page.scattering-nav-hidden .scattering-panel-splitter {
 
 .scattering-result-block {
   background: var(--panel-strong);
+  /* Never let the fixed-height results pane shrink a block below its content
+     (the block's overflow:hidden would clip it). The pane scrolls instead, and
+     each block keeps its own internal scroll region (table wrap / rules body). */
+  flex-shrink: 0;
 }
 
 .scattering-result-block > .tool-collapsible-summary {
@@ -992,8 +996,24 @@ body.scattering-page.scattering-nav-hidden .scattering-panel-splitter {
   min-height: 2.75rem;
 }
 
+.scattering-rules-panel .tool-collapsible-body,
+.scattering-rotation-note .tool-collapsible-body {
+  max-height: min(38vh, 320px);
+  overflow-y: auto;
+}
+
 .scattering-rules-panel {
   max-width: none;
+}
+
+.scattering-twin-rules {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border);
+}
+
+.scattering-twin-rules .laue-subheading {
+  margin: 0 0 0.35rem;
 }
 
 .scattering-mode-toggle {

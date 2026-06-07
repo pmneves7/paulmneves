@@ -38,13 +38,31 @@
     return "cubic";
   }
 
+  // Resolve a Hermann–Mauguin symbol to its International Tables number using the
+  // symmetry engine when it is loaded. This is exact for any recognised symbol;
+  // the regex heuristic below is only a fallback for when the engine is absent
+  // (e.g. unit tests) or cannot parse the input.
+  function spaceGroupNumberFromEngine(symbol) {
+    const engine = (typeof window !== "undefined" && window.SpaceGroupEngine)
+      || (typeof globalThis !== "undefined" && globalThis.SpaceGroupEngine);
+    if (!engine || typeof engine.lookupSpaceGroup !== "function") return null;
+    const query = String(symbol || "").split(":")[0].trim();
+    if (!query) return null;
+    try {
+      const group = engine.lookupSpaceGroup(query, "");
+      return group && Number.isInteger(group.id) ? group.id : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
   function parseSpaceGroupInput(input) {
     const trimmed = String(input || "").trim();
     const number = parseInt(trimmed, 10);
     const hasNumber = Number.isInteger(number) && String(number) === trimmed;
     const symbol = hasNumber ? "" : trimmed;
     const normalizedSymbol = normalizeSymbol(symbol);
-    const resolvedNumber = hasNumber ? number : null;
+    const resolvedNumber = hasNumber ? number : spaceGroupNumberFromEngine(trimmed);
 
     let rhombohedralSetting = "obverse";
     if (/:r\b/i.test(trimmed) || /\(r\)/i.test(trimmed)) {
@@ -59,7 +77,9 @@
         ? normalizedSymbol.charAt(0).toUpperCase()
         : "P");
 
-    const system = hasNumber ? crystalSystem(number) : guessCrystalSystem(normalizedSymbol, centering);
+    const system = Number.isInteger(resolvedNumber)
+      ? crystalSystem(resolvedNumber)
+      : guessCrystalSystem(normalizedSymbol, centering);
 
     return {
       input: trimmed,
@@ -82,15 +102,32 @@
     return {};
   }
 
+  // Best-effort crystal system from a normalized Hermann–Mauguin symbol, used
+  // only when the symmetry engine cannot resolve the input (see
+  // spaceGroupNumberFromEngine). String heuristics on H-M symbols are inherently
+  // ambiguous (screw subscripts vs axes, compact vs full symbols), so the rare
+  // 4₃ screw groups and full-form monoclinic symbols may be misclassified here.
   function guessCrystalSystem(normalizedSymbol, centering) {
     const body = normalizedSymbol.slice(centering.length);
-    if (/m3/.test(body) || (centering === "F" && body.startsWith("d"))) return "cubic";
-    if (/[46]/.test(body)) return "hexagonal";
-    if (/^r?3/.test(body) && !/m3/.test(body)) return "trigonal";
-    if (/4/.test(body)) return "tetragonal";
-    if (/^2(1)?[mc]$/.test(body) || /^c2[mc]$/.test(body)) return "monoclinic";
+    if (!body) return "triclinic";
+
+    const hasThree = body.includes("3");
+    const hasFour = body.includes("4");
+    const hasSix = body.includes("6");
+    const leadsWithThree = /^3/.test(body);
+
+    // Cubic: a 3-fold along <111> sits after the leading axis and there is no
+    // 6-fold (covers m-3, m-3m, 23, 432, -43m and the F d -3 diamond forms).
+    if (hasThree && !leadsWithThree && !hasSix) return "cubic";
+    if (hasSix) return "hexagonal";
+    if (leadsWithThree) return "trigonal";
+    if (hasFour) return "tetragonal";
+
+    // Monoclinic compact symbols: "2", "21", "m", "c", "2/m", "21/c", … which
+    // normalize (no slash) to bodies like "2", "21", "m", "2c", "21c".
+    if (body.length <= 3 && /^(2|21)?[abcmn]?$/.test(body)) return "monoclinic";
     if (body.length >= 3) return "orthorhombic";
-    if (/2/.test(body)) return "monoclinic";
+    if (body.includes("2") || body.includes("m")) return "monoclinic";
     return "triclinic";
   }
 
@@ -377,6 +414,62 @@
     return true;
   }
 
+  // Alternative twin domains whose *lattice* reflection condition differs from
+  // the current setting. Merohedral twins share the lattice (same absences), so
+  // the meaningful case is the rhombohedral obverse/reverse pair, where a twin
+  // domain can fill in reflections that are absent in the chosen setting.
+  function twinExtinctionAlternatives(context) {
+    if (!context || context.centering !== "R") return [];
+    const condition = {
+      obverse: "−h + k + l = 3n",
+      reverse: "h − k + l = 3n"
+    };
+    const current = context.rhombohedralSetting === "reverse" ? "reverse" : "obverse";
+    const other = current === "reverse" ? "obverse" : "reverse";
+    return [
+      {
+        id: "twin-r-current",
+        setting: current,
+        label: `This domain (${current} R setting): (hkl) require ${condition[current]}`
+      },
+      {
+        id: "twin-r-alternate",
+        setting: other,
+        label: `Obverse/reverse twin domain (${other} R setting): (hkl) require ${condition[other]}`
+      }
+    ];
+  }
+
+  // Point group of the lattice (holohedry) and its order, by crystal system.
+  // A hexagonal lattice (trigonal-P or hexagonal groups) has holohedry 6/mmm;
+  // a rhombohedral (R) lattice has −3m.
+  function latticeHolohedry(system, centering) {
+    switch (system) {
+      case "triclinic": return { symbol: "−1", order: 2 };
+      case "monoclinic": return { symbol: "2/m", order: 4 };
+      case "orthorhombic": return { symbol: "mmm", order: 8 };
+      case "tetragonal": return { symbol: "4/mmm", order: 16 };
+      case "trigonal": return centering === "R" ? { symbol: "−3m", order: 12 } : { symbol: "6/mmm", order: 24 };
+      case "hexagonal": return { symbol: "6/mmm", order: 24 };
+      case "cubic": return { symbol: "m−3m", order: 48 };
+      default: return null;
+    }
+  }
+
+  // Merohedral twinning is possible when the crystal point group is a proper
+  // subgroup of its lattice holohedry. Such twins preserve the lattice (and so
+  // the reflection conditions), overlapping otherwise-inequivalent reflections.
+  // pointGroupOrder = number of distinct rotation/mirror parts in the group.
+  function merohedralTwinInfo(context, pointGroupOrder) {
+    const holohedry = latticeHolohedry(context && context.system, context && context.centering);
+    if (!holohedry || !Number.isInteger(pointGroupOrder) || pointGroupOrder <= 0) return null;
+    if (holohedry.order % pointGroupOrder !== 0) {
+      return { holohedry, pointGroupOrder, index: null, possible: false };
+    }
+    const index = holohedry.order / pointGroupOrder;
+    return { holohedry, pointGroupOrder, index, possible: index > 1 };
+  }
+
   function describeExtinctionRules(context, crystal) {
     const lines = [
       "Reflections must satisfy every rule below (International Tables standard setting):"
@@ -425,4 +518,8 @@
   window.hasDiamondBasisExtinctions = hasDiamondBasisExtinctions;
   window.diamondBasisAllowed = diamondBasisAllowed;
   window.describeExtinctionRules = describeExtinctionRules;
+  window.twinExtinctionAlternatives = twinExtinctionAlternatives;
+  window.latticeHolohedry = latticeHolohedry;
+  window.merohedralTwinInfo = merohedralTwinInfo;
+  window.crystalSystemFromNumber = crystalSystem;
 })();
