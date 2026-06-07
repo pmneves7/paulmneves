@@ -210,13 +210,26 @@
                 <input type="number" id="gamma" step="any" min="0" max="180" value="90" required />
               </div>
               <div class="tool-field scattering-grid-break">
-                <label for="spacegroup">Space group</label>
+                <label for="spacegroup">Space group (symbol)</label>
                 <input
                   type="text"
                   id="spacegroup"
                   value="Pm-3m"
-                  placeholder="symbol or number, e.g. 221"
-                  title="Enter a Hermann-Mauguin symbol such as Pm-3m or Fd-3m, or an International Tables space-group number from 1 to 230."
+                  placeholder="e.g. F d -3 m"
+                  title="Enter a Hermann-Mauguin symbol such as Pm-3m or Fd-3m. Editing this updates the number field."
+                />
+              </div>
+              <div class="tool-field">
+                <label for="spacegroup-number">Space group (no.)</label>
+                <input
+                  type="number"
+                  id="spacegroup-number"
+                  min="1"
+                  max="230"
+                  step="1"
+                  value="221"
+                  placeholder="1–230"
+                  title="International Tables space-group number from 1 to 230. Editing this updates the symbol field."
                 />
               </div>
               <div class="tool-field" id="scattering-setting-field" hidden>
@@ -391,6 +404,7 @@
   <script src="../js/space-groups-data.js"></script>
   <script src="../js/spacegroup-settings-data.js"></script>
   <script src="../js/spacegroup-engine.js"></script>
+  <script src="../js/spacegroup-fields.js"></script>
   <script src="../js/crystal-model.js"></script>
   <script src="../js/scattering-extinctions.js"></script>
   <script src="../js/scattering-factors.js"></script>
@@ -409,6 +423,7 @@
     const extinctionTwinRulesEl = document.getElementById("extinction-twin-rules");
     const spaceGroupSettingField = document.getElementById("scattering-setting-field");
     const spaceGroupSettingEl = document.getElementById("spacegroup-setting");
+    const spaceGroupNumberEl = document.getElementById("spacegroup-number");
     const sourceTypeEl = document.getElementById("source-type");
     const xrayLineEl = document.getElementById("xray-line");
     const xrayLineField = document.getElementById("xray-line-field");
@@ -519,6 +534,9 @@
       return (spaceGroupSettingEl && spaceGroupSettingEl.value) || crystalMeta.spaceGroupSetting || "";
     }
 
+    // Linked space-group symbol/number fields, wired by the shared helper.
+    let spaceGroupFieldsLink = null;
+
     function settingOptionLabel(setting, index, total) {
       const base = `${setting.hermannMauguin} [${setting.hallSymbol}]`;
       if (setting.preferred) return `${base} - conventional`;
@@ -526,6 +544,7 @@
     }
 
     function updateSpaceGroupSettingOptions() {
+      if (spaceGroupFieldsLink) spaceGroupFieldsLink.sync();
       if (!spaceGroupSettingField || !spaceGroupSettingEl || !window.SpaceGroupEngine || typeof window.SpaceGroupEngine.listSpaceGroupSettings !== "function") return;
       const previous = crystalMeta.spaceGroupSetting || (spaceGroupSettingEl && spaceGroupSettingEl.value) || "";
       const settings = window.SpaceGroupEngine.listSpaceGroupSettings(latticeFieldMap.spaceGroup ? latticeFieldMap.spaceGroup.value : "");
@@ -768,6 +787,13 @@
         if (input === latticeFieldMap.spaceGroup) updateSpaceGroupSettingOptions();
       });
     });
+
+    if (window.SpaceGroupFields && typeof window.SpaceGroupFields.linkSpaceGroupFields === "function") {
+      spaceGroupFieldsLink = window.SpaceGroupFields.linkSpaceGroupFields({
+        symbol: latticeFieldMap.spaceGroup,
+        number: spaceGroupNumberEl
+      });
+    }
 
     function rhombohedralSettingForExtinctions(spaceGroup) {
       const raw = String(spaceGroup || "").toLowerCase();

@@ -551,7 +551,10 @@
     return total > 1 ? `${base} - setting ${index + 1}` : base;
   }
 
+  let spaceGroupFieldsLink = null;
+
   function updateSpaceGroupSettingOptions() {
+    if (spaceGroupFieldsLink) spaceGroupFieldsLink.sync();
     const field = $("crystal-setting-field");
     const select = $("crystal-spacegroup-setting");
     if (!field || !select || !window.SpaceGroupEngine || typeof window.SpaceGroupEngine.listSpaceGroupSettings !== "function") return;
@@ -2969,6 +2972,13 @@
       });
     }
 
+    if (window.SpaceGroupFields && typeof window.SpaceGroupFields.linkSpaceGroupFields === "function") {
+      spaceGroupFieldsLink = window.SpaceGroupFields.linkSpaceGroupFields({
+        symbol: "crystal-spacegroup",
+        number: "crystal-spacegroup-number"
+      });
+    }
+
     const spaceGroupSetting = $("crystal-spacegroup-setting");
     if (spaceGroupSetting) {
       spaceGroupSetting.addEventListener("change", () => {
@@ -3014,7 +3024,7 @@
 
     document.querySelectorAll("input, select").forEach((el) => {
       if (el.closest("#crystal-atom-table") || el.closest("#crystal-atom-style-list") || ["cif-file", "crystal-config-file"].includes(el.id)) return;
-      if (["show-generated-atoms", "crystal-spacegroup", "crystal-spacegroup-setting", "model-export-format"].includes(el.id)) return;
+      if (["show-generated-atoms", "crystal-spacegroup", "crystal-spacegroup-number", "crystal-spacegroup-setting", "model-export-format"].includes(el.id)) return;
       if (el.tagName === "INPUT" && (el.type === "range" || el.type === "color")) {
         el.addEventListener("change", render);
       } else {

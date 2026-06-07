@@ -90,8 +90,12 @@
                   <input type="number" id="laue-gamma" step="any" min="0" max="180" value="90" />
                 </div>
                 <div class="tool-field">
-                  <label for="laue-spacegroup">Space group</label>
-                  <input type="text" id="laue-spacegroup" value="Fd-3m" placeholder="symbol or IT number" />
+                  <label for="laue-spacegroup">Space group (symbol)</label>
+                  <input type="text" id="laue-spacegroup" value="Fd-3m" placeholder="e.g. F d -3 m" />
+                </div>
+                <div class="tool-field">
+                  <label for="laue-spacegroup-number">Space group (no.)</label>
+                  <input type="number" id="laue-spacegroup-number" min="1" max="230" step="1" value="227" placeholder="1–230" />
                 </div>
               </form>
             </div>
@@ -503,6 +507,10 @@
   <script src="../js/site.js"></script>
   <script src="../js/cif-parser.js"></script>
   <script src="../js/crystal-presets.js"></script>
+  <script src="../js/space-groups-data.js"></script>
+  <script src="../js/spacegroup-settings-data.js"></script>
+  <script src="../js/spacegroup-engine.js"></script>
+  <script src="../js/spacegroup-fields.js"></script>
   <script src="../js/scattering-extinctions.js"></script>
   <script src="../js/laue-math.js"></script>
   <script src="../js/laue-formats.js"></script>

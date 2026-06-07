@@ -113,3 +113,29 @@ assert.equal(crystalSystemFromNumber(75), "tetragonal");
 assert.equal(crystalSystemFromNumber(143), "trigonal");
 assert.equal(crystalSystemFromNumber(168), "hexagonal");
 assert.equal(crystalSystemFromNumber(221), "cubic");
+
+// Crystal system from a Hermann–Mauguin symbol. With the symmetry engine absent
+// (as here) this exercises the heuristic fallback; in the app the engine makes
+// it exact. Regression guard for the old bugs: tetragonal misread as hexagonal,
+// the 23/432/-43m cubic classes, and Fdd2/Fddd misread as cubic.
+assert.equal(context("P4").system, "tetragonal");
+assert.equal(context("P41212").system, "tetragonal");
+assert.equal(context("P432").system, "cubic");
+assert.equal(context("P-43m").system, "cubic");
+assert.equal(context("P23").system, "cubic");
+assert.equal(context("Pa-3").system, "cubic");
+assert.equal(context("Ia-3d").system, "cubic");
+assert.equal(context("Fd-3m").system, "cubic");
+assert.equal(context("Pm-3m").system, "cubic");
+assert.equal(context("Fdd2").system, "orthorhombic");
+assert.equal(context("Fddd").system, "orthorhombic");
+assert.equal(context("Pnma").system, "orthorhombic");
+assert.equal(context("P212121").system, "orthorhombic");
+assert.equal(context("P63").system, "hexagonal");
+assert.equal(context("P6/mmm").system, "hexagonal");
+assert.equal(context("P-3m1").system, "trigonal");
+assert.equal(context("R-3c").system, "trigonal");
+assert.equal(context("P21/c").system, "monoclinic");
+assert.equal(context("C2/c").system, "monoclinic");
+assert.equal(context("Pm").system, "monoclinic");
+assert.equal(context("P-1").system, "triclinic");

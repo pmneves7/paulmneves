@@ -1003,7 +1003,10 @@
     return "";
   }
 
+  let spaceGroupFieldsLink = null;
+
   function updatePredictions() {
+    if (spaceGroupFieldsLink) spaceGroupFieldsLink.sync();
     if (!state.displayData) return;
     state.crystal = readCrystal();
     const inst = readInstrument();
@@ -1485,6 +1488,7 @@
     document.getElementById("laue-reverse-colormap").checked = state.display.reverseColormap !== false;
     document.getElementById("laue-invert-intensity").checked = !!state.display.invertIntensity;
     writeOverlaySettingsToForm(state.overlay);
+    if (spaceGroupFieldsLink) spaceGroupFieldsLink.sync();
     if (state.rawData) reprocessImage();
     else applyViewTransform();
     drawCurveEditor();
@@ -2228,6 +2232,7 @@
         "#laue-peak-param-fields input"
     )
       .forEach((el) => {
+        if (el.id === "laue-spacegroup-number") return; // handled by the symbol/number link
         el.addEventListener("input", () => {
           if (el.closest("#laue-crystal-form")) clearCrystalPresetMeta();
           if (el.id === "laue-det-offset-x" || el.id === "laue-det-offset-y") onBeamCenterChanged();
@@ -2254,6 +2259,13 @@
           persistConfig();
         });
       });
+
+    if (window.SpaceGroupFields && typeof window.SpaceGroupFields.linkSpaceGroupFields === "function") {
+      spaceGroupFieldsLink = window.SpaceGroupFields.linkSpaceGroupFields({
+        symbol: "laue-spacegroup",
+        number: "laue-spacegroup-number"
+      });
+    }
 
     window.addEventListener("resize", () => {
       if (state.displayData) {
