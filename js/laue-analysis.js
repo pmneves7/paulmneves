@@ -1781,7 +1781,7 @@
     const beamR = state.instrument.beamRadius;
     const hitR = screenPxToCanvas(10);
     if (Math.hypot(pos.x - (beamX + beamR), pos.y - beamY) < hitR) {
-      return { type: "beam-center", dx: pos.x - beamX, dy: pos.y - beamY };
+      return { type: "beam-radius", cx: beamX, cy: beamY };
     }
     if (Math.hypot(pos.x - beamX, pos.y - beamY) < hitR) {
       return { type: "beam-center", dx: pos.x - beamX, dy: pos.y - beamY };
@@ -1912,6 +1912,9 @@
     if (state.drag.type === "beam-center") {
       setBeamCenterPosition(pos.x - (state.drag.dx || 0), pos.y - (state.drag.dy || 0));
       onBeamCenterChanged({ deferRadialNormalize: true });
+    } else if (state.drag.type === "beam-radius") {
+      state.instrument.beamRadius = Math.max(5, Math.hypot(pos.x - state.drag.cx, pos.y - state.drag.cy));
+      redraw();
     } else if (state.drag.type === "pan-orient") {
       const signs = {
         omega: document.getElementById("laue-sign-omega").value === "-1" ? -1 : 1,
