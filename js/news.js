@@ -1,7 +1,7 @@
 const NEWS_ITEMS = [
   {
-    date: "May 2026",
-    content: `<a href="https://arxiv.org/abs/2512.16990"><em>A General Approach to Solving Spin Moiré Superstructures</em></a> accepted in <em>Phys. Rev. X</em>.`,
+    date: "June 2026",
+    content: `<a href="https://journals.aps.org/prx/abstract/10.1103/bjq3-py7l"><em>General Approach to Solving Spin Moiré Superstructures</em></a> published in <em>Phys. Rev. X</em>.`,
   },
   {
     date: "April 2026",

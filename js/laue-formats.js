@@ -902,30 +902,6 @@
     return out;
   }
 
-  function fillEmptyRadialBins(avg, count, bins) {
-    for (let b = 0; b < bins; b += 1) {
-      if (count[b] === 0 || !(avg[b] > 0)) avg[b] = NaN;
-    }
-    for (let pass = 0; pass < bins; pass += 1) {
-      let done = true;
-      for (let b = 0; b < bins; b += 1) {
-        if (Number.isFinite(avg[b])) continue;
-        done = false;
-        let lo = b - 1;
-        let hi = b + 1;
-        while (lo >= 0 && !Number.isFinite(avg[lo])) lo -= 1;
-        while (hi < bins && !Number.isFinite(avg[hi])) hi += 1;
-        if (lo >= 0 && hi < bins) avg[b] = (avg[lo] + avg[hi]) / 2;
-        else if (lo >= 0) avg[b] = avg[lo];
-        else if (hi < bins) avg[b] = avg[hi];
-      }
-      if (done) break;
-    }
-    for (let b = 0; b < bins; b += 1) {
-      if (!Number.isFinite(avg[b]) || avg[b] <= 0) avg[b] = 1;
-    }
-  }
-
   function radialNormalize(intensities, width, height, centerX, centerY, nBins) {
     const bins = Math.max(4, Math.round(nBins));
     const n = width * height;
@@ -938,8 +914,8 @@
       1e-6
     );
     const sum = new Float64Array(bins);
+    const radiusSum = new Float64Array(bins);
     const count = new Uint32Array(bins);
-    const avg = new Float32Array(bins);
     const radialCoord = new Float32Array(n);
     const invBinWidth = bins / maxR;
     const dx = new Float32Array(width);
@@ -960,19 +936,31 @@
         const idx = y * width + x;
         const f = Math.sqrt(dxSq[x] + dySq[y]) * invBinWidth;
         const bin = Math.min(bins - 1, Math.max(0, Math.floor(f)));
-        radialCoord[idx] = f - 0.5;
+        radialCoord[idx] = f;
         sum[bin] += intensities[idx];
+        radiusSum[bin] += f;
         count[bin] += 1;
       }
     }
 
+    const avg = new Float32Array(bins);
+    const avgRadius = new Float32Array(bins);
+    let validCount = 0;
     for (let b = 0; b < bins; b += 1) {
-      avg[b] = count[b] > 0 ? sum[b] / count[b] : NaN;
+      if (count[b] === 0) continue;
+      const mean = sum[b] / count[b];
+      if (!(mean > 0) || !Number.isFinite(mean)) continue;
+      avg[validCount] = mean;
+      avgRadius[validCount] = radiusSum[b] / count[b];
+      validCount += 1;
     }
-    fillEmptyRadialBins(avg, count, bins);
+    if (!validCount) {
+      out.set(intensities);
+      return out;
+    }
 
     const validMeans = [];
-    for (let b = 0; b < bins; b += 1) {
+    for (let b = 0; b < validCount; b += 1) {
       if (avg[b] > 0) validMeans.push(avg[b]);
     }
     validMeans.sort((a, b) => a - b);
@@ -986,14 +974,17 @@
         const idx = y * width + x;
         const f = radialCoord[idx];
         let mean;
-        if (f <= 0) {
+        if (f <= avgRadius[0] || validCount === 1) {
           mean = avg[0];
-        } else if (f >= bins - 1) {
-          mean = avg[bins - 1];
+        } else if (f >= avgRadius[validCount - 1]) {
+          mean = avg[validCount - 1];
         } else {
-          const b0 = Math.floor(f);
+          let b0 = Math.min(validCount - 2, Math.max(0, Math.floor(f)));
+          while (b0 < validCount - 2 && avgRadius[b0 + 1] < f) b0 += 1;
+          while (b0 > 0 && avgRadius[b0] > f) b0 -= 1;
           const b1 = b0 + 1;
-          const t = f - b0;
+          const span = Math.max(avgRadius[b1] - avgRadius[b0], 1e-12);
+          const t = (f - avgRadius[b0]) / span;
           mean = avg[b0] * (1 - t) + avg[b1] * t;
         }
         out[idx] = intensities[idx] / Math.max(mean, meanFloor);
