@@ -148,6 +148,20 @@
             </div>
 
             <div class="digitizer-edit-apply-panel" data-tab-pane="edit">
+              <h3 class="tool-subheading">Remove pixels</h3>
+              <p class="tool-note digitizer-edit-note">
+                Select a cleanup region, then press <kbd>Delete</kbd>/<kbd>Backspace</kbd> or use
+                <em>Delete selection</em> to make those pixels transparent.
+              </p>
+              <div class="digitizer-mode-bar digitizer-auto-mode-bar" role="toolbar" aria-label="Pixel removal region tools">
+                <button type="button" class="digitizer-mode-btn" data-mode="edit-remove-rect">Remove rect</button>
+                <button type="button" class="digitizer-mode-btn" data-mode="edit-remove-lasso">Remove lasso</button>
+                <button type="button" class="digitizer-mode-btn" data-mode="edit-remove-poly">Remove poly</button>
+              </div>
+              <div class="digitizer-edit-actions">
+                <button type="button" class="button secondary" id="dig-edit-delete-selection" disabled>Delete selection</button>
+                <button type="button" class="button secondary" id="dig-edit-clear-selection" disabled>Clear selection</button>
+              </div>
               <h3 class="tool-subheading">Apply &amp; export</h3>
               <p class="tool-note digitizer-edit-note">
                 <em>Apply edits</em> bakes the current preview into the working image.

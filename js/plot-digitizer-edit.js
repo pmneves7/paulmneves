@@ -16,7 +16,10 @@
     "edit-crop",
     "edit-persp",
     "edit-lens-center",
-    "edit-bg-pick"
+    "edit-bg-pick",
+    "edit-remove-rect",
+    "edit-remove-lasso",
+    "edit-remove-poly"
   ]);
 
   const CORNER_KEYS = ["tl", "tr", "br", "bl"];
@@ -32,6 +35,8 @@
     bm: "edge bottom",
     lm: "edge left"
   };
+  const REMOVE_MODES = new Set(["edit-remove-rect", "edit-remove-lasso", "edit-remove-poly"]);
+  const REMOVE_POLY_CLOSE_RADIUS_PX = 10;
 
   const PARAM_SPECS = [
     { key: "rotationDeg", range: "dig-edit-rotation-range", num: "dig-edit-rotation", min: -45, max: 45, default: 0 },
@@ -71,7 +76,11 @@
       transparencyTolerance: 24,
       transparencySoftness: 32,
       transparencyPreviewBgEnabled: false,
-      transparencyPreviewBgColor: { r: 255, g: 255, b: 255 }
+      transparencyPreviewBgColor: { r: 255, g: 255, b: 255 },
+      removeSelection: null,
+      removePolyPoints: [],
+      removeLassoPoints: [],
+      removeDrag: null
     };
   }
 
@@ -87,6 +96,10 @@
 
   function clamp(v, lo, hi) {
     return Math.max(lo, Math.min(hi, v));
+  }
+
+  function isRemoveMode(mode) {
+    return REMOVE_MODES.has(mode);
   }
 
   function copyPoint(p) {
@@ -111,6 +124,29 @@
 
   function midpoint(a, b) {
     return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  }
+
+  function pointInPolygon(x, y, pts) {
+    let inside = false;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const xi = pts[i].x;
+      const yi = pts[i].y;
+      const xj = pts[j].x;
+      const yj = pts[j].y;
+      const intersect = ((yi > y) !== (yj > y))
+        && (x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+
+  function cancelRemoveSelection(state, clearSelection = true) {
+    if (!state.edit) return;
+    if (clearSelection) state.edit.removeSelection = null;
+    state.edit.removePolyPoints = [];
+    state.edit.removeLassoPoints = [];
+    state.edit.removeDrag = null;
+    updateRemoveButtons(state);
   }
 
   function defaultCorners(w, h) {
@@ -1389,6 +1425,12 @@
     wrap.classList.toggle("has-alpha", showAlpha);
   }
 
+  function updateRemoveButtons(state = hooks.getState()) {
+    const hasSelection = !!(state && state.edit && state.edit.removeSelection);
+    if (els.deleteSelection) els.deleteSelection.disabled = !hasSelection;
+    if (els.clearSelection) els.clearSelection.disabled = !hasSelection;
+  }
+
   function getExportCanvas() {
     const state = hooks.getState();
     if (!state.image) return null;
@@ -1411,6 +1453,7 @@
     }
     state.editDrag = null;
     syncInputsFromParams(state);
+    updateRemoveButtons(state);
     markPreviewDirty();
   }
 
@@ -1506,6 +1549,74 @@
     return dist(edit.lensCenter, c) > 0.5;
   }
 
+  function drawRemovePath(ctx, pts, close, scale) {
+    if (!pts || pts.length < 2) return;
+    const s = scale || 1;
+    ctx.save();
+    ctx.strokeStyle = "#c0392b";
+    ctx.fillStyle = "rgba(192, 57, 43, 0.18)";
+    ctx.lineWidth = 2 * s;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    if (close && pts.length >= 3) {
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawRemoveSelection(ctx, selection, scale) {
+    if (!selection) return;
+    const s = scale || 1;
+    if (selection.kind === "rect") {
+      const x = Math.min(selection.a.x, selection.b.x);
+      const y = Math.min(selection.a.y, selection.b.y);
+      const w = Math.abs(selection.b.x - selection.a.x);
+      const h = Math.abs(selection.b.y - selection.a.y);
+      ctx.save();
+      ctx.fillStyle = "rgba(192, 57, 43, 0.18)";
+      ctx.strokeStyle = "#c0392b";
+      ctx.lineWidth = 2 * s;
+      ctx.setLineDash([6 * s, 4 * s]);
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeRect(x + 0.5, y + 0.5, w, h);
+      ctx.restore();
+      return;
+    }
+    drawRemovePath(ctx, selection.points, true, s);
+  }
+
+  function drawRemoveOverlays(ctx, scale) {
+    const state = hooks.getState();
+    const edit = state.edit;
+    drawRemoveSelection(ctx, edit.removeSelection, scale);
+
+    if (edit.removeDrag && edit.removeDrag.kind === "rect") {
+      drawRemoveSelection(ctx, { kind: "rect", a: edit.removeDrag.startPt, b: edit.removeDrag.currentPt }, scale);
+    }
+    if (edit.removeLassoPoints && edit.removeLassoPoints.length >= 2) {
+      drawRemovePath(ctx, edit.removeLassoPoints, edit.removeLassoPoints.length >= 3, scale);
+    }
+    if (edit.removePolyPoints && edit.removePolyPoints.length) {
+      const pts = edit.removePolyPoints.slice();
+      if (state.cursor && state.pointerInside) pts.push(state.cursor);
+      drawRemovePath(ctx, pts, edit.removePolyPoints.length >= 3, scale);
+      ctx.save();
+      edit.removePolyPoints.forEach((pt, i) => {
+        ctx.fillStyle = i === 0 && edit.removePolyPoints.length >= 3 ? "#f1c054" : "#fff";
+        ctx.strokeStyle = "#c0392b";
+        ctx.lineWidth = 1.5 * scale;
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, (i === 0 ? 6 : 4) * scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      });
+      ctx.restore();
+    }
+  }
+
   function drawOverlays(ctx, scale) {
     const state = hooks.getState();
     if (!state.image || state.activeTab !== "edit" || !previewMeta) return;
@@ -1586,6 +1697,8 @@
       }
       ctx.restore();
     }
+
+    drawRemoveOverlays(ctx, s);
   }
 
   function drawHandle(ctx, p, color, label, s, active) {
@@ -1849,6 +1962,25 @@
     ensurePreview(true);
 
     const mode = state.mode;
+    if (mode === "edit-remove-poly") {
+      const pts = state.edit.removePolyPoints;
+      if (pts.length >= 3) {
+        const first = pts[0];
+        const closeR = REMOVE_POLY_CLOSE_RADIUS_PX * (hooks.displayScale ? hooks.displayScale() : 1);
+        if (Math.hypot(p.x - first.x, p.y - first.y) <= closeR) {
+          state.edit.removeSelection = { kind: "poly", points: pts.slice() };
+          state.edit.removePolyPoints = [];
+          updateRemoveButtons(state);
+          hooks.flashStatus("Cleanup polygon selected. Press Delete to remove those pixels.");
+          hooks.refreshAll();
+          return true;
+        }
+      }
+      pts.push({ x: p.x, y: p.y });
+      hooks.redrawCanvas();
+      return true;
+    }
+
     if (mode === "edit-crop" || mode === "edit-persp") {
       return true;
     }
@@ -1876,10 +2008,38 @@
     return false;
   }
 
+  function startRemoveDrag(state, kind, p) {
+    state.editDrag = { kind: "remove", moved: false };
+    state.edit.removeDrag = {
+      kind,
+      startPt: { x: p.x, y: p.y },
+      currentPt: { x: p.x, y: p.y },
+      moved: false
+    };
+    if (kind === "lasso") {
+      state.edit.removeLassoPoints = [{ x: p.x, y: p.y }];
+    }
+    state.cursor = { x: p.x, y: p.y };
+    state.pointerInside = true;
+    startEditDragListeners();
+  }
+
   function handleMouseDown(p) {
     const state = hooks.getState();
     if (!state.image || state.activeTab !== "edit") return false;
     ensurePreview(true);
+
+    if (state.mode === "edit-remove-rect") {
+      startRemoveDrag(state, "rect", p);
+      if (hooks.updateModeBar) hooks.updateModeBar();
+      return true;
+    }
+
+    if (state.mode === "edit-remove-lasso") {
+      startRemoveDrag(state, "lasso", p);
+      if (hooks.updateModeBar) hooks.updateModeBar();
+      return true;
+    }
 
     if (state.mode === "edit-crop") {
       clearPerspective(state);
@@ -1927,7 +2087,17 @@
   function handleMouseMove(p) {
     const state = hooks.getState();
     if (!state.editDrag) return false;
-    if (state.editDrag.kind === "crop") {
+    if (state.edit.removeDrag) {
+      state.edit.removeDrag.currentPt = { x: p.x, y: p.y };
+      state.edit.removeDrag.moved = true;
+      if (state.edit.removeDrag.kind === "lasso") {
+        const pts = state.edit.removeLassoPoints;
+        const last = pts[pts.length - 1];
+        if (!last || Math.hypot(p.x - last.x, p.y - last.y) >= 1.5) {
+          pts.push({ x: p.x, y: p.y });
+        }
+      }
+    } else if (state.editDrag.kind === "crop") {
       applyCropDrag(state, state.editDrag.handle, state.editDrag.startCrop, state.editDrag.startPt, p);
     } else if (state.editDrag.kind === "persp") {
       if (state.editDrag.handle === "new") {
@@ -1945,7 +2115,40 @@
 
   function handleMouseUp() {
     const state = hooks.getState();
-    if (!state.editDrag) return false;
+    if (!state.editDrag && !state.edit.removeDrag) return false;
+    if (state.edit.removeDrag) {
+      const drag = state.edit.removeDrag;
+      const moved = drag.moved;
+      const kind = drag.kind;
+      state.edit.removeDrag = null;
+      state.editDrag = null;
+      stopEditDragListeners();
+      if (moved) {
+        if (kind === "rect") {
+          state.edit.removeSelection = {
+            kind: "rect",
+            a: drag.startPt,
+            b: drag.currentPt
+          };
+        } else {
+          const pts = state.edit.removeLassoPoints.slice();
+          if (pts.length >= 3) {
+            state.edit.removeSelection = { kind: "lasso", points: pts };
+          }
+          state.edit.removeLassoPoints = [];
+        }
+        if (state.edit.removeSelection) {
+          hooks.flashStatus("Cleanup region selected. Press Delete to remove those pixels.");
+        }
+        state.suppressNextClick = true;
+        updateRemoveButtons(state);
+        hooks.refreshAll();
+      } else {
+        cancelRemoveSelection(state, false);
+      }
+      if (hooks.updateModeBar) hooks.updateModeBar();
+      return true;
+    }
     const { moved, handle, kind } = state.editDrag;
     state.editDrag = null;
     stopEditDragListeners();
@@ -1976,6 +2179,7 @@
     stopEditDragListeners();
     const state = hooks.getState();
     state.editDrag = null;
+    cancelRemoveSelection(state, false);
   }
 
   function cancelPerspectiveRegion() {
@@ -2062,6 +2266,13 @@
   function onEditModeChange(mode) {
     const state = hooks.getState();
     if (!state.image) return;
+    if (!isRemoveMode(mode)) {
+      cancelRemoveSelection(state, false);
+    } else {
+      state.edit.removePolyPoints = [];
+      state.edit.removeLassoPoints = [];
+      state.edit.removeDrag = null;
+    }
     if (mode === "edit-persp") {
       clearCrop(state);
       if (!state.edit.customCorners || !state.edit.corners) {
@@ -2081,6 +2292,20 @@
       }
     }
     hooks.refreshAll();
+  }
+
+  function handleEscape(state) {
+    if (!state || !state.edit) return false;
+    if (state.edit.removePolyPoints.length || state.edit.removeLassoPoints.length || state.edit.removeDrag) {
+      cancelRemoveSelection(state, false);
+      stopEditDragListeners();
+      return true;
+    }
+    if (state.edit.removeSelection) {
+      cancelRemoveSelection(state, true);
+      return true;
+    }
+    return false;
   }
 
   function remapAllPoints(mapFn) {
@@ -2126,6 +2351,69 @@
     ensurePreview(true);
     hooks.flashStatus("Edits applied to the working image.");
     hooks.refreshAll();
+  }
+
+  function selectionMaskContains(selection, x, y) {
+    if (!selection) return false;
+    if (selection.kind === "rect") {
+      const left = Math.min(selection.a.x, selection.b.x);
+      const right = Math.max(selection.a.x, selection.b.x);
+      const top = Math.min(selection.a.y, selection.b.y);
+      const bottom = Math.max(selection.a.y, selection.b.y);
+      return x >= left && x <= right && y >= top && y <= bottom;
+    }
+    return selection.points && selection.points.length >= 3
+      ? pointInPolygon(x, y, selection.points)
+      : false;
+  }
+
+  function clearSelectionFromCanvas(src, selection) {
+    const out = cloneCanvas(src);
+    const outCtx = out.getContext("2d");
+    const imageData = outCtx.getImageData(0, 0, out.width, out.height);
+    const data = imageData.data;
+    for (let y = 0; y < out.height; y++) {
+      for (let x = 0; x < out.width; x++) {
+        if (!selectionMaskContains(selection, x + 0.5, y + 0.5)) continue;
+        const i = (y * out.width + x) * 4;
+        data[i] = 0;
+        data[i + 1] = 0;
+        data[i + 2] = 0;
+        data[i + 3] = 0;
+      }
+    }
+    outCtx.putImageData(imageData, 0, 0);
+    out._hasAlpha = true;
+    return out;
+  }
+
+  function deleteSelectedPixels() {
+    const state = hooks.getState();
+    if (!state.image || !state.edit || !state.edit.removeSelection) {
+      if (hooks.flashStatus) hooks.flashStatus("Select a cleanup region first.");
+      return false;
+    }
+    const srcW = state.image.width;
+    const srcH = state.image.height;
+    const shouldBakePerspective = hasActivePerspective(state.edit, srcW, srcH);
+    ensurePreview(true, { applyPerspective: shouldBakePerspective });
+    if (!previewMeta) return false;
+
+    const base = previewMeta.finalCanvas || previewMeta.preChromaCanvas || previewCanvas || state.image;
+    const cleared = clearSelectionFromCanvas(base, state.edit.removeSelection);
+    const mapFn = (pt) => previewMeta.mapSourceToFinal(pt);
+
+    remapAllPoints(mapFn);
+    state.image = cleared;
+    state.image._hasAlpha = true;
+    resetEditState(state, true);
+    previewDirty = true;
+    ensurePreview(true);
+    updateRemoveButtons(state);
+    updateCanvasWrapAlpha();
+    hooks.flashStatus("Selected pixels removed.");
+    hooks.refreshAll();
+    return true;
   }
 
   function revertToOriginal() {
@@ -2311,6 +2599,19 @@
     els.transparencyPreviewBgEnabled = document.getElementById("dig-edit-bg-preview-enabled");
     els.transparencyPreviewBgColor = document.getElementById("dig-edit-bg-preview-color");
     els.transparencyPreviewBgHex = document.getElementById("dig-edit-bg-preview-hex");
+    els.deleteSelection = document.getElementById("dig-edit-delete-selection");
+    els.clearSelection = document.getElementById("dig-edit-clear-selection");
+
+    if (els.deleteSelection) {
+      els.deleteSelection.addEventListener("click", deleteSelectedPixels);
+    }
+    if (els.clearSelection) {
+      els.clearSelection.addEventListener("click", () => {
+        cancelRemoveSelection(hooks.getState(), true);
+        hooks.refreshAll();
+      });
+    }
+    updateRemoveButtons(hooks.getState());
 
     if (els.transparencyPreviewBgEnabled) {
       els.transparencyPreviewBgEnabled.addEventListener("change", () => {
@@ -2509,6 +2810,7 @@
     handleMouseDown,
     handleMouseMove,
     handleMouseUp,
+    handleEscape,
     cancelEditDrag,
     cancelPerspectiveRegion,
     cancelCropRegion,
@@ -2521,6 +2823,7 @@
       return hasPendingEdits(state.edit, state.image);
     },
     applyEdits,
+    deleteSelectedPixels,
     saveImage,
     copyImageToClipboard,
     updateCanvasWrap: updateCanvasWrapAlpha,

@@ -517,6 +517,18 @@
         statusEl.textContent = "Click on the image to pick a background color to make transparent. Repeat for additional colors.";
         return;
       }
+      if (state.mode === "edit-remove-rect") {
+        statusEl.textContent = "Click and drag a rectangle, then press Delete or Backspace to remove those pixels.";
+        return;
+      }
+      if (state.mode === "edit-remove-lasso") {
+        statusEl.textContent = "Click and drag a freeform lasso, then press Delete or Backspace to remove those pixels.";
+        return;
+      }
+      if (state.mode === "edit-remove-poly") {
+        statusEl.textContent = "Click polygon vertices. Click the first point to close, then press Delete or Backspace.";
+        return;
+      }
       statusEl.textContent = "Adjust sliders in the sidebar for live preview, then click Apply edits.";
       return;
     }
@@ -1783,6 +1795,24 @@
     }
   }
 
+  function isEditableElement(el) {
+    if (!el) return false;
+    return el.tagName === "INPUT"
+      || el.tagName === "TEXTAREA"
+      || el.tagName === "SELECT"
+      || el.isContentEditable;
+  }
+
+  function hasSelectedText() {
+    const selection = window.getSelection ? window.getSelection() : null;
+    if (selection && selection.toString()) return true;
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA")) {
+      return ae.selectionStart !== ae.selectionEnd;
+    }
+    return false;
+  }
+
   // --- Events: image loading ----------------------------------------------
 
   uploadBtn.addEventListener("click", () => fileInput.click());
@@ -2189,13 +2219,24 @@
   document.addEventListener("keydown", (e) => {
     if (!state.image) return;
     const ae = document.activeElement;
-    if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.tagName === "SELECT")) {
+    const copyShortcut = (e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "c";
+    if (copyShortcut) {
+      if (!hasSelectedText() && !isEditableElement(ae) && window.DigitizerImageEdit) {
+        e.preventDefault();
+        window.DigitizerImageEdit.copyImageToClipboard();
+      }
+      return;
+    }
+
+    if (isEditableElement(ae)) {
       return;
     }
 
     if (e.key === "Escape") {
       let changed = false;
       if (state.activeTab === "plot" && window.DigitizerAuto && window.DigitizerAuto.handleEscape(state)) {
+        changed = true;
+      } else if (state.activeTab === "edit" && window.DigitizerImageEdit && window.DigitizerImageEdit.handleEscape(state)) {
         changed = true;
       } else if (state.pendingMeasurement) {
         state.pendingMeasurement = null;
@@ -2213,6 +2254,13 @@
       }
       if (changed) {
         refreshAll();
+        e.preventDefault();
+      }
+      return;
+    }
+
+    if ((e.key === "Backspace" || e.key === "Delete") && state.activeTab === "edit" && window.DigitizerImageEdit) {
+      if (window.DigitizerImageEdit.deleteSelectedPixels()) {
         e.preventDefault();
       }
       return;
@@ -2251,6 +2299,7 @@
         handleTransformClick(kind);
       },
       clearAnnotationState,
+      displayScale,
       setCanvasSize(w, h) {
         canvas.width = w;
         canvas.height = h;
