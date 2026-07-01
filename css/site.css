@@ -1943,6 +1943,10 @@ footer {
   margin-top: 0.25rem;
 }
 
+.digitizer-remove-actions {
+  margin-top: 0.45rem;
+}
+
 .digitizer-edit-actions .button,
 .digitizer-edit-actions .tool-inline-button {
   font-size: 0.88rem;
