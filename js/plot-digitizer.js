@@ -11,6 +11,7 @@
   const loadError = document.getElementById("dig-load-error");
 
   const workspace = document.getElementById("dig-workspace");
+  const canvasArea = document.querySelector(".digitizer-canvas-area");
   const canvasWrap = document.getElementById("dig-canvas-wrap");
   const canvas = document.getElementById("dig-canvas");
   const zoomCanvas = document.getElementById("dig-zoom");
@@ -65,6 +66,7 @@
 
   const CALIBRATION_KEYS = ["y1", "y2", "x1", "x2"];
   const AUTO_MODES = window.DigitizerAuto ? window.DigitizerAuto.AUTO_MODES : new Set();
+  const COLORMAP_MODES = window.DigitizerColormap ? window.DigitizerColormap.MODES : new Set();
   const PLOT_MODES = new Set(["y1", "y2", "x1", "x2", "add", ...AUTO_MODES]);
   const MAP_MODES = new Set(["scale-a", "scale-b", "measure-distance", "measure-angle"]);
   const EDIT_MODES = window.DigitizerImageEdit ? window.DigitizerImageEdit.EDIT_MODES : new Set();
@@ -90,7 +92,7 @@
   const state = {
     image: null,
     activeTab: "edit",
-    modeByTab: { plot: "y1", map: "scale-a", edit: null },
+    modeByTab: { plot: "y1", colormap: "cm-y1", map: "scale-a", edit: null },
     mode: null,
     cursor: null,
     pointerInside: false,
@@ -342,14 +344,14 @@
   // --- Tab handling -------------------------------------------------------
 
   function setActiveTab(tabName, force) {
-    if (tabName !== "plot" && tabName !== "map" && tabName !== "edit") return;
+    if (tabName !== "plot" && tabName !== "colormap" && tabName !== "map" && tabName !== "edit") return;
     const prevTab = state.activeTab;
     if (!force && state.activeTab === tabName) return;
     state.activeTab = tabName;
     state.selected = null;
     state.pendingMeasurement = null;
     state.mode = state.modeByTab[tabName]
-      ?? (tabName === "plot" ? "y1" : tabName === "map" ? "scale-a" : null);
+      ?? (tabName === "plot" ? "y1" : tabName === "colormap" ? "cm-y1" : tabName === "map" ? "scale-a" : null);
 
     tabButtons.forEach((btn) => {
       const isActive = btn.dataset.tab === tabName;
@@ -362,6 +364,7 @@
     if (canvasWrap) {
       canvasWrap.classList.toggle("is-editing", tabName === "edit");
     }
+    if (canvasArea) canvasArea.classList.toggle("is-colormap", tabName === "colormap");
     if (tabName === "edit" && window.DigitizerImageEdit) {
       window.DigitizerImageEdit.onTabEnter();
     } else {
@@ -377,9 +380,14 @@
   function setMode(mode) {
     if (!state.image || !mode) return;
     if (state.activeTab === "plot" && !PLOT_MODES.has(mode)) return;
+    if (state.activeTab === "colormap" && !COLORMAP_MODES.has(mode)) return;
     if (state.activeTab === "map" && !MAP_MODES.has(mode)) return;
     if (state.activeTab === "edit" && !EDIT_MODES.has(mode)) return;
     if (mode === "add" && !readyToDigitize()) return;
+    if (state.activeTab === "colormap" && mode === "cm-run" && window.DigitizerColormap) {
+      window.DigitizerColormap.run();
+      return;
+    }
 
     if (state.activeTab === "edit" && state.mode === "edit-persp" && mode === "edit-persp") {
       if (window.DigitizerImageEdit && window.DigitizerImageEdit.applyActiveRegionEdit("edit-persp")) {
@@ -412,9 +420,11 @@
       const m = btn.dataset.mode;
       const isPlot = PLOT_MODES.has(m);
       const isMap = MAP_MODES.has(m);
+      const isColormap = COLORMAP_MODES.has(m);
       const isEdit = EDIT_MODES.has(m);
       const visibleInActiveTab = (state.activeTab === "plot" && isPlot)
         || (state.activeTab === "map" && isMap)
+        || (state.activeTab === "colormap" && isColormap)
         || (state.activeTab === "edit" && isEdit);
       btn.classList.toggle("active", visibleInActiveTab && m === state.mode);
 
@@ -428,6 +438,9 @@
       } else if (m === "measure-distance" || m === "measure-angle") {
         btn.disabled = false;
         btn.classList.toggle("completed", false);
+      } else if (COLORMAP_MODES.has(m)) {
+        btn.disabled = false;
+        btn.classList.toggle("completed", !!(window.DigitizerColormap && window.DigitizerColormap.isModeComplete(m)) && m !== state.mode);
       } else if (EDIT_MODES.has(m)) {
         btn.disabled = false;
         btn.classList.toggle("completed", false);
@@ -490,6 +503,10 @@
       }
       statusEl.textContent = "Select a mode above to begin.";
       return;
+    }
+
+    if (state.activeTab === "colormap" && window.DigitizerColormap) {
+      if (window.DigitizerColormap.updateStatus(state, statusEl)) return;
     }
 
     if (state.activeTab === "edit") {
@@ -577,6 +594,7 @@
     if (!state.mode) state.mode = state.modeByTab[state.activeTab];
     if (window.DigitizerImageEdit) window.DigitizerImageEdit.onImageLoaded();
     if (window.DigitizerAuto) window.DigitizerAuto.onImageLoaded(state);
+    if (window.DigitizerColormap) window.DigitizerColormap.onImageLoaded(state);
     refreshAll();
     workspace.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -591,6 +609,7 @@
     state.pointDrag = null;
     state.suppressNextClick = false;
     state.linkOrigin = false;
+    state.colormap = null;
   }
 
   function hasCalibrationOrPoints() {
@@ -601,6 +620,7 @@
     if (CALIBRATION_KEYS.some((k) => valueInputs[k].value !== "")) return true;
     if (scaleDistanceInput && scaleDistanceInput.value !== "") return true;
     if (scaleUnitInput && scaleUnitInput.value.trim() !== "") return true;
+    if (state.colormap && (state.colormap.plot || state.colormap.bar || Object.values(state.colormap.cal).some(Boolean) || Object.values(state.colormap.colorCal || {}).some(Boolean))) return true;
     return false;
   }
 
@@ -608,12 +628,22 @@
     if (!state.image || !hasCalibrationOrPoints()) return;
     clearAnnotationState();
     CALIBRATION_KEYS.forEach((k) => { valueInputs[k].value = ""; });
+    ["cm-x1-value", "cm-x2-value", "cm-y1-value", "cm-y2-value", "cm-i1-value", "cm-i2-value", "cm-c1-value", "cm-c2-value"].forEach((id) => {
+      const input = document.getElementById(id);
+      if (input) input.value = "";
+    });
     if (scaleDistanceInput) scaleDistanceInput.value = "";
     if (scaleUnitInput) scaleUnitInput.value = "";
     if (linkOriginEl) linkOriginEl.checked = false;
+    ["cm-link-origin", "cm-logx", "cm-logy", "cm-transformed", "cm-log-i", "cm-discrete"].forEach((id) => {
+      const input = document.getElementById(id);
+      if (input) input.checked = false;
+    });
     state.modeByTab.plot = "y1";
+    state.modeByTab.colormap = "cm-y1";
     state.modeByTab.map = "scale-a";
     state.mode = state.modeByTab[state.activeTab];
+    if (window.DigitizerColormap) window.DigitizerColormap.onAnnotationsCleared();
     refreshAll();
   }
 
@@ -621,7 +651,7 @@
     state.image = null;
     state.originalImage = null;
     clearAnnotationState();
-    state.modeByTab = { plot: "y1", map: "scale-a", edit: null };
+    state.modeByTab = { plot: "y1", colormap: "cm-y1", map: "scale-a", edit: null };
     state.mode = state.modeByTab[state.activeTab];
     state.cursor = null;
     state.pointerInside = false;
@@ -634,6 +664,7 @@
     statusEl.textContent = "";
     if (window.DigitizerImageEdit) window.DigitizerImageEdit.onImageCleared();
     if (window.DigitizerAuto) window.DigitizerAuto.onImageCleared(state);
+    if (window.DigitizerColormap) window.DigitizerColormap.onImageCleared(state);
     renderPointsTable();
     renderMeasurementsTable();
     updateCoordReadout();
@@ -769,6 +800,23 @@
     CALIBRATION_KEYS.forEach((k) => {
       if (state.calibration[k]) state.calibration[k] = mapPoint(state.calibration[k]);
     });
+    if (state.colormap) {
+      Object.keys(state.colormap.cal).forEach((k) => {
+        if (state.colormap.cal[k]) state.colormap.cal[k] = mapPoint(state.colormap.cal[k]);
+      });
+      Object.keys(state.colormap.colorCal || {}).forEach((k) => {
+        if (state.colormap.colorCal[k]) state.colormap.colorCal[k] = mapPoint(state.colormap.colorCal[k]);
+      });
+      ["plot", "bar"].forEach((key) => {
+        const r = state.colormap[key];
+        if (!r) return;
+        const corners = [mapPoint({ x: r.x, y: r.y }), mapPoint({ x: r.x + r.w, y: r.y }), mapPoint({ x: r.x, y: r.y + r.h }), mapPoint({ x: r.x + r.w, y: r.y + r.h })];
+        const xs = corners.map((p) => p.x);
+        const ys = corners.map((p) => p.y);
+        state.colormap[key] = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+      });
+      state.colormap.dirty = true;
+    }
     state.points = state.points.map(mapPoint);
 
     if (state.scale.a) state.scale.a = mapPoint(state.scale.a);
@@ -991,6 +1039,8 @@
       drawPendingMeasurement(s);
     } else if (state.activeTab === "edit" && window.DigitizerImageEdit) {
       window.DigitizerImageEdit.drawOverlays(ctx, s);
+    } else if (state.activeTab === "colormap" && window.DigitizerColormap) {
+      window.DigitizerColormap.draw(ctx, s);
     }
 
     drawCursorCrosshair(s);
@@ -1356,6 +1406,8 @@
       if (cal.x1) marker(cal.x1, "#a25d12", null, isSelectedCalibration("x1"));
       if (cal.x2) marker(cal.x2, "#a25d12", null, isSelectedCalibration("x2"));
       state.points.forEach((p, i) => marker(p, "#d92626", "#d92626", isSelectedDataIndex(i)));
+    } else if (state.activeTab === "colormap" && window.DigitizerColormap) {
+      window.DigitizerColormap.drawZoom(zoomCtx, sx, sy, k, marker);
     } else if (state.activeTab === "map") {
       if (state.scale.a) marker(state.scale.a, "#2a8c5f", null, isSelectedScale("a"));
       if (state.scale.b) marker(state.scale.b, "#2a8c5f", null, isSelectedScale("b"));
@@ -1413,6 +1465,12 @@
           dataLine = `Data: (${formatValue(d.x)}, ${formatValue(d.y)})`;
         }
       }
+      if (state.activeTab === "colormap" && window.DigitizerColormap) {
+        const d = window.DigitizerColormap.dataAtCursor(state.cursor);
+        if (d && Number.isFinite(d.x) && Number.isFinite(d.y)) {
+          dataLine = `Data: (${formatValue(d.x)}, ${formatValue(d.y)})`;
+        }
+      }
       if (state.activeTab === "map") {
         const preview = pendingMeasurementPreview();
         if (preview) dataLine = preview;
@@ -1443,6 +1501,10 @@
   }
 
   function updateSelectionReadout() {
+    if (state.activeTab === "colormap" && window.DigitizerColormap) {
+      coordSelectedEl.textContent = window.DigitizerColormap.selectedText();
+      return;
+    }
     if (!state.selected) {
       coordSelectedEl.textContent = "";
       return;
@@ -1658,7 +1720,7 @@
     updateModeBar();
     updateStatus();
     if (state.image) {
-      dataSection.hidden = state.activeTab === "edit";
+      dataSection.hidden = state.activeTab === "edit" || state.activeTab === "colormap";
     }
     renderPointsTable();
     renderMeasurementsTable();
@@ -1920,6 +1982,9 @@
       if (state.activeTab === "edit" && window.DigitizerImageEdit) {
         if (window.DigitizerImageEdit.handleMouseMove(state.cursor)) return;
       }
+      if (state.activeTab === "colormap" && window.DigitizerColormap) {
+        if (window.DigitizerColormap.onMouseMove(state.cursor)) return;
+      }
       redrawCanvas();
     });
   }
@@ -1965,11 +2030,16 @@
         return;
       }
     }
+    if (state.activeTab === "colormap" && window.DigitizerColormap && window.DigitizerColormap.onMouseDown(p)) {
+      e.preventDefault();
+      return;
+    }
   });
   window.addEventListener("mouseup", () => {
     if (state.activeTab === "edit" && window.DigitizerImageEdit) {
       window.DigitizerImageEdit.handleMouseUp();
     }
+    if (state.activeTab === "colormap" && window.DigitizerColormap) window.DigitizerColormap.onMouseUp();
   });
   canvas.addEventListener("mouseenter", () => { state.pointerInside = true; });
   canvas.addEventListener("mouseleave", () => {
@@ -2011,6 +2081,9 @@
 
     if (state.activeTab === "plot" && window.DigitizerAuto) {
       if (window.DigitizerAuto.handleCanvasClick(p)) return;
+    }
+    if (state.activeTab === "colormap" && window.DigitizerColormap) {
+      if (window.DigitizerColormap.onClick(p)) return;
     }
 
     // Otherwise: clicking an existing marker / endpoint selects it.
@@ -2318,6 +2391,9 @@
       redrawCanvas,
       readyToDigitize
     });
+  }
+  if (window.DigitizerColormap) {
+    window.DigitizerColormap.init({ getState: () => state, refreshAll, flashStatus, redrawCanvas });
   }
 
   setActiveTab("edit", true);

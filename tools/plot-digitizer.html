@@ -81,6 +81,7 @@
         <div class="digitizer-tabs" role="tablist" aria-label="Tool mode">
           <button type="button" class="digitizer-tab is-active" data-tab="edit" role="tab" aria-selected="true" id="dig-tab-edit">Figure cleanup</button>
           <button type="button" class="digitizer-tab" data-tab="plot" role="tab" aria-selected="false" id="dig-tab-plot">Plot digitizer</button>
+          <button type="button" class="digitizer-tab" data-tab="colormap" role="tab" aria-selected="false" id="dig-tab-colormap">2D colormap</button>
           <button type="button" class="digitizer-tab" data-tab="map" role="tab" aria-selected="false" id="dig-tab-map">Map / measurement</button>
         </div>
 
@@ -125,6 +126,22 @@
           </div>
         </div>
 
+        <div data-tab-pane="colormap" hidden>
+          <p class="tool-note">Calibrate X and Y, drag a rectangle around the data area and another around the colorbar, then convert colors to intensity. Pixels outside the data rectangle or too far from the calibrated colorbar become <code>NaN</code>.</p>
+          <p class="tool-note">Optionally set C₁ and C₂ on two labeled colorbar ticks and enter their values. When both are set, they calibrate the color scale instead of the colorbar ends; this is useful when the true endpoints are not labeled.</p>
+          <div class="digitizer-mode-bar" role="toolbar" aria-label="2D colormap mode">
+            <button type="button" class="digitizer-mode-btn" data-mode="cm-y1">Set Y₁</button>
+            <button type="button" class="digitizer-mode-btn" data-mode="cm-y2">Set Y₂</button>
+            <button type="button" class="digitizer-mode-btn" data-mode="cm-x1">Set X₁</button>
+            <button type="button" class="digitizer-mode-btn" data-mode="cm-x2">Set X₂</button>
+            <label class="digitizer-mode-link" title="Keep X₁ at the same pixel position as Y₁ (shared origin)"><input type="checkbox" id="cm-link-origin" /> Link X₁ = Y₁</label>
+            <button type="button" class="digitizer-mode-btn" data-mode="cm-plot">Draw data region</button>
+            <button type="button" class="digitizer-mode-btn" data-mode="cm-bar">Draw colorbar</button>
+            <button type="button" class="digitizer-mode-btn" data-mode="cm-c1">Set C₁</button>
+            <button type="button" class="digitizer-mode-btn" data-mode="cm-c2">Set C₂</button>
+          </div>
+        </div>
+
         <div data-tab-pane="map" hidden>
           <p class="tool-note">
             Click the two endpoints of a known-length scale bar (or any two points whose real
@@ -146,6 +163,19 @@
               <canvas id="dig-canvas"></canvas>
               <p class="digitizer-status" id="dig-status" aria-live="polite"></p>
             </div>
+
+            <div class="colormap-convert-action" data-tab-pane="colormap" hidden>
+              <button type="button" class="button digitizer-mode-btn colormap-convert-button" data-mode="cm-run">Convert 2D colormap</button>
+              <button type="button" class="button secondary" id="cm-copy-long">Copy x, y, I CSV</button>
+              <button type="button" class="button secondary" id="cm-download-long">Download x, y, I</button>
+              <button type="button" class="button secondary" id="cm-download-matrix">Download 2D matrix</button>
+            </div>
+
+            <section class="digitizer-data colormap-result-panel" data-tab-pane="colormap" hidden>
+              <div class="digitizer-data-header"><h2>3. Reconstructed 2D data</h2></div>
+              <p class="tool-note" id="cm-data-note">No conversion yet.</p>
+              <div class="colormap-preview-wrap" id="cm-preview-wrap" hidden><canvas id="cm-preview"></canvas></div>
+            </section>
 
             <div class="digitizer-edit-apply-panel" data-tab-pane="edit">
               <h3 class="tool-subheading">Remove pixels</h3>
@@ -310,6 +340,48 @@
                 Enable <em>transformed axes</em> if the plot was photographed off-axis so the X and Y
                 axes are not perpendicular in the image.
               </p>
+            </div>
+
+            <div data-tab-pane="colormap" hidden>
+              <h3 class="tool-subheading">2D calibration</h3>
+              <div class="digitizer-axis-fields">
+                <div class="tool-field"><label for="cm-x1-value">X₁ value</label><input type="number" step="any" id="cm-x1-value" /></div>
+                <div class="tool-field"><label for="cm-x2-value">X₂ value</label><input type="number" step="any" id="cm-x2-value" /></div>
+                <div class="tool-field"><label for="cm-y1-value">Y₁ value</label><input type="number" step="any" id="cm-y1-value" /></div>
+                <div class="tool-field"><label for="cm-y2-value">Y₂ value</label><input type="number" step="any" id="cm-y2-value" /></div>
+                <div class="tool-field"><label for="cm-i1-value">Colorbar start</label><input type="number" step="any" id="cm-i1-value" /></div>
+                <div class="tool-field"><label for="cm-i2-value">Colorbar end</label><input type="number" step="any" id="cm-i2-value" /></div>
+                <div class="tool-field"><label for="cm-c1-value">C₁ value (optional)</label><input type="number" step="any" id="cm-c1-value" /></div>
+                <div class="tool-field"><label for="cm-c2-value">C₂ value (optional)</label><input type="number" step="any" id="cm-c2-value" /></div>
+                <div class="tool-field"><label for="cm-nx">Output X points</label><input type="number" min="1" max="2000" value="200" id="cm-nx" /></div>
+                <div class="tool-field"><label for="cm-ny">Output Y points</label><input type="number" min="1" max="2000" value="200" id="cm-ny" /></div>
+              </div>
+              <div class="digitizer-axis-actions">
+                <button type="button" class="tool-inline-button" id="cm-output-auto">Auto decide output points</button>
+                <button type="button" class="tool-inline-button" id="cm-output-pixels">Use data-region pixels</button>
+              </div>
+              <p class="tool-note digitizer-axis-actions-note" id="cm-output-readout">Draw the data region to choose an output grid.</p>
+              <div class="digitizer-axis-actions"><button type="button" class="tool-inline-button" id="cm-swap-y">Swap Y₁ ↔ Y₂</button><button type="button" class="tool-inline-button" id="cm-swap-x">Swap X₁ ↔ X₂</button></div>
+              <p class="tool-note digitizer-axis-actions-note">Tip: left-click any marker to select it, then use the <kbd>←</kbd> <kbd>↑</kbd> <kbd>→</kbd> <kbd>↓</kbd> keys to nudge it one pixel at a time (hold <kbd>Shift</kbd> for ten).</p>
+              <h3 class="tool-subheading digitizer-axis-options-heading">Axis options</h3>
+              <div class="digitizer-axis-options">
+                <label><input type="checkbox" id="cm-logx" /> Logarithmic X axis</label>
+                <label><input type="checkbox" id="cm-logy" /> Logarithmic Y axis</label>
+                <label><input type="checkbox" id="cm-transformed" /> Transformed (non-orthogonal) axes</label>
+              </div>
+              <p class="tool-note digitizer-options-note">Enable <em>transformed axes</em> if the plot was photographed off-axis so the X and Y axes are not perpendicular in the image.</p>
+              <div class="digitizer-axis-options">
+                <label><input type="checkbox" id="cm-log-i" /> Logarithmic colorbar</label>
+                <label><input type="checkbox" id="cm-discrete" /> Treat colorbar as discrete levels</label>
+              </div>
+              <p class="tool-note digitizer-options-note">Enable <em>discrete levels</em> when the colorbar consists of distinct color blocks rather than a smooth gradient. Each matching block is then assigned one intensity level, which avoids inventing values between bins.</p>
+              <div class="digitizer-edit-param"><label for="cm-tolerance">Color-match tolerance</label><div class="digitizer-edit-param-controls"><input type="range" min="1" max="80" value="20" id="cm-tolerance" /><input type="number" min="1" max="80" value="20" id="cm-tolerance-value" /></div></div>
+              <h3 class="tool-subheading">NaN colors</h3>
+              <p class="tool-note digitizer-edit-note">Any matching color in this list is exported as <code>NaN</code>. Add multiple colors manually or pick them from the image.</p>
+              <div class="digitizer-edit-color-row"><input type="color" id="cm-nan-color" value="#ffffff" title="NaN color" /><input type="text" id="cm-nan-hex" class="digitizer-edit-hex-input" value="#ffffff" maxlength="9" /><button type="button" class="tool-inline-button" id="cm-nan-add">Add color</button><button type="button" class="tool-inline-button" data-mode="cm-pick-nan">Pick NaN color</button></div>
+              <ul class="digitizer-edit-key-list" id="cm-nan-list" aria-label="Colors exported as NaN"></ul>
+              <div class="digitizer-edit-param"><label for="cm-nan-tolerance">NaN color tolerance</label><div class="digitizer-edit-param-controls"><input type="range" min="0" max="80" value="12" id="cm-nan-tolerance" /><input type="number" min="0" max="80" value="12" id="cm-nan-tolerance-value" /></div></div>
+              <p class="tool-note" id="cm-readout">Set four axis references, then draw the data region and colorbar.</p>
             </div>
 
             <div data-tab-pane="edit">
@@ -533,6 +605,7 @@
             </table>
           </div>
         </div>
+
       </section>
     </div>
 
@@ -546,6 +619,7 @@
   <script src="../js/site.js"></script>
   <script src="../js/plot-digitizer-edit.js"></script>
   <script src="../js/plot-digitizer-auto.js"></script>
+  <script src="../js/plot-digitizer-colormap.js"></script>
   <script src="../js/plot-digitizer.js"></script>
 </body>
 </html>
