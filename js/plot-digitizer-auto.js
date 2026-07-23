@@ -8,14 +8,16 @@
 
   const AUTO_MASK_MODES = new Set(["auto-mask-rect", "auto-mask-lasso", "auto-mask-poly"]);
   const AUTO_PICK_MODES = new Set(["auto-pick-data", "auto-pick-bg"]);
-  const AUTO_MODES = new Set([...AUTO_MASK_MODES, ...AUTO_PICK_MODES]);
+  const AUTO_TEMPLATE_MODES = new Set(["auto-template-rect"]);
+  const AUTO_MODES = new Set([...AUTO_MASK_MODES, ...AUTO_PICK_MODES, ...AUTO_TEMPLATE_MODES]);
 
   const AUTO_MODE_LABELS = {
     "auto-mask-rect": "rectangle region",
     "auto-mask-lasso": "lasso region",
     "auto-mask-poly": "polygon region",
     "auto-pick-data": "data color",
-    "auto-pick-bg": "background color"
+    "auto-pick-bg": "background color",
+    "auto-template-rect": "marker kernel"
   };
 
   const POLY_CLOSE_RADIUS_PX = 10;
@@ -33,6 +35,12 @@
       detectMode: "line",
       tolerance: 40,
       minDist: 8,
+      templateThreshold: 40,
+      templatePeakPosition: "maximum",
+      traceErrorBars: false,
+      templateRect: null,
+      templateMarker: null,
+      templateDrag: null,
       liveUpdate: false,
       grayscaleOnly: false,
       polyPoints: [],
@@ -100,7 +108,18 @@
   }
 
   function ensureAutoState(state) {
-    if (!state.auto) state.auto = defaultAutoState();
+    if (!state.auto) {
+      state.auto = defaultAutoState();
+      return;
+    }
+    const defaults = defaultAutoState();
+    Object.keys(defaults).forEach((key) => {
+      if (state.auto[key] === undefined) state.auto[key] = defaults[key];
+    });
+    if (state.auto.detectMode === "errorbar") {
+      state.auto.detectMode = "point";
+      state.auto.traceErrorBars = true;
+    }
   }
 
   function initMask(state) {
@@ -360,10 +379,485 @@
     return points;
   }
 
-  function runAutoDigitize(state) {
+  function normalizedRect(a, b) {
+    return {
+      x: Math.min(a.x, b.x),
+      y: Math.min(a.y, b.y),
+      w: Math.abs(b.x - a.x),
+      h: Math.abs(b.y - a.y)
+    };
+  }
+
+  function integerTemplateBounds(rect, w, h) {
+    if (!rect) return null;
+    const left = clamp(Math.floor(rect.x), 0, w - 1);
+    const top = clamp(Math.floor(rect.y), 0, h - 1);
+    const right = clamp(Math.ceil(rect.x + rect.w), left + 1, w);
+    const bottom = clamp(Math.ceil(rect.y + rect.h), top + 1, h);
+    if (right - left < 3 || bottom - top < 3) return null;
+    return { left, top, width: right - left, height: bottom - top };
+  }
+
+  function evenlySpacedIndices(size, count) {
+    const result = [];
+    const seen = new Set();
+    const n = Math.min(size, count);
+    for (let i = 0; i < n; i++) {
+      const value = n === 1 ? 0 : Math.round(i * (size - 1) / (n - 1));
+      if (!seen.has(value)) {
+        seen.add(value);
+        result.push(value);
+      }
+    }
+    return result;
+  }
+
+  function buildTemplateKernel(data, imageW, bounds) {
+    const xs = evenlySpacedIndices(bounds.width, 15);
+    const ys = evenlySpacedIndices(bounds.height, 15);
+    const samples = [];
+    const means = [0, 0, 0];
+    ys.forEach((y) => {
+      xs.forEach((x) => {
+        const i = ((bounds.top + y) * imageW + bounds.left + x) * 4;
+        const rgb = [data[i] / 255, data[i + 1] / 255, data[i + 2] / 255];
+        samples.push({ x, y, rgb });
+        means[0] += rgb[0];
+        means[1] += rgb[1];
+        means[2] += rgb[2];
+      });
+    });
+    means[0] /= samples.length;
+    means[1] /= samples.length;
+    means[2] /= samples.length;
+    let energy = 0;
+    samples.forEach((sample) => {
+      sample.v = [
+        sample.rgb[0] - means[0],
+        sample.rgb[1] - means[1],
+        sample.rgb[2] - means[2]
+      ];
+      energy += sample.v[0] * sample.v[0]
+        + sample.v[1] * sample.v[1]
+        + sample.v[2] * sample.v[2];
+    });
+    return energy > 1e-8 ? { samples, energy } : null;
+  }
+
+  function templateScoreAt(data, imageW, originX, originY, kernel) {
+    let sumR = 0;
+    let sumG = 0;
+    let sumB = 0;
+    let sumSq = 0;
+    let dot = 0;
+    let colorError = 0;
+    const samples = kernel.samples;
+    for (let k = 0; k < samples.length; k++) {
+      const sample = samples[k];
+      const i = ((originY + sample.y) * imageW + originX + sample.x) * 4;
+      const r = data[i] / 255;
+      const g = data[i + 1] / 255;
+      const b = data[i + 2] / 255;
+      sumR += r;
+      sumG += g;
+      sumB += b;
+      sumSq += r * r + g * g + b * b;
+      dot += r * sample.v[0] + g * sample.v[1] + b * sample.v[2];
+      colorError += (r - sample.rgb[0]) * (r - sample.rgb[0])
+        + (g - sample.rgb[1]) * (g - sample.rgb[1])
+        + (b - sample.rgb[2]) * (b - sample.rgb[2]);
+    }
+    const n = samples.length;
+    const patchEnergy = sumSq - (sumR * sumR + sumG * sumG + sumB * sumB) / n;
+    if (patchEnergy <= 1e-8) return -1;
+    const shapeScore = dot / Math.sqrt(kernel.energy * patchEnergy);
+    const colorRmse = Math.sqrt(colorError / (n * 3));
+    const colorScore = Math.max(0, 1 - colorRmse / 0.5);
+    // Preserve normalized shape matching while keeping identically-shaped
+    // markers of another color below the same threshold.
+    return shapeScore * (0.3 + 0.7 * colorScore);
+  }
+
+  function runTemplateMode(state) {
+    const info = getDisplayImageData(state);
+    if (!info) return [];
+    resizeMaskIfNeeded(state);
+    const { data, w, h } = info;
+    const auto = state.auto;
+    const bounds = integerTemplateBounds(auto.templateRect, w, h);
+    if (!bounds || !auto.mask) return [];
+    const kernel = buildTemplateKernel(data, w, bounds);
+    if (!kernel) return [];
+    const appearance = {
+      markerX: (bounds.width - 1) / 2,
+      markerY: (bounds.height - 1) / 2
+    };
+    const maxOriginX = w - bounds.width;
+    const maxOriginY = h - bounds.height;
+    const threshold = clamp(auto.templateThreshold / 100, 0.05, 0.99);
+    const estimatedWork = (maxOriginX + 1) * (maxOriginY + 1) * kernel.samples.length;
+    const step = estimatedWork > 260000000 ? 3 : estimatedWork > 90000000 ? 2 : 1;
+    const cols = Math.floor(maxOriginX / step) + 1;
+    const rows = Math.floor(maxOriginY / step) + 1;
+    const response = new Float32Array(cols * rows);
+    response.fill(-1);
+
+    for (let gy = 0; gy < rows; gy++) {
+      const oy = gy * step;
+      for (let gx = 0; gx < cols; gx++) {
+        const ox = gx * step;
+        const markerX = Math.round(ox + appearance.markerX);
+        const markerY = Math.round(oy + appearance.markerY);
+        if (!auto.mask[maskIndex(markerX, markerY, w)]) continue;
+        response[gy * cols + gx] = templateScoreAt(data, w, ox, oy, kernel);
+      }
+    }
+
+    const candidates = [];
+    for (let gy = 0; gy < rows; gy++) {
+      for (let gx = 0; gx < cols; gx++) {
+        const index = gy * cols + gx;
+        const score = response[index];
+        if (score < threshold) continue;
+        let isPeak = true;
+        for (let dy = -1; dy <= 1 && isPeak; dy++) {
+          const ny = gy + dy;
+          if (ny < 0 || ny >= rows) continue;
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = gx + dx;
+            if (nx < 0 || nx >= cols || (dx === 0 && dy === 0)) continue;
+            const neighborIndex = ny * cols + nx;
+            const neighbor = response[neighborIndex];
+            if (neighbor > score || (neighbor === score && neighborIndex < index)) {
+              isPeak = false;
+              break;
+            }
+          }
+        }
+        if (isPeak) candidates.push({ ox: gx * step, oy: gy * step, score });
+      }
+    }
+    candidates.sort((a, b) => b.score - a.score);
+    if (candidates.length > 10000) candidates.length = 10000;
+
+    const minDist = Math.max(1, auto.minDist);
+    const refineRadius = Math.max(1, Math.min(8, Math.round(minDist * 0.3)));
+    const coarseCandidates = [];
+    for (let i = 0; i < candidates.length && coarseCandidates.length < 2000; i++) {
+      const candidate = candidates[i];
+      const x = candidate.ox + appearance.markerX;
+      const y = candidate.oy + appearance.markerY;
+      if (coarseCandidates.some((other) => Math.hypot(other.x - x, other.y - y) < minDist)) continue;
+      coarseCandidates.push({ ...candidate, x, y });
+    }
+    const points = [];
+    coarseCandidates.forEach((candidate) => {
+      let sumW = 0;
+      let sumX = 0;
+      let sumY = 0;
+      let bestScore = -Infinity;
+      let bestX = candidate.ox + appearance.markerX;
+      let bestY = candidate.oy + appearance.markerY;
+      for (let oy = Math.max(0, candidate.oy - refineRadius);
+        oy <= Math.min(maxOriginY, candidate.oy + refineRadius); oy++) {
+        for (let ox = Math.max(0, candidate.ox - refineRadius);
+          ox <= Math.min(maxOriginX, candidate.ox + refineRadius); ox++) {
+          const score = templateScoreAt(data, w, ox, oy, kernel);
+          if (score > bestScore) {
+            bestScore = score;
+            bestX = ox + appearance.markerX;
+            bestY = oy + appearance.markerY;
+          }
+          const weight = Math.max(0, score - threshold);
+          if (weight <= 0) continue;
+          sumW += weight;
+          sumX += (ox + appearance.markerX) * weight;
+          sumY += (oy + appearance.markerY) * weight;
+        }
+      }
+      const point = auto.templatePeakPosition === "centroid" && sumW > 0
+        ? { x: sumX / sumW, y: sumY / sumW }
+        : { x: bestX, y: bestY };
+      if (points.some((other) => Math.hypot(other.x - point.x, other.y - point.y) < minDist)) return;
+      points.push(point);
+    });
+    return points;
+  }
+
+  function matchedPixelMap(data, w, h, auto, mask) {
+    const weights = new Float32Array(w * h);
+    for (let idx = 0; idx < weights.length; idx++) {
+      if (!mask[idx]) continue;
+      const i = idx * 4;
+      weights[idx] = dataPixelWeight(data[i], data[i + 1], data[i + 2], data[i + 3], auto);
+    }
+    return weights;
+  }
+
+  function localMarkerFeatures(weights, w, h, p, radius) {
+    const left = clamp(Math.floor(p.x - radius), 0, w - 1);
+    const right = clamp(Math.ceil(p.x + radius), 0, w - 1);
+    const top = clamp(Math.floor(p.y - radius), 0, h - 1);
+    const bottom = clamp(Math.ceil(p.y + radius), 0, h - 1);
+    const r2 = radius * radius;
+    let mass = 0;
+    let horizontalSpread = 0;
+    let broadRows = 0;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    let meanX = 0;
+    let meanY = 0;
+    for (let y = top; y <= bottom; y++) {
+      let rowMass = 0;
+      let rowMin = Infinity;
+      let rowMax = -Infinity;
+      for (let x = left; x <= right; x++) {
+        const dx = x - p.x;
+        const dy = y - p.y;
+        if (dx * dx + dy * dy > r2) continue;
+        const weight = weights[maskIndex(x, y, w)];
+        rowMass += weight;
+        if (weight > 0) {
+          rowMin = Math.min(rowMin, x);
+          rowMax = Math.max(rowMax, x);
+          minX = Math.min(minX, x);
+          maxX = Math.max(maxX, x);
+          minY = Math.min(minY, y);
+          maxY = Math.max(maxY, y);
+          meanX += x * weight;
+          meanY += y * weight;
+        }
+      }
+      mass += rowMass;
+      horizontalSpread = Math.max(horizontalSpread, rowMass);
+      if (Number.isFinite(rowMin) && rowMax - rowMin + 1 >= Math.max(3, radius * 0.5)) broadRows++;
+    }
+    if (mass <= 0 || !Number.isFinite(minX)) return { score: 0, confident: false, center: p };
+    meanX /= mass;
+    meanY /= mass;
+    let varX = 0;
+    let varY = 0;
+    let quadrantMask = 0;
+    for (let y = top; y <= bottom; y++) {
+      for (let x = left; x <= right; x++) {
+        const weight = weights[maskIndex(x, y, w)];
+        if (weight <= 0) continue;
+        const dx = x - meanX;
+        const dy = y - meanY;
+        if (dx * dx + dy * dy > r2) continue;
+        varX += dx * dx * weight;
+        varY += dy * dy * weight;
+        if (Math.abs(dx) > 0.75 && Math.abs(dy) > 0.75) {
+          quadrantMask |= 1 << ((dx >= 0 ? 1 : 0) + (dy >= 0 ? 2 : 0));
+        }
+      }
+    }
+    const aspect = Math.min(varX, varY) / Math.max(1, Math.max(varX, varY));
+    const width = maxX - minX + 1;
+    const height = maxY - minY + 1;
+    const quadrants = [1, 2, 4, 8].reduce((n, bit) => n + ((quadrantMask & bit) ? 1 : 0), 0);
+    // Filled and hollow markers occupy several adjacent rows, extend in both
+    // dimensions, and have balanced local variance. A plotted curve, a stem,
+    // or a cap generally fails at least two of those tests.
+    const confident = broadRows >= Math.max(2, Math.round(radius * 0.3))
+      && width >= Math.max(3, radius * 0.5)
+      && height >= Math.max(3, radius * 0.5)
+      && aspect >= 0.12
+      && quadrants >= 3;
+    return {
+      score: mass * Math.max(1, horizontalSpread) * (0.25 + aspect) * (1 + broadRows),
+      confident,
+      center: { x: meanX, y: meanY }
+    };
+  }
+
+  function collapseVerticalCandidates(points, weights, w, h, radius) {
+    const used = new Uint8Array(points.length);
+    const result = [];
+    // Hollow rings and horizontal caps can seed candidates on either side of
+    // the true x coordinate. The user-provided minimum distance is the marker
+    // scale, so use most of it when merging a single vertical observation.
+    const xTolerance = Math.max(4, radius * 1.25);
+
+    for (let i = 0; i < points.length; i++) {
+      if (used[i]) continue;
+      const group = [i];
+      used[i] = 1;
+      // Error-bar artifacts line up at nearly the same x. Grow transitively so
+      // every seed along a long stem is compared with the marker body.
+      for (let cursor = 0; cursor < group.length; cursor++) {
+        const a = points[group[cursor]];
+        for (let j = i + 1; j < points.length; j++) {
+          if (used[j]) continue;
+          const b = points[j];
+          if (Math.abs(a.x - b.x) <= xTolerance && Math.abs(a.y - b.y) <= radius * 1.6) {
+            used[j] = 1;
+            group.push(j);
+          }
+        }
+      }
+      let best = group[0];
+      let bestScore = -Infinity;
+      let bestFeatures = null;
+      group.forEach((idx) => {
+        const features = localMarkerFeatures(weights, w, h, points[idx], radius);
+        if (features.score > bestScore) {
+          bestScore = features.score;
+          best = idx;
+          bestFeatures = features;
+        }
+      });
+      if (bestFeatures && bestFeatures.confident) {
+        // Keep the greedy candidate's locality but use the marker mass centroid
+        // to reduce the common half-marker offset from rings and attached stems.
+        const source = points[best];
+        const center = bestFeatures.center;
+        result.push({
+          x: Math.abs(center.x - source.x) <= radius * 0.65 ? center.x : source.x,
+          y: Math.abs(center.y - source.y) <= radius * 0.65 ? center.y : source.y
+        });
+      }
+    }
+    return result;
+  }
+
+  function traceVerticalExtent(weights, w, h, point, radius) {
+    const halfWidth = Math.max(1, Math.round(radius * 0.18));
+    const cx = Math.round(point.x);
+    const rows = new Uint8Array(h);
+    for (let y = 0; y < h; y++) {
+      for (let x = Math.max(0, cx - halfWidth); x <= Math.min(w - 1, cx + halfWidth); x++) {
+        if (weights[maskIndex(x, y, w)] > 0) {
+          rows[y] = 1;
+          break;
+        }
+      }
+    }
+
+    const center = clamp(Math.round(point.y), 0, h - 1);
+    const markerFallback = () => {
+      let top = Infinity;
+      let bottom = -Infinity;
+      const left = clamp(Math.floor(point.x - radius), 0, w - 1);
+      const right = clamp(Math.ceil(point.x + radius), 0, w - 1);
+      const localTop = clamp(Math.floor(point.y - radius), 0, h - 1);
+      const localBottom = clamp(Math.ceil(point.y + radius), 0, h - 1);
+      const r2 = radius * radius;
+      for (let y = localTop; y <= localBottom; y++) {
+        for (let x = left; x <= right; x++) {
+          const dx = x - point.x;
+          const dy = y - point.y;
+          if (dx * dx + dy * dy <= r2 && weights[maskIndex(x, y, w)] > 0) {
+            top = Math.min(top, y);
+            bottom = Math.max(bottom, y);
+          }
+        }
+      }
+      if (Number.isFinite(top) && Number.isFinite(bottom) && bottom > top) return { top, bottom };
+      return { top: point.y - radius / 2, bottom: point.y + radius / 2 };
+    };
+    let seed = center;
+    if (!rows[seed]) {
+      let bestDistance = Infinity;
+      for (let y = Math.max(0, center - halfWidth - 2); y <= Math.min(h - 1, center + halfWidth + 2); y++) {
+        if (rows[y] && Math.abs(y - center) < bestDistance) {
+          seed = y;
+          bestDistance = Math.abs(y - center);
+        }
+      }
+      if (!Number.isFinite(bestDistance)) {
+        return markerFallback();
+      }
+    }
+
+    // Permit tiny anti-aliasing gaps, but stop before unrelated features in the
+    // same column. Hollow markers therefore expose a shorter bar inside them.
+    const maxGap = 2;
+    const walk = (direction) => {
+      let edge = seed;
+      let gap = 0;
+      for (let y = seed + direction; y >= 0 && y < h; y += direction) {
+        if (rows[y]) {
+          edge = y;
+          gap = 0;
+        } else {
+          gap += 1;
+          if (gap > maxGap) break;
+        }
+      }
+      return edge;
+    };
+    const top = walk(-1);
+    const bottom = walk(1);
+    return bottom > top ? { top, bottom } : markerFallback();
+  }
+
+  function runColorMarkerCenters(state, markerAware) {
+    const info = getDisplayImageData(state);
+    if (!info) return [];
+    resizeMaskIfNeeded(state);
+    const { data, w, h } = info;
+    const auto = state.auto;
+    if (!auto.mask) return [];
+    const raw = runPointMode(state);
+    if (!markerAware) return raw;
+    const radius = Math.max(1, auto.minDist);
+    const weights = matchedPixelMap(data, w, h, auto, auto.mask);
+    return collapseVerticalCandidates(raw, weights, w, h, radius);
+  }
+
+  function addVerticalErrorBars(state, centers) {
+    const info = getDisplayImageData(state);
+    if (!info || !centers.length) return centers;
+    resizeMaskIfNeeded(state);
+    const { data, w, h } = info;
+    const auto = state.auto;
+    if (!auto.mask) return centers;
+    const radius = Math.max(1, auto.minDist);
+    const weights = matchedPixelMap(data, w, h, auto, auto.mask);
+    return centers.map((point) => {
+      const extent = traceVerticalExtent(weights, w, h, point, radius);
+      return {
+        x: point.x,
+        y: point.y,
+        errorBar: {
+          top: { x: point.x, y: extent.top },
+          bottom: { x: point.x, y: extent.bottom }
+        }
+      };
+    });
+  }
+
+  function runMarkerDetection(state) {
     if (!state.auto) return [];
-    if (state.auto.detectMode === "point") return runPointMode(state);
+    ensureAutoState(state);
+    if (state.auto.detectMode === "template") return runTemplateMode(state);
+    else if (state.auto.detectMode === "point") {
+      return runColorMarkerCenters(state, true);
+    }
     return runLineMode(state);
+  }
+
+  function runAutoDigitize(state) {
+    const centers = runMarkerDetection(state);
+    if (state.auto.detectMode === "line") return centers;
+    return state.auto.traceErrorBars ? addVerticalErrorBars(state, centers) : centers;
+  }
+
+  function replacePointsWithDetection(state, includeErrorBars) {
+    syncParamsFromInputs(state);
+    const detected = includeErrorBars === false ? runMarkerDetection(state) : runAutoDigitize(state);
+    state.points = detected;
+    if (detected.length) {
+      state.selected = { type: "data", index: detected.length - 1 };
+      if (state.modeByTab) state.modeByTab.plot = "add";
+      state.mode = "add";
+    } else if (state.selected && (state.selected.type === "data" || state.selected.type === "data-error")) {
+      state.selected = null;
+    }
+    return detected;
   }
 
   let liveAutoTimer = null;
@@ -371,18 +865,36 @@
   function applyLiveAutoDigitize(state) {
     ensureAutoState(state);
     if (!state.auto.liveUpdate) return false;
-    if (!hooks.readyToDigitize()) return false;
-    syncParamsFromInputs(state);
-    const detected = runAutoDigitize(state);
-    state.points = detected;
-    if (detected.length) {
-      state.selected = { type: "data", index: detected.length - 1 };
-      if (state.modeByTab) state.modeByTab.plot = "add";
-      state.mode = "add";
-    } else if (state.selected && state.selected.type === "data") {
-      state.selected = null;
-    }
+    replacePointsWithDetection(state);
     return true;
+  }
+
+  function runAutoDigitizeNow() {
+    const state = hooks.getState();
+    ensureAutoState(state);
+    if (state.auto.detectMode === "template" && !state.auto.templateRect) {
+      hooks.flashStatus("Select Marker kernel, then drag a tight rectangle around one marker.");
+      return;
+    }
+    const detected = replacePointsWithDetection(state, false);
+    hooks.refreshAll();
+    hooks.flashStatus(`${detected.length} marker${detected.length === 1 ? "" : "s"} detected.`);
+  }
+
+  function runErrorBarDetectionNow() {
+    const state = hooks.getState();
+    ensureAutoState(state);
+    syncParamsFromInputs(state);
+    if (!state.points.length) {
+      hooks.flashStatus("Detect or add marker centers before detecting error bars.");
+      return;
+    }
+    state.points = addVerticalErrorBars(
+      state,
+      state.points.map((point) => ({ x: point.x, y: point.y }))
+    );
+    hooks.refreshAll();
+    hooks.flashStatus(`Error bars detected for ${state.points.length} marker${state.points.length === 1 ? "" : "s"}.`);
   }
 
   function requestLiveAutoDigitize(immediate) {
@@ -497,12 +1009,12 @@
     const state = hooks.getState();
     if (!state.image || state.activeTab !== "plot") return false;
     const mode = state.mode;
-    if (mode !== "auto-mask-rect" && mode !== "auto-mask-lasso") return false;
+    if (mode !== "auto-mask-rect" && mode !== "auto-mask-lasso" && mode !== "auto-template-rect") return false;
 
     ensureAutoState(state);
     resizeMaskIfNeeded(state);
     state.auto.maskDrag = {
-      kind: mode === "auto-mask-rect" ? "rect" : "lasso",
+      kind: mode === "auto-template-rect" ? "template" : mode === "auto-mask-rect" ? "rect" : "lasso",
       startPt: { x: p.x, y: p.y },
       currentPt: { x: p.x, y: p.y },
       moved: false
@@ -557,7 +1069,23 @@
 
     if (!drag.moved) return;
 
-    if (drag.kind === "rect") {
+    if (drag.kind === "template") {
+      const rect = normalizedRect(drag.startPt, drag.currentPt);
+      const info = getDisplayImageData(state);
+      const bounds = info ? integerTemplateBounds(rect, info.w, info.h) : null;
+      if (info && bounds) {
+        state.auto.templateRect = rect;
+        state.auto.templateMarker = {
+          x: bounds.left + (bounds.width - 1) / 2,
+          y: bounds.top + (bounds.height - 1) / 2
+        };
+        state.auto.detectMode = "template";
+        syncParamsToInputs(state);
+        hooks.flashStatus(`Marker kernel set (${bounds.width} × ${bounds.height} px).`);
+      } else {
+        hooks.flashStatus("Draw a kernel rectangle at least 3 × 3 pixels.");
+      }
+    } else if (drag.kind === "rect") {
       applyRectToMask(state, drag.startPt.x, drag.startPt.y, drag.currentPt.x, drag.currentPt.y);
       hooks.flashStatus(state.auto.subtract ? "Rectangle subtracted from region." : "Rectangle added to region.");
     } else if (drag.kind === "lasso") {
@@ -632,6 +1160,29 @@
     ctx.restore();
   }
 
+  function drawTemplateOverlay(ctx, rect, marker, scale, isDraft) {
+    if (!rect || rect.w <= 0 || rect.h <= 0) return;
+    const s = scale || 1;
+    ctx.save();
+    ctx.fillStyle = isDraft ? "rgba(126, 63, 152, 0.12)" : "rgba(126, 63, 152, 0.2)";
+    ctx.strokeStyle = "#7e3f98";
+    ctx.lineWidth = 2 * s;
+    ctx.setLineDash(isDraft ? [5 * s, 4 * s] : []);
+    ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+    ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w, rect.h);
+    if (marker) {
+      const r = 5 * s;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(marker.x - r, marker.y);
+      ctx.lineTo(marker.x + r, marker.y);
+      ctx.moveTo(marker.x, marker.y - r);
+      ctx.lineTo(marker.x, marker.y + r);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   function drawOverlays(ctx, scale) {
     const state = hooks.getState();
     if (!state.image || state.activeTab !== "plot") return;
@@ -646,6 +1197,20 @@
     const s = scale || 1;
 
     drawExcludedMaskOverlay(ctx, auto.mask, w, h);
+
+    if (auto.templateRect) {
+      drawTemplateOverlay(ctx, auto.templateRect, auto.templateMarker, s, false);
+    }
+
+    if (auto.maskDrag && auto.maskDrag.kind === "template" && auto.maskDrag.moved) {
+      drawTemplateOverlay(
+        ctx,
+        normalizedRect(auto.maskDrag.startPt, auto.maskDrag.currentPt),
+        null,
+        s,
+        true
+      );
+    }
 
     if (auto.maskDrag && auto.maskDrag.kind === "rect") {
       const a = auto.maskDrag.startPt;
@@ -721,6 +1286,19 @@
     }
   }
 
+  function drawZoomOverlays(ctx, sx, sy, k) {
+    const state = hooks.getState();
+    if (!state.image || state.activeTab !== "plot") return;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.clip();
+    ctx.translate(-sx * k, -sy * k);
+    ctx.scale(k, k);
+    drawOverlays(ctx, 1 / k);
+    ctx.restore();
+  }
+
   function updateStatus(state, statusEl) {
     if (!statusEl || state.activeTab !== "plot") return false;
     const mode = state.mode;
@@ -751,6 +1329,10 @@
     }
     if (mode === "auto-pick-bg") {
       statusEl.textContent = "Click on the plot to pick the background color.";
+      return true;
+    }
+    if (mode === "auto-template-rect") {
+      statusEl.textContent = "Drag a tight rectangle around one complete marker to use it as the marker kernel.";
       return true;
     }
     return false;
@@ -785,9 +1367,24 @@
     } else if (els.minDist) {
       state.auto.minDist = clamp(Number(els.minDist.value), 1, 80);
     }
+    if (els.templateThresholdRange) {
+      state.auto.templateThreshold = Number(els.templateThresholdRange.value);
+      if (els.templateThreshold) els.templateThreshold.value = String(state.auto.templateThreshold);
+    } else if (els.templateThreshold) {
+      state.auto.templateThreshold = clamp(Number(els.templateThreshold.value), 5, 99);
+    }
+    if (els.traceErrorBars) state.auto.traceErrorBars = els.traceErrorBars.checked;
+    const peakRadio = document.querySelector('input[name="dig-auto-peak-position"]:checked');
+    if (peakRadio) {
+      state.auto.templatePeakPosition = peakRadio.value === "centroid" ? "centroid" : "maximum";
+    }
     const modeRadio = document.querySelector('input[name="dig-auto-detect-mode"]:checked');
-    if (modeRadio) state.auto.detectMode = modeRadio.value === "point" ? "point" : "line";
-    updateMinDistVisibility(state);
+    if (modeRadio) {
+      state.auto.detectMode = ["point", "template"].includes(modeRadio.value)
+        ? modeRadio.value
+        : "line";
+    }
+    updateDetectionControlVisibility(state);
   }
 
   function syncParamsToInputs(state) {
@@ -799,17 +1396,46 @@
     if (els.toleranceRange) els.toleranceRange.value = String(state.auto.tolerance);
     if (els.minDist) els.minDist.value = String(state.auto.minDist);
     if (els.minDistRange) els.minDistRange.value = String(state.auto.minDist);
+    if (els.templateThreshold) els.templateThreshold.value = String(state.auto.templateThreshold);
+    if (els.templateThresholdRange) els.templateThresholdRange.value = String(state.auto.templateThreshold);
+    if (els.traceErrorBars) els.traceErrorBars.checked = !!state.auto.traceErrorBars;
     document.querySelectorAll('input[name="dig-auto-detect-mode"]').forEach((el) => {
       el.checked = el.value === state.auto.detectMode;
     });
+    document.querySelectorAll('input[name="dig-auto-peak-position"]').forEach((el) => {
+      el.checked = el.value === state.auto.templatePeakPosition;
+    });
     syncColorInputs(state);
-    updateMinDistVisibility(state);
+    updateDetectionControlVisibility(state);
+    updateTemplateReadout(state);
   }
 
-  function updateMinDistVisibility(state) {
+  function updateDetectionControlVisibility(state) {
     ensureAutoState(state);
-    const show = state.auto.detectMode === "point";
-    if (els.minDistRow) els.minDistRow.hidden = !show;
+    const markerMode = state.auto.detectMode === "point" || state.auto.detectMode === "template";
+    if (els.minDistRow) els.minDistRow.hidden = !markerMode;
+    if (els.templateThresholdRow) els.templateThresholdRow.hidden = state.auto.detectMode !== "template";
+    if (els.peakPositionRow) els.peakPositionRow.hidden = state.auto.detectMode !== "template";
+    if (els.errorRow) els.errorRow.hidden = !markerMode;
+    if (els.runErrorsBtn) els.runErrorsBtn.disabled = !markerMode || !state.auto.traceErrorBars;
+    if (els.colorSettings) {
+      els.colorSettings.hidden = state.auto.detectMode === "template" && !state.auto.traceErrorBars;
+    }
+    if (els.colorToolButtons) {
+      const hideColorTools = state.auto.detectMode === "template" && !state.auto.traceErrorBars;
+      els.colorToolButtons.forEach((button) => { button.hidden = hideColorTools; });
+    }
+  }
+
+  function updateTemplateReadout(state) {
+    if (!els.templateReadout) return;
+    const bounds = state.auto.maskW && state.auto.maskH
+      ? integerTemplateBounds(state.auto.templateRect, state.auto.maskW, state.auto.maskH)
+      : null;
+    els.templateReadout.textContent = bounds
+      ? `Kernel: ${bounds.width} × ${bounds.height} px.`
+      : "No marker kernel selected.";
+    if (els.clearTemplateBtn) els.clearTemplateBtn.hidden = !bounds;
   }
 
   function wireControls() {
@@ -823,9 +1449,31 @@
     els.minDist = document.getElementById("dig-auto-min-dist");
     els.minDistRange = document.getElementById("dig-auto-min-dist-range");
     els.minDistRow = document.getElementById("dig-auto-min-dist-row");
+    els.templateThreshold = document.getElementById("dig-auto-template-threshold");
+    els.templateThresholdRange = document.getElementById("dig-auto-template-threshold-range");
+    els.templateThresholdRow = document.getElementById("dig-auto-template-threshold-row");
+    els.peakPositionRow = document.getElementById("dig-auto-peak-position-row");
+    els.colorSettings = document.getElementById("dig-auto-color-settings");
+    els.colorToolButtons = document.querySelectorAll(
+      '.digitizer-auto-mode-bar [data-mode="auto-pick-data"], '
+      + '.digitizer-auto-mode-bar [data-mode="auto-pick-bg"]'
+    );
+    els.traceErrorBars = document.getElementById("dig-auto-trace-errors");
+    els.errorRow = document.getElementById("dig-auto-error-row");
+    els.clearTemplateBtn = document.getElementById("dig-auto-clear-template");
+    els.templateReadout = document.getElementById("dig-auto-template-readout");
+    els.runBtn = document.getElementById("dig-auto-run");
+    els.runErrorsBtn = document.getElementById("dig-auto-run-errors");
     els.resetMaskBtn = document.getElementById("dig-auto-reset-mask");
     els.liveUpdate = document.getElementById("dig-auto-live");
     els.grayscaleOnly = document.getElementById("dig-auto-grayscale");
+
+    if (els.runBtn) {
+      els.runBtn.addEventListener("click", runAutoDigitizeNow);
+    }
+    if (els.runErrorsBtn) {
+      els.runErrorsBtn.addEventListener("click", runErrorBarDetectionNow);
+    }
 
     if (els.subtract) {
       els.subtract.addEventListener("change", () => {
@@ -848,6 +1496,14 @@
 
     if (els.grayscaleOnly) {
       els.grayscaleOnly.addEventListener("change", () => {
+        syncParamsFromInputs(hooks.getState());
+        requestLiveAutoDigitize(true);
+        hooks.refreshAll();
+      });
+    }
+
+    if (els.traceErrorBars) {
+      els.traceErrorBars.addEventListener("change", () => {
         syncParamsFromInputs(hooks.getState());
         requestLiveAutoDigitize(true);
         hooks.refreshAll();
@@ -899,14 +1555,51 @@
     }
     wireRangePair(els.toleranceRange, els.tolerance, "tolerance", 0, 120);
     wireRangePair(els.minDistRange, els.minDist, "minDist", 1, 80);
+    wireRangePair(
+      els.templateThresholdRange,
+      els.templateThreshold,
+      "templateThreshold",
+      5,
+      99
+    );
 
     document.querySelectorAll('input[name="dig-auto-detect-mode"]').forEach((el) => {
+      el.addEventListener("change", () => {
+        const state = hooks.getState();
+        syncParamsFromInputs(state);
+        if (state.auto.detectMode === "template" && !state.auto.templateRect) {
+          hooks.flashStatus("Select Marker kernel, then drag around one complete marker.");
+        }
+        requestLiveAutoDigitize(true);
+        hooks.refreshAll();
+      });
+    });
+
+    document.querySelectorAll('input[name="dig-auto-peak-position"]').forEach((el) => {
       el.addEventListener("change", () => {
         syncParamsFromInputs(hooks.getState());
         requestLiveAutoDigitize(true);
         hooks.refreshAll();
       });
     });
+
+    if (els.clearTemplateBtn) {
+      els.clearTemplateBtn.addEventListener("click", () => {
+        const state = hooks.getState();
+        ensureAutoState(state);
+        state.auto.templateRect = null;
+        state.auto.templateMarker = null;
+        updateTemplateReadout(state);
+        if (state.auto.detectMode === "template") {
+          state.points = [];
+          if (state.selected && (state.selected.type === "data" || state.selected.type === "data-error")) {
+            state.selected = null;
+          }
+        }
+        hooks.flashStatus("Marker kernel cleared.");
+        hooks.refreshAll();
+      });
+    }
 
     if (els.resetMaskBtn) {
       els.resetMaskBtn.addEventListener("click", () => {
@@ -931,12 +1624,23 @@
       syncParamsToInputs(state);
     },
     onImageLoaded(state) {
+      ensureAutoState(state);
+      state.auto.templateRect = null;
+      state.auto.templateMarker = null;
       initMask(state);
+      syncParamsToInputs(state);
+    },
+    restoreState(state) {
+      ensureAutoState(state);
+      resizeMaskIfNeeded(state);
+      cancelInProgress(state);
       syncParamsToInputs(state);
     },
     onImageCleared(state) {
       ensureAutoState(state);
       state.auto.mask = null;
+      state.auto.templateRect = null;
+      state.auto.templateMarker = null;
       cancelInProgress(state);
     },
     isAutoMode,
@@ -946,6 +1650,7 @@
     handleMouseDown,
     handleEscape,
     drawOverlays,
+    drawZoomOverlays,
     updateStatus,
     resetMask,
     resizeMaskIfNeeded,

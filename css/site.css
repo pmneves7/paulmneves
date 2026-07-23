@@ -1597,9 +1597,37 @@ footer {
   position: relative;
 }
 
+.digitizer-workspace-toolbar {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.digitizer-view-controls {
+  align-items: center;
+  display: flex;
+  gap: 0.4rem;
+}
+
+.digitizer-view-controls output {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 3.5rem;
+  text-align: center;
+}
+
+.digitizer-view-controls .digitizer-zoom-button {
+  font-size: 1.2rem;
+  line-height: 1;
+  min-width: 2.25rem;
+}
+
 #dig-canvas {
   display: block;
-  max-width: 100%;
+  max-width: none;
+  width: auto;
   height: auto;
   cursor: crosshair;
   background: transparent;
@@ -1804,6 +1832,30 @@ footer {
   grid-column: 1 / -1;
 }
 
+.digitizer-auto-footer {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1.25rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
+.digitizer-auto-error-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.digitizer-auto-error-controls[hidden],
+.digitizer-auto-panel .digitizer-edit-param[hidden],
+.digitizer-auto-panel .digitizer-edit-moire-methods[hidden] {
+  display: none;
+}
+
 .digitizer-auto-note {
   margin: 0 0 0.55rem;
   font-size: 0.85rem;
@@ -1812,6 +1864,18 @@ footer {
 .digitizer-auto-color-label {
   flex: 0 0 5.5rem;
   font-size: 0.88rem;
+}
+
+.digitizer-auto-color-settings {
+  display: contents;
+}
+
+.digitizer-auto-color-settings[hidden] {
+  display: none;
+}
+
+.digitizer-auto-mode-bar .digitizer-mode-btn[hidden] {
+  display: none;
 }
 
 .digitizer-auto-actions {
@@ -1830,6 +1894,11 @@ footer {
   font-weight: 600;
   cursor: pointer;
   user-select: none;
+}
+
+.digitizer-auto-prototype-readout {
+  color: var(--muted);
+  font-size: 0.85rem;
 }
 
 .digitizer-data {
@@ -1878,6 +1947,7 @@ footer {
 }
 
 .colormap-convert-action { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem; margin-top: 0.85rem; }
+.colormap-convert-action[hidden] { display: none; }
 .colormap-convert-button { color: #fff; background: #173f70; border-color: #173f70; }
 .colormap-convert-button:hover, .colormap-convert-button:focus-visible { color: #fff; background: #102f57; border-color: #102f57; }
 .digitizer-edit-color-swatch { width: 1rem; height: 1rem; border: 1px solid #777; display: inline-block; vertical-align: middle; }

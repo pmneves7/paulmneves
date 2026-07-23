@@ -2765,6 +2765,13 @@
       wireControls();
     },
     onImageLoaded,
+    restoreState() {
+      const state = hooks.getState();
+      stateDefaults(state);
+      state.edit.removeDrag = null;
+      syncInputsFromParams(state);
+      markPreviewDirty();
+    },
     onImageCleared,
     onTabEnter,
     onTabLeave,

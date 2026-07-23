@@ -38,6 +38,10 @@
   const downloadBtn = document.getElementById("dig-download-btn");
   const clearPointsBtn = document.getElementById("dig-clear-points-btn");
   const clearCalibrationsBtn = document.getElementById("dig-clear-calibrations");
+  const zoomOutBtn = document.getElementById("dig-zoom-out");
+  const zoomInBtn = document.getElementById("dig-zoom-in");
+  const zoomFitBtn = document.getElementById("dig-zoom-fit");
+  const viewZoomEl = document.getElementById("dig-view-zoom");
 
   const measurementsTbody = document.getElementById("dig-measurements-tbody");
   const measurementsNote = document.getElementById("dig-measurements-note");
@@ -85,6 +89,13 @@
   const POINT_HIT_RADIUS_PX = 12;
   const SELECT_HIT_RADIUS_PX = 10;
   const DEFAULT_PLOT_PROBE = document.getElementById("dig-default-plot");
+  const SESSION_DB_NAME = "plot-digitizer-session";
+  const SESSION_STORE_NAME = "sessions";
+  const SESSION_KEY = "current";
+  const MIN_VIEW_ZOOM = 0.1;
+  const MAX_VIEW_ZOOM = 8;
+  let sessionSaveTimer = null;
+  let restoringSession = false;
 
   zoomCanvas.width = ZOOM_DISPLAY_SIZE;
   zoomCanvas.height = ZOOM_DISPLAY_SIZE;
@@ -115,7 +126,9 @@
     //   { type: "measurement", index, key }
     selected: null,
     pointDrag: null,
-    suppressNextClick: false
+    suppressNextClick: false,
+    viewZoom: 1,
+    viewFit: false
   };
 
   // --- Small helpers ------------------------------------------------------
@@ -145,14 +158,222 @@
     return canvas.width / rect.width;
   }
 
+  function snapHalfPixel(value) {
+    return Math.round(value * 2) / 2;
+  }
+
+  function snapPointerCoordinate(value, max, usePixelEdge) {
+    if (usePixelEdge) return Math.max(0, Math.min(max, Math.round(value)));
+    return Math.max(0.5, Math.min(max - 0.5, Math.floor(value) + 0.5));
+  }
+
   function clientToImage(event) {
     const rect = canvas.getBoundingClientRect();
     const sx = canvas.width / Math.max(rect.width, 1);
     const sy = canvas.height / Math.max(rect.height, 1);
     return {
-      x: (event.clientX - rect.left) * sx,
-      y: (event.clientY - rect.top) * sy
+      x: snapPointerCoordinate((event.clientX - rect.left) * sx, canvas.width, event.altKey),
+      y: snapPointerCoordinate((event.clientY - rect.top) * sy, canvas.height, event.altKey)
     };
+  }
+
+  function applyViewZoom() {
+    if (!state.image) return;
+    const z = Math.max(MIN_VIEW_ZOOM, Math.min(MAX_VIEW_ZOOM, state.viewZoom || 1));
+    state.viewZoom = z;
+    canvas.style.width = `${canvas.width * z}px`;
+    canvas.style.height = `${canvas.height * z}px`;
+    if (viewZoomEl) viewZoomEl.textContent = `${Math.round(z * 100)}%`;
+  }
+
+  function fitViewZoom() {
+    if (!state.image) return;
+    const available = Math.max(1, canvasWrap.clientWidth - 2);
+    state.viewFit = true;
+    state.viewZoom = Math.max(MIN_VIEW_ZOOM, Math.min(MAX_VIEW_ZOOM, available / canvas.width));
+    applyViewZoom();
+    redrawCanvas();
+    scheduleSessionSave();
+  }
+
+  function setViewZoom(next, clientX, clientY) {
+    if (!state.image) return;
+    const oldRect = canvas.getBoundingClientRect();
+    const oldZoom = state.viewZoom || 1;
+    const anchorX = clientX == null ? canvasWrap.clientWidth / 2 : clientX - oldRect.left;
+    const anchorY = clientY == null ? canvasWrap.clientHeight / 2 : clientY - oldRect.top;
+    const imageX = anchorX / oldZoom;
+    const imageY = anchorY / oldZoom;
+    state.viewFit = false;
+    state.viewZoom = Math.max(MIN_VIEW_ZOOM, Math.min(MAX_VIEW_ZOOM, next));
+    applyViewZoom();
+    const newRect = canvas.getBoundingClientRect();
+    if (clientX != null) canvasWrap.scrollLeft += (newRect.left + imageX * state.viewZoom) - clientX;
+    if (clientY != null) canvasWrap.scrollTop += (newRect.top + imageY * state.viewZoom) - clientY;
+    redrawCanvas();
+    scheduleSessionSave();
+  }
+
+  function openSessionDb() {
+    return new Promise((resolve, reject) => {
+      if (!window.indexedDB) {
+        reject(new Error("IndexedDB unavailable"));
+        return;
+      }
+      const request = indexedDB.open(SESSION_DB_NAME, 1);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains(SESSION_STORE_NAME)) {
+          request.result.createObjectStore(SESSION_STORE_NAME);
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  function sessionRequest(mode, action) {
+    return openSessionDb().then((db) => new Promise((resolve, reject) => {
+      const tx = db.transaction(SESSION_STORE_NAME, mode);
+      const request = action(tx.objectStore(SESSION_STORE_NAME));
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+      tx.oncomplete = () => db.close();
+    }));
+  }
+
+  function canvasBlob(source) {
+    return new Promise((resolve) => source.toBlob(resolve, "image/png"));
+  }
+
+  function captureControlValues() {
+    const result = {};
+    workspace.querySelectorAll("input[id], select[id], textarea[id]").forEach((el) => {
+      if (el.type === "file") return;
+      result[el.id] = { value: el.value, checked: !!el.checked };
+    });
+    return result;
+  }
+
+  function restoreControlValues(values) {
+    Object.entries(values || {}).forEach(([id, saved]) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if ("value" in saved) el.value = saved.value;
+      if ((el.type === "checkbox" || el.type === "radio") && "checked" in saved) el.checked = saved.checked;
+    });
+  }
+
+  function snapshotState() {
+    const auto = state.auto ? {
+      ...state.auto,
+      dragStart: null,
+      dragCurrent: null,
+      maskDrag: null,
+      templateDrag: null,
+      polyPoints: [],
+      lassoPoints: []
+    } : null;
+    const edit = state.edit ? { ...state.edit, removeDrag: null, removePolyPoints: [], removeLassoPoints: [] } : null;
+    const colormap = state.colormap ? { ...state.colormap, drag: null, result: null } : null;
+    return {
+      activeTab: state.activeTab,
+      modeByTab: state.modeByTab,
+      calibration: state.calibration,
+      linkOrigin: state.linkOrigin,
+      points: state.points,
+      scale: state.scale,
+      measurements: state.measurements,
+      selected: state.selected,
+      viewZoom: state.viewZoom,
+      viewFit: state.viewFit,
+      auto,
+      edit,
+      colormap
+    };
+  }
+
+  async function saveSessionNow() {
+    if (!state.image || restoringSession) return;
+    try {
+      const [imageBlob, originalBlob] = await Promise.all([
+        canvasBlob(state.image),
+        state.originalImage ? canvasBlob(state.originalImage) : Promise.resolve(null)
+      ]);
+      if (!imageBlob) return;
+      await sessionRequest("readwrite", (store) => store.put({
+        version: 1,
+        savedAt: Date.now(),
+        imageBlob,
+        originalBlob,
+        state: snapshotState(),
+        controls: captureControlValues()
+      }, SESSION_KEY));
+    } catch (err) {
+      // Persistence is a convenience; private browsing/storage limits must not break the tool.
+    }
+  }
+
+  function scheduleSessionSave() {
+    if (restoringSession || !state.image) return;
+    if (sessionSaveTimer) clearTimeout(sessionSaveTimer);
+    sessionSaveTimer = setTimeout(() => {
+      sessionSaveTimer = null;
+      saveSessionNow();
+    }, 700);
+  }
+
+  function blobToImage(blob) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Invalid stored image")); };
+      img.src = url;
+    });
+  }
+
+  async function restoreSession() {
+    restoringSession = true;
+    try {
+      const saved = await sessionRequest("readonly", (store) => store.get(SESSION_KEY));
+      if (!saved || !saved.imageBlob || !saved.state) return false;
+      const img = await blobToImage(saved.imageBlob);
+      setImage(img, { noScroll: true, restoring: true });
+      const restored = saved.state;
+      ["modeByTab", "calibration", "points", "scale", "measurements", "selected", "auto", "edit", "colormap"].forEach((key) => {
+        if (restored[key] != null) state[key] = restored[key];
+      });
+      state.linkOrigin = !!restored.linkOrigin;
+      state.viewZoom = Number(restored.viewZoom) || 1;
+      state.viewFit = !!restored.viewFit;
+      state.pendingMeasurement = null;
+      state.pointDrag = null;
+      if (saved.originalBlob) {
+        const original = await blobToImage(saved.originalBlob);
+        state.originalImage = imageToCanvas(original);
+      }
+      restoreControlValues(saved.controls);
+      if (linkOriginEl) linkOriginEl.checked = state.linkOrigin;
+      if (window.DigitizerImageEdit?.restoreState) window.DigitizerImageEdit.restoreState();
+      if (window.DigitizerAuto?.restoreState) window.DigitizerAuto.restoreState(state);
+      const tab = ["edit", "plot", "colormap", "map"].includes(restored.activeTab) ? restored.activeTab : "plot";
+      setActiveTab(tab, true);
+      state.selected = restored.selected || null;
+      if (state.viewFit) fitViewZoom(); else applyViewZoom();
+      refreshAll();
+      flashStatus("Restored your previous digitizer session.", 2600);
+      return true;
+    } catch (err) {
+      return false;
+    } finally {
+      restoringSession = false;
+    }
+  }
+
+  function deleteStoredSession() {
+    if (sessionSaveTimer) clearTimeout(sessionSaveTimer);
+    sessionSaveTimer = null;
+    sessionRequest("readwrite", (store) => store.delete(SESSION_KEY)).catch(() => {});
   }
 
   function formatValue(v) {
@@ -165,7 +386,7 @@
 
   function formatPixelPoint(p) {
     if (!p) return "";
-    return `(${Math.round(p.x)}, ${Math.round(p.y)})`;
+    return `(${snapHalfPixel(p.x)}, ${snapHalfPixel(p.y)})`;
   }
 
   // --- Plot calibration validity -----------------------------------------
@@ -286,6 +507,14 @@
     return { x: dataX, y: dataY };
   }
 
+  function computeErrorBarValue(p) {
+    if (!p || !p.errorBar || !p.errorBar.top || !p.errorBar.bottom) return null;
+    const top = computeDataCoords(p.errorBar.top);
+    const bottom = computeDataCoords(p.errorBar.bottom);
+    if (!top || !bottom || !Number.isFinite(top.y) || !Number.isFinite(bottom.y)) return null;
+    return Math.abs(bottom.y - top.y) / 2;
+  }
+
   // --- Measurement math ---------------------------------------------------
 
   function distanceBetween(a, b) {
@@ -386,6 +615,17 @@
     if (mode === "add" && !readyToDigitize()) return;
     if (state.activeTab === "colormap" && mode === "cm-run" && window.DigitizerColormap) {
       window.DigitizerColormap.run();
+      return;
+    }
+
+    if (state.activeTab === "plot" && state.mode === mode && AUTO_MODES.has(mode)) {
+      state.mode = null;
+      state.modeByTab.plot = null;
+      state.pendingMeasurement = null;
+      if (window.DigitizerAuto) window.DigitizerAuto.onMaskModeChange(state, null);
+      updateModeBar();
+      updateStatus();
+      draw();
       return;
     }
 
@@ -582,12 +822,16 @@
     return c;
   }
 
-  function setImage(img) {
+  function setImage(img, opts) {
+    if (state.image && !(opts && opts.restoring)) clearCalibrationsAndPoints();
     state.image = imageToCanvas(img);
     state.selected = null;
     state.pendingMeasurement = null;
     canvas.width = state.image.width;
     canvas.height = state.image.height;
+    state.viewZoom = 1;
+    state.viewFit = false;
+    applyViewZoom();
     workspace.hidden = false;
     dataSection.hidden = false;
     clearBtn.hidden = false;
@@ -596,7 +840,7 @@
     if (window.DigitizerAuto) window.DigitizerAuto.onImageLoaded(state);
     if (window.DigitizerColormap) window.DigitizerColormap.onImageLoaded(state);
     refreshAll();
-    workspace.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (!(opts && opts.noScroll)) workspace.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function clearAnnotationState() {
@@ -648,6 +892,7 @@
   }
 
   function clearAll() {
+    deleteStoredSession();
     state.image = null;
     state.originalImage = null;
     clearAnnotationState();
@@ -657,6 +902,8 @@
     state.pointerInside = false;
     canvas.width = 0;
     canvas.height = 0;
+    canvas.style.width = "";
+    canvas.style.height = "";
     workspace.hidden = true;
     dataSection.hidden = true;
     clearBtn.hidden = true;
@@ -817,7 +1064,16 @@
       });
       state.colormap.dirty = true;
     }
-    state.points = state.points.map(mapPoint);
+    state.points = state.points.map((p) => {
+      const mapped = mapPoint(p);
+      if (p.errorBar && p.errorBar.top && p.errorBar.bottom) {
+        mapped.errorBar = {
+          top: mapPoint(p.errorBar.top),
+          bottom: mapPoint(p.errorBar.bottom)
+        };
+      }
+      return mapped;
+    });
 
     if (state.scale.a) state.scale.a = mapPoint(state.scale.a);
     if (state.scale.b) state.scale.b = mapPoint(state.scale.b);
@@ -863,7 +1119,9 @@
   }
 
   function isSelectedDataIndex(idx) {
-    return state.selected && state.selected.type === "data" && state.selected.index === idx;
+    return state.selected
+      && (state.selected.type === "data" || state.selected.type === "data-error")
+      && state.selected.index === idx;
   }
 
   function isSelectedScale(key) {
@@ -884,6 +1142,10 @@
     }
     if (s.type === "calibration") return state.calibration[s.key];
     if (s.type === "data") return state.points[s.index] || null;
+    if (s.type === "data-error") {
+      const p = state.points[s.index];
+      return p && p.errorBar ? p.errorBar[s.key] || null : null;
+    }
     if (s.type === "scale") return state.scale[s.key];
     if (s.type === "measurement") {
       const m = state.measurements[s.index];
@@ -898,6 +1160,9 @@
       return { y1: "Y₁", y2: "Y₂", x1: "X₁", x2: "X₂" }[sel.key] || sel.key;
     }
     if (sel.type === "data") return `point #${sel.index + 1}`;
+    if (sel.type === "data-error") {
+      return `point #${sel.index + 1} ${sel.key === "top" ? "upper" : "lower"} error cap`;
+    }
     if (sel.type === "scale") return sel.key === "a" ? "scale P₁" : "scale P₂";
     if (sel.type === "measurement") {
       const m = state.measurements[sel.index];
@@ -927,8 +1192,19 @@
     }
     const p = getSelectedPoint();
     if (!p) return false;
-    p.x += dx;
-    p.y += dy;
+    const owner = state.selected.type === "data-error" ? state.points[state.selected.index] : null;
+    const nextX = owner ? owner.x : snapHalfPixel(p.x + dx);
+    const nextY = snapHalfPixel(p.y + dy);
+    const actualDx = nextX - p.x;
+    const actualDy = nextY - p.y;
+    if (state.selected.type === "data" && p.errorBar) {
+      p.errorBar.top.x += actualDx;
+      p.errorBar.top.y += actualDy;
+      p.errorBar.bottom.x += actualDx;
+      p.errorBar.bottom.y += actualDy;
+    }
+    p.x = nextX;
+    p.y = nextY;
     if (state.selected.type === "calibration") {
       syncLinkedOrigin(state.selected.key);
     }
@@ -947,7 +1223,18 @@
     const p = clientToImage(e);
     const pt = getSelectedPoint();
     if (!pt) return;
-    pt.x = p.x;
+    if (state.selected && state.selected.type === "data" && pt.errorBar) {
+      const dx = p.x - pt.x;
+      const dy = p.y - pt.y;
+      pt.errorBar.top.x += dx;
+      pt.errorBar.top.y += dy;
+      pt.errorBar.bottom.x += dx;
+      pt.errorBar.bottom.y += dy;
+    }
+    const owner = state.selected && state.selected.type === "data-error"
+      ? state.points[state.selected.index]
+      : null;
+    pt.x = owner ? owner.x : p.x;
     pt.y = p.y;
     if (state.selected && state.selected.type === "calibration") {
       syncLinkedOrigin(state.selected.key);
@@ -1130,6 +1417,41 @@
     if (!state.points.length) return;
     const r = 4 * s;
     state.points.forEach((p, i) => {
+      if (p.errorBar && p.errorBar.top && p.errorBar.bottom) {
+        const top = p.errorBar.top;
+        const bottom = p.errorBar.bottom;
+        const dx = bottom.x - top.x;
+        const dy = bottom.y - top.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const capX = -dy / len * 4 * s;
+        const capY = dx / len * 4 * s;
+        ctx.save();
+        ctx.strokeStyle = "rgba(217, 38, 38, 0.9)";
+        ctx.lineWidth = 1.5 * s;
+        ctx.beginPath();
+        ctx.moveTo(top.x, top.y);
+        ctx.lineTo(bottom.x, bottom.y);
+        ctx.moveTo(top.x - capX, top.y - capY);
+        ctx.lineTo(top.x + capX, top.y + capY);
+        ctx.moveTo(bottom.x - capX, bottom.y - capY);
+        ctx.lineTo(bottom.x + capX, bottom.y + capY);
+        ctx.stroke();
+        ["top", "bottom"].forEach((key) => {
+          const endpoint = p.errorBar[key];
+          if (state.selected && state.selected.type === "data-error"
+              && state.selected.index === i && state.selected.key === key) {
+            drawSelectionHalo(endpoint, 5 * s, s);
+          }
+          ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+          ctx.strokeStyle = "rgba(217, 38, 38, 0.95)";
+          ctx.lineWidth = 1.25 * s;
+          ctx.beginPath();
+          ctx.arc(endpoint.x, endpoint.y, 2.75 * s, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        });
+        ctx.restore();
+      }
       if (isSelectedDataIndex(i)) drawSelectionHalo(p, r, s);
       ctx.save();
       ctx.fillStyle = "#d92626";
@@ -1400,12 +1722,58 @@
     };
 
     if (state.activeTab === "plot") {
+      if (window.DigitizerAuto && window.DigitizerAuto.drawZoomOverlays) {
+        window.DigitizerAuto.drawZoomOverlays(zoomCtx, sx, sy, k);
+      }
       const cal = state.calibration;
       if (cal.y1) marker(cal.y1, "#1f4163", null, isSelectedCalibration("y1"));
       if (cal.y2) marker(cal.y2, "#1f4163", null, isSelectedCalibration("y2"));
       if (cal.x1) marker(cal.x1, "#a25d12", null, isSelectedCalibration("x1"));
       if (cal.x2) marker(cal.x2, "#a25d12", null, isSelectedCalibration("x2"));
-      state.points.forEach((p, i) => marker(p, "#d92626", "#d92626", isSelectedDataIndex(i)));
+      state.points.forEach((p, i) => {
+        marker(p, "#d92626", "#d92626", isSelectedDataIndex(i));
+        if (p.errorBar && p.errorBar.top && p.errorBar.bottom) {
+          const topX = (p.errorBar.top.x - sx) * k;
+          const topY = (p.errorBar.top.y - sy) * k;
+          const bottomX = (p.errorBar.bottom.x - sx) * k;
+          const bottomY = (p.errorBar.bottom.y - sy) * k;
+          const dx = bottomX - topX;
+          const dy = bottomY - topY;
+          const len = Math.hypot(dx, dy) || 1;
+          const capX = -dy / len * 4;
+          const capY = dx / len * 4;
+          zoomCtx.save();
+          zoomCtx.strokeStyle = "#d92626";
+          zoomCtx.lineWidth = 1.5;
+          zoomCtx.beginPath();
+          zoomCtx.moveTo(topX, topY);
+          zoomCtx.lineTo(bottomX, bottomY);
+          zoomCtx.moveTo(topX - capX, topY - capY);
+          zoomCtx.lineTo(topX + capX, topY + capY);
+          zoomCtx.moveTo(bottomX - capX, bottomY - capY);
+          zoomCtx.lineTo(bottomX + capX, bottomY + capY);
+          zoomCtx.stroke();
+          [["top", topX, topY], ["bottom", bottomX, bottomY]].forEach(([key, x, y]) => {
+            const selected = state.selected && state.selected.type === "data-error"
+              && state.selected.index === i && state.selected.key === key;
+            if (selected) {
+              zoomCtx.strokeStyle = "#f1c054";
+              zoomCtx.lineWidth = 2.5;
+              zoomCtx.beginPath();
+              zoomCtx.arc(x, y, 8, 0, Math.PI * 2);
+              zoomCtx.stroke();
+            }
+            zoomCtx.fillStyle = "rgba(255, 255, 255, 0.95)";
+            zoomCtx.strokeStyle = "#d92626";
+            zoomCtx.lineWidth = 1.25;
+            zoomCtx.beginPath();
+            zoomCtx.arc(x, y, 3, 0, Math.PI * 2);
+            zoomCtx.fill();
+            zoomCtx.stroke();
+          });
+          zoomCtx.restore();
+        }
+      });
     } else if (state.activeTab === "colormap" && window.DigitizerColormap) {
       window.DigitizerColormap.drawZoom(zoomCtx, sx, sy, k, marker);
     } else if (state.activeTab === "map") {
@@ -1457,7 +1825,7 @@
       coordPixelEl.textContent = "Move the cursor over the plot.";
       coordDataEl.textContent = "";
     } else {
-      coordPixelEl.textContent = `Pixel: (${Math.round(state.cursor.x)}, ${Math.round(state.cursor.y)})`;
+      coordPixelEl.textContent = `Pixel: (${snapHalfPixel(state.cursor.x)}, ${snapHalfPixel(state.cursor.y)})`;
       let dataLine = "";
       if (state.activeTab === "plot" && readyToDigitize()) {
         const d = computeDataCoords(state.cursor);
@@ -1564,29 +1932,60 @@
       tdX.textContent = d ? formatValue(d.x) : "—";
       const tdY = document.createElement("td");
       tdY.textContent = d ? formatValue(d.y) : "—";
+      const tdError = document.createElement("td");
+      const error = d ? computeErrorBarValue(p) : null;
+      tdError.textContent = error != null ? formatValue(error) : "—";
 
       const tdAction = document.createElement("td");
+      const errorBtn = document.createElement("button");
+      errorBtn.type = "button";
+      errorBtn.className = "tool-inline-button";
+      errorBtn.textContent = p.errorBar ? "remove error" : "add error";
+      errorBtn.addEventListener("click", () => toggleDataErrorBar(idx));
+      tdAction.appendChild(errorBtn);
       const removeBtn = document.createElement("button");
       removeBtn.type = "button";
       removeBtn.className = "tool-inline-button";
       removeBtn.textContent = "remove";
       removeBtn.addEventListener("click", () => removeDataPoint(idx));
+      if (tdAction.childNodes.length) tdAction.appendChild(document.createTextNode(" "));
       tdAction.appendChild(removeBtn);
 
       tr.appendChild(tdIdx);
       tr.appendChild(tdX);
       tr.appendChild(tdY);
+      tr.appendChild(tdError);
       tr.appendChild(tdAction);
       tbody.appendChild(tr);
     });
   }
 
+  function toggleDataErrorBar(idx) {
+    const p = state.points[idx];
+    if (!p) return;
+    if (p.errorBar) {
+      p.errorBar = null;
+      if (state.selected && state.selected.type === "data-error" && state.selected.index === idx) {
+        state.selected = { type: "data", index: idx };
+      }
+    } else {
+      const halfHeight = 5;
+      p.errorBar = {
+        top: { x: p.x, y: snapHalfPixel(p.y - halfHeight) },
+        bottom: { x: p.x, y: snapHalfPixel(p.y + halfHeight) }
+      };
+      state.selected = { type: "data-error", index: idx, key: "top" };
+      flashStatus("Drag the upper and lower error caps, or nudge them with the arrow keys.");
+    }
+    refreshAll();
+  }
+
   function removeDataPoint(idx) {
     if (idx < 0 || idx >= state.points.length) return;
     state.points.splice(idx, 1);
-    if (state.selected && state.selected.type === "data") {
+    if (state.selected && (state.selected.type === "data" || state.selected.type === "data-error")) {
       if (state.selected.index === idx) state.selected = null;
-      else if (state.selected.index > idx) state.selected = { type: "data", index: state.selected.index - 1 };
+      else if (state.selected.index > idx) state.selected = { ...state.selected, index: state.selected.index - 1 };
     }
     refreshAll();
   }
@@ -1671,7 +2070,13 @@
 
     if (state.activeTab === "plot") {
       for (const key of CALIBRATION_KEYS) consider({ type: "calibration", key }, state.calibration[key]);
-      state.points.forEach((pt, i) => consider({ type: "data", index: i }, pt));
+      state.points.forEach((pt, i) => {
+        if (pt.errorBar) {
+          consider({ type: "data-error", index: i, key: "top" }, pt.errorBar.top);
+          consider({ type: "data-error", index: i, key: "bottom" }, pt.errorBar.bottom);
+        }
+        consider({ type: "data", index: i }, pt);
+      });
     } else if (state.activeTab === "map") {
       consider({ type: "scale", key: "a" }, state.scale.a);
       consider({ type: "scale", key: "b" }, state.scale.b);
@@ -1729,6 +2134,7 @@
     draw();
     drawZoom();
     if (window.DigitizerImageEdit) window.DigitizerImageEdit.updateCanvasWrap();
+    scheduleSessionSave();
   }
 
   function redrawCanvas() {
@@ -1802,7 +2208,8 @@
       .map((p) => {
         const d = computeDataCoords(p);
         if (!d || !Number.isFinite(d.x) || !Number.isFinite(d.y)) return null;
-        return `${d.x},${d.y}`;
+        const error = computeErrorBarValue(p);
+        return `${d.x},${d.y},${error == null ? "" : error}`;
       })
       .filter((line) => line !== null)
       .join("\n");
@@ -1894,6 +2301,21 @@
     }
   });
   clearBtn.addEventListener("click", clearAll);
+
+  if (zoomOutBtn) zoomOutBtn.addEventListener("click", () => setViewZoom((state.viewZoom || 1) / 1.25));
+  if (zoomInBtn) zoomInBtn.addEventListener("click", () => setViewZoom((state.viewZoom || 1) * 1.25));
+  if (zoomFitBtn) zoomFitBtn.addEventListener("click", fitViewZoom);
+  canvasWrap.addEventListener("wheel", (e) => {
+    if (!state.image || !(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    const factor = Math.exp(-e.deltaY * 0.01);
+    setViewZoom((state.viewZoom || 1) * factor, e.clientX, e.clientY);
+  }, { passive: false });
+  ["input", "change"].forEach((eventName) => {
+    workspace.addEventListener(eventName, (e) => {
+      if (e.target && e.target.matches("input, select, textarea")) scheduleSessionSave();
+    });
+  });
 
   document.addEventListener("paste", (e) => {
     if (!e.clipboardData) return;
@@ -2339,6 +2761,13 @@
       return;
     }
 
+    if ((e.key === "Backspace" || e.key === "Delete") && state.activeTab === "plot"
+        && state.selected && (state.selected.type === "data" || state.selected.type === "data-error")) {
+      e.preventDefault();
+      removeDataPoint(state.selected.index);
+      return;
+    }
+
     if (!state.selected) return;
 
     let dx = 0;
@@ -2351,7 +2780,7 @@
       default: return;
     }
     e.preventDefault();
-    const step = e.shiftKey ? 10 : 1;
+    const step = e.shiftKey ? 5 : 0.5;
     if (moveSelectedBy(dx * step, dy * step)) {
       snapCursorToSelection();
       refreshAll();
@@ -2397,9 +2826,13 @@
   }
 
   setActiveTab("edit", true);
-  loadDefaultSamplePlot();
+  restoreSession().then((restored) => {
+    if (!restored) loadDefaultSamplePlot();
+  });
 
   window.addEventListener("resize", () => {
-    if (state.image) draw();
+    if (!state.image) return;
+    if (state.viewFit) fitViewZoom();
+    else draw();
   });
 })();

@@ -10,7 +10,7 @@
   <title>Figure cleanup and digitizer | Paul M. Neves</title>
   <link rel="canonical" href="https://paulmneves.com/tools/plot-digitizer.html" />
   <link rel="icon" type="image/png" href="../media/favicon.png" />
-  <link rel="stylesheet" href="../css/site.css" />
+  <link rel="stylesheet" href="../css/site.css?v=20260723-2" />
 </head>
 <body>
   <header>
@@ -87,6 +87,12 @@
 
         <div class="digitizer-workspace-toolbar">
           <button type="button" class="tool-inline-button" id="dig-clear-calibrations" title="Remove axis and scale calibration, digitized points, and measurements">Clear all calibrations and points</button>
+          <div class="digitizer-view-controls" role="group" aria-label="Plot zoom">
+            <button type="button" class="tool-inline-button digitizer-zoom-button" id="dig-zoom-out" aria-label="Zoom out" title="Zoom out">−</button>
+            <output id="dig-view-zoom" aria-live="polite">100%</output>
+            <button type="button" class="tool-inline-button digitizer-zoom-button" id="dig-zoom-in" aria-label="Zoom in" title="Zoom in">+</button>
+            <button type="button" class="tool-inline-button" id="dig-zoom-fit">Fit</button>
+          </div>
         </div>
 
         <div data-tab-pane="edit">
@@ -111,7 +117,8 @@
             (in any order), then enter their values to the right. When all four are set, switch to
             <em>Add points</em> and click inside the plot to digitize data, or use the
             <em>Auto digitize</em> controls below the image. Right-click an added point
-            (or use the table) to remove it.
+            (or use the table) to remove it. Error-bar endpoints can be dragged or nudged;
+            use the point table to add a manual error bar when automatic detection is ambiguous.
           </p>
           <div class="digitizer-mode-bar" role="toolbar" aria-label="Plot mode">
             <button type="button" class="digitizer-mode-btn" data-mode="y1">Set Y₁</button>
@@ -214,15 +221,20 @@
             <div class="digitizer-edit-apply-panel digitizer-auto-panel" data-tab-pane="plot" hidden>
               <h3 class="tool-subheading">Auto digitize</h3>
               <p class="tool-note digitizer-auto-note">
-                Define a region mask and pick data/background colors, then enable live auto-digitize
-                to update points as you adjust settings. Region tools modify which pixels are included
-                (whole plot selected by default). Use <em>Subtract from region</em> to remove areas
-                instead of adding them.
+                For the most robust marker detection, choose <em>Marker kernel</em> and drag a tight
+                rectangle around one complete marker. The kernel is correlated across the selected
+                plot region; the match threshold controls accepted peaks and minimum spacing merges
+                nearby responses. Choose either the local response maximum or its center of mass for
+                each marker position. Color and line modes remain available.
+                Vertical error-bar tracing is a separate optional pass after marker centers are found.
+                Pick the color shared by the marker and bars before enabling it. Automatic results can
+                still be corrected by dragging either end cap or using <em>add error</em> in the table.
               </p>
               <div class="digitizer-mode-bar digitizer-auto-mode-bar" role="toolbar" aria-label="Auto region tools">
                 <button type="button" class="digitizer-mode-btn" data-mode="auto-mask-rect">Region rect</button>
                 <button type="button" class="digitizer-mode-btn" data-mode="auto-mask-lasso">Region lasso</button>
                 <button type="button" class="digitizer-mode-btn" data-mode="auto-mask-poly">Region poly</button>
+                <button type="button" class="digitizer-mode-btn" data-mode="auto-template-rect">Marker kernel</button>
                 <button type="button" class="digitizer-mode-btn" data-mode="auto-pick-data">Pick data</button>
                 <button type="button" class="digitizer-mode-btn" data-mode="auto-pick-bg">Pick bg</button>
               </div>
@@ -232,20 +244,31 @@
                     <input type="checkbox" id="dig-auto-subtract" />
                     Subtract from region (invert tool)
                   </label>
+                </div>
+                <div class="digitizer-auto-color-settings" id="dig-auto-color-settings">
+                  <div class="digitizer-axis-options">
                   <label>
                     <input type="checkbox" id="dig-auto-grayscale" />
-                    Grayscale only (match luminance, ignore hue)
+                    Color mode only: match luminance, ignore hue
                   </label>
-                </div>
-                <div class="digitizer-edit-color-row">
-                  <label class="digitizer-auto-color-label" for="dig-auto-data-color">Data</label>
-                  <input type="color" id="dig-auto-data-color" value="#000000" title="Data color" />
-                  <input type="text" id="dig-auto-data-hex" class="digitizer-edit-hex-input" value="#000000" spellcheck="false" autocomplete="off" maxlength="9" />
-                </div>
-                <div class="digitizer-edit-color-row">
-                  <label class="digitizer-auto-color-label" for="dig-auto-bg-color">Background</label>
-                  <input type="color" id="dig-auto-bg-color" value="#ffffff" title="Background color" />
-                  <input type="text" id="dig-auto-bg-hex" class="digitizer-edit-hex-input" value="#ffffff" spellcheck="false" autocomplete="off" maxlength="9" />
+                  </div>
+                  <div class="digitizer-edit-color-row">
+                    <label class="digitizer-auto-color-label" for="dig-auto-data-color">Marker/bar</label>
+                    <input type="color" id="dig-auto-data-color" value="#000000" title="Data color" />
+                    <input type="text" id="dig-auto-data-hex" class="digitizer-edit-hex-input" value="#000000" spellcheck="false" autocomplete="off" maxlength="9" />
+                  </div>
+                  <div class="digitizer-edit-color-row">
+                    <label class="digitizer-auto-color-label" for="dig-auto-bg-color">Background</label>
+                    <input type="color" id="dig-auto-bg-color" value="#ffffff" title="Background color" />
+                    <input type="text" id="dig-auto-bg-hex" class="digitizer-edit-hex-input" value="#ffffff" spellcheck="false" autocomplete="off" maxlength="9" />
+                  </div>
+                  <div class="digitizer-edit-param">
+                    <label for="dig-auto-tolerance">Color tolerance</label>
+                    <div class="digitizer-edit-param-controls">
+                      <input type="range" id="dig-auto-tolerance-range" min="0" max="120" step="1" value="40" />
+                      <input type="number" id="dig-auto-tolerance" step="1" min="0" max="120" value="40" />
+                    </div>
+                  </div>
                 </div>
                 <div class="digitizer-edit-moire-methods" role="radiogroup" aria-label="Auto detection mode">
                   <label>
@@ -254,25 +277,51 @@
                   </label>
                   <label>
                     <input type="radio" name="dig-auto-detect-mode" value="point" />
-                    Point mode (scatter)
+                    Color marker mode
+                  </label>
+                  <label>
+                    <input type="radio" name="dig-auto-detect-mode" value="template" />
+                    Marker kernel mode
                   </label>
                 </div>
-                <div class="digitizer-edit-param">
-                  <label for="dig-auto-tolerance">Color tolerance</label>
-                  <div class="digitizer-edit-param-controls">
-                    <input type="range" id="dig-auto-tolerance-range" min="0" max="120" step="1" value="40" />
-                    <input type="number" id="dig-auto-tolerance" step="1" min="0" max="120" value="40" />
-                  </div>
-                </div>
                 <div class="digitizer-edit-param" id="dig-auto-min-dist-row" hidden>
-                  <label for="dig-auto-min-dist">Min point distance R (px)</label>
+                  <label for="dig-auto-min-dist">Minimum marker spacing (px)</label>
                   <div class="digitizer-edit-param-controls">
                     <input type="range" id="dig-auto-min-dist-range" min="1" max="80" step="1" value="8" />
                     <input type="number" id="dig-auto-min-dist" step="1" min="1" max="80" value="8" />
                   </div>
                 </div>
+                <div class="digitizer-edit-param" id="dig-auto-template-threshold-row" hidden>
+                  <label for="dig-auto-template-threshold">Kernel match threshold (%)</label>
+                  <div class="digitizer-edit-param-controls">
+                    <input type="range" id="dig-auto-template-threshold-range" min="5" max="99" step="1" value="40" />
+                    <input type="number" id="dig-auto-template-threshold" step="1" min="5" max="99" value="40" />
+                  </div>
+                </div>
+                <div class="digitizer-edit-moire-methods" id="dig-auto-peak-position-row" role="radiogroup" aria-label="Kernel peak position" hidden>
+                  <label>
+                    <input type="radio" name="dig-auto-peak-position" value="maximum" checked />
+                    Local maximum
+                  </label>
+                  <label>
+                    <input type="radio" name="dig-auto-peak-position" value="centroid" />
+                    Peak center of mass
+                  </label>
+                </div>
                 <div class="digitizer-auto-actions">
+                  <button type="button" class="tool-inline-button" id="dig-auto-run">Detect markers</button>
                   <button type="button" class="tool-inline-button" id="dig-auto-reset-mask">Reset region</button>
+                  <button type="button" class="tool-inline-button" id="dig-auto-clear-template" hidden>Clear kernel</button>
+                  <span class="digitizer-auto-prototype-readout" id="dig-auto-template-readout">No marker kernel selected.</span>
+                </div>
+                <div class="digitizer-auto-footer">
+                  <div class="digitizer-auto-error-controls" id="dig-auto-error-row">
+                    <label class="digitizer-auto-live-toggle">
+                      <input type="checkbox" id="dig-auto-trace-errors" />
+                      Trace vertical error bars
+                    </label>
+                    <button type="button" class="tool-inline-button" id="dig-auto-run-errors" disabled>Detect error bars</button>
+                  </div>
                   <label class="digitizer-auto-live-toggle">
                     <input type="checkbox" id="dig-auto-live" />
                     Live auto-digitize
@@ -322,8 +371,9 @@
               </div>
               <p class="tool-note digitizer-axis-actions-note">
                 Tip: left-click any marker or point to select it, then use the
-                <kbd>←</kbd> <kbd>↑</kbd> <kbd>→</kbd> <kbd>↓</kbd> keys to nudge it one
-                pixel at a time (hold <kbd>Shift</kbd> for ten). Press <kbd>Esc</kbd> to deselect
+                mouse snaps to pixel centers (hold <kbd>Alt</kbd>/<kbd>Option</kbd> for pixel edges),
+                and the <kbd>←</kbd> <kbd>↑</kbd> <kbd>→</kbd> <kbd>↓</kbd> keys nudge half a
+                pixel at a time (hold <kbd>Shift</kbd> for five). Press <kbd>Esc</kbd> to deselect
                 or cancel a measurement in progress.
               </p>
 
@@ -362,7 +412,7 @@
               </div>
               <p class="tool-note digitizer-axis-actions-note" id="cm-output-readout">Draw the data region to choose an output grid.</p>
               <div class="digitizer-axis-actions"><button type="button" class="tool-inline-button" id="cm-swap-y">Swap Y₁ ↔ Y₂</button><button type="button" class="tool-inline-button" id="cm-swap-x">Swap X₁ ↔ X₂</button></div>
-              <p class="tool-note digitizer-axis-actions-note">Tip: left-click any marker to select it, then use the <kbd>←</kbd> <kbd>↑</kbd> <kbd>→</kbd> <kbd>↓</kbd> keys to nudge it one pixel at a time (hold <kbd>Shift</kbd> for ten).</p>
+              <p class="tool-note digitizer-axis-actions-note">Tip: mouse placement snaps to pixel centers (hold <kbd>Alt</kbd>/<kbd>Option</kbd> for pixel edges). Select a marker and use the <kbd>←</kbd> <kbd>↑</kbd> <kbd>→</kbd> <kbd>↓</kbd> keys to nudge it half a pixel at a time (hold <kbd>Shift</kbd> for five).</p>
               <h3 class="tool-subheading digitizer-axis-options-heading">Axis options</h3>
               <div class="digitizer-axis-options">
                 <label><input type="checkbox" id="cm-logx" /> Logarithmic X axis</label>
@@ -573,6 +623,7 @@
                   <th>#</th>
                   <th>X</th>
                   <th>Y</th>
+                  <th>Error bar</th>
                   <th aria-label="Actions"></th>
                 </tr>
               </thead>
@@ -617,9 +668,9 @@
   </footer>
 
   <script src="../js/site.js"></script>
-  <script src="../js/plot-digitizer-edit.js"></script>
-  <script src="../js/plot-digitizer-auto.js"></script>
-  <script src="../js/plot-digitizer-colormap.js"></script>
-  <script src="../js/plot-digitizer.js"></script>
+  <script src="../js/plot-digitizer-edit.js?v=20260723-2"></script>
+  <script src="../js/plot-digitizer-auto.js?v=20260723-2"></script>
+  <script src="../js/plot-digitizer-colormap.js?v=20260723-2"></script>
+  <script src="../js/plot-digitizer.js?v=20260723-3"></script>
 </body>
 </html>
