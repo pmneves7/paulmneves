@@ -34,9 +34,13 @@
   const dataSection = document.getElementById("dig-data");
   const dataNote = document.getElementById("dig-data-note");
   const tbody = document.getElementById("dig-points-tbody");
+  const pointsXHeader = document.getElementById("dig-points-x-header");
+  const pointsYHeader = document.getElementById("dig-points-y-header");
+  const pointsErrorHeader = document.getElementById("dig-points-error-header");
   const copyBtn = document.getElementById("dig-copy-btn");
   const downloadBtn = document.getElementById("dig-download-btn");
   const clearPointsBtn = document.getElementById("dig-clear-points-btn");
+  const equalErrorBarsEl = document.getElementById("dig-equal-error-bars");
   const clearCalibrationsBtn = document.getElementById("dig-clear-calibrations");
   const zoomOutBtn = document.getElementById("dig-zoom-out");
   const zoomInBtn = document.getElementById("dig-zoom-in");
@@ -409,8 +413,35 @@
     return true;
   }
 
+  function calibrationGeometryProblem() {
+    if (!calibrationComplete()) return "";
+    const cal = state.calibration;
+    if (!transformedEl.checked) {
+      const problems = [];
+      if (Math.abs(cal.x2.x - cal.x1.x) < 1e-9) {
+        problems.push("X₁ and X₂ need different horizontal positions");
+      }
+      if (Math.abs(cal.y2.y - cal.y1.y) < 1e-9) {
+        problems.push("Y₁ and Y₂ need different vertical positions");
+      }
+      return problems.join("; ");
+    }
+    const vxX = cal.x2.x - cal.x1.x;
+    const vxY = cal.x2.y - cal.x1.y;
+    const vyX = cal.y2.x - cal.y1.x;
+    const vyY = cal.y2.y - cal.y1.y;
+    const det = vxX * vyY - vxY * vyX;
+    return Math.abs(det) < 1e-9
+      ? "the X and Y calibration directions are parallel"
+      : "";
+  }
+
+  function calibrationGeometryValid() {
+    return calibrationComplete() && !calibrationGeometryProblem();
+  }
+
   function readyToDigitize() {
-    return calibrationComplete() && axisValuesValid();
+    return calibrationComplete() && axisValuesValid() && calibrationGeometryValid();
   }
 
   // --- Map scale validity -------------------------------------------------
@@ -1134,6 +1165,32 @@
       && (key == null || state.selected.key === key);
   }
 
+  function equalErrorBarsEnabled() {
+    return !!(equalErrorBarsEl && equalErrorBarsEl.checked);
+  }
+
+  function normalizeEqualErrorBar(point, preferredKey) {
+    if (!point || !point.errorBar || !equalErrorBarsEnabled()) return;
+    const top = point.errorBar.top;
+    const bottom = point.errorBar.bottom;
+    if (!top || !bottom) return;
+    let halfHeight;
+    if (preferredKey === "top" || preferredKey === "bottom") {
+      halfHeight = Math.abs(point.errorBar[preferredKey].y - point.y);
+    } else {
+      halfHeight = Math.max(Math.abs(top.y - point.y), Math.abs(bottom.y - point.y));
+    }
+    const imageHeight = state.image ? state.image.height : Infinity;
+    if (Number.isFinite(imageHeight)) {
+      halfHeight = Math.min(halfHeight, Math.max(0, Math.min(point.y, imageHeight - 1 - point.y)));
+    }
+    halfHeight = Math.round(halfHeight * 2) / 2;
+    top.x = point.x;
+    top.y = snapHalfPixel(point.y - halfHeight);
+    bottom.x = point.x;
+    bottom.y = snapHalfPixel(point.y + halfHeight);
+  }
+
   function getSelectedPoint() {
     const s = state.selected;
     if (!s) return null;
@@ -1205,6 +1262,9 @@
     }
     p.x = nextX;
     p.y = nextY;
+    if (state.selected.type === "data-error" && owner) {
+      normalizeEqualErrorBar(owner, state.selected.key);
+    }
     if (state.selected.type === "calibration") {
       syncLinkedOrigin(state.selected.key);
     }
@@ -1236,6 +1296,9 @@
       : null;
     pt.x = owner ? owner.x : p.x;
     pt.y = p.y;
+    if (state.selected && state.selected.type === "data-error" && owner) {
+      normalizeEqualErrorBar(owner, state.selected.key);
+    }
     if (state.selected && state.selected.type === "calibration") {
       syncLinkedOrigin(state.selected.key);
     }
@@ -1909,16 +1972,28 @@
   function renderPointsTable() {
     tbody.innerHTML = "";
     const ready = readyToDigitize();
+    if (pointsXHeader) pointsXHeader.textContent = ready ? "X" : "X (px)";
+    if (pointsYHeader) pointsYHeader.textContent = ready ? "Y" : "Y (px)";
+    if (pointsErrorHeader) pointsErrorHeader.textContent = ready ? "Error bar" : "Error bar (px)";
+    const geometryProblem = calibrationGeometryProblem();
     if (!state.image) {
       dataNote.textContent = "";
     } else if (!state.points.length) {
-      dataNote.textContent = ready
-        ? "Click inside the plot in Add points mode to digitize data."
-        : "Calibrate the four axis points and enter their values to start digitizing.";
+      if (ready) {
+        dataNote.textContent = "Click inside the plot in Add points mode to digitize data.";
+      } else if (geometryProblem) {
+        dataNote.textContent = `Axis calibration cannot convert pixels to data: ${geometryProblem}.`;
+      } else {
+        dataNote.textContent = "Calibrate the four axis points and enter their values to start digitizing.";
+      }
     } else {
-      dataNote.textContent = ready
-        ? `${state.points.length} point${state.points.length === 1 ? "" : "s"} digitized.`
-        : `${state.points.length} pixel point${state.points.length === 1 ? "" : "s"} stored; enter axis values to see data coordinates.`;
+      if (ready) {
+        dataNote.textContent = `${state.points.length} point${state.points.length === 1 ? "" : "s"} digitized.`;
+      } else if (geometryProblem) {
+        dataNote.textContent = `${state.points.length} pixel point${state.points.length === 1 ? "" : "s"} stored. Axis calibration cannot convert them to data: ${geometryProblem}.`;
+      } else {
+        dataNote.textContent = `${state.points.length} pixel point${state.points.length === 1 ? "" : "s"} stored; complete the axis calibration to see data coordinates.`;
+      }
     }
 
     state.points.forEach((p, idx) => {
@@ -1929,12 +2004,17 @@
       const tdIdx = document.createElement("td");
       tdIdx.textContent = String(idx + 1);
       const tdX = document.createElement("td");
-      tdX.textContent = d ? formatValue(d.x) : "—";
+      tdX.textContent = d ? formatValue(d.x) : formatValue(p.x);
       const tdY = document.createElement("td");
-      tdY.textContent = d ? formatValue(d.y) : "—";
+      tdY.textContent = d ? formatValue(d.y) : formatValue(p.y);
       const tdError = document.createElement("td");
       const error = d ? computeErrorBarValue(p) : null;
-      tdError.textContent = error != null ? formatValue(error) : "—";
+      const pixelError = p.errorBar && p.errorBar.top && p.errorBar.bottom
+        ? Math.abs(p.errorBar.bottom.y - p.errorBar.top.y) / 2
+        : null;
+      tdError.textContent = error != null
+        ? formatValue(error)
+        : pixelError != null ? formatValue(pixelError) : "—";
 
       const tdAction = document.createElement("td");
       const errorBtn = document.createElement("button");
@@ -1956,6 +2036,21 @@
       tr.appendChild(tdY);
       tr.appendChild(tdError);
       tr.appendChild(tdAction);
+      tr.tabIndex = 0;
+      const selectRowPoint = () => {
+        state.selected = { type: "data", index: idx };
+        snapCursorToSelection();
+        refreshAll();
+      };
+      tr.addEventListener("click", (event) => {
+        if (event.target.closest("button, a, input, select, textarea")) return;
+        selectRowPoint();
+      });
+      tr.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        selectRowPoint();
+      });
       tbody.appendChild(tr);
     });
   }
@@ -2436,6 +2531,7 @@
     if (state.activeTab === "plot" || state.activeTab === "map") {
       const hit = findHit(p);
       if (hit) {
+        canvas.focus({ preventScroll: true });
         state.selected = hit;
         state.pointDrag = { moved: false };
         startPointDrag();
@@ -2654,9 +2750,20 @@
   clearPointsBtn.addEventListener("click", () => {
     if (!state.points.length) return;
     state.points = [];
-    if (state.selected && state.selected.type === "data") state.selected = null;
+    if (state.selected && (state.selected.type === "data" || state.selected.type === "data-error")) {
+      state.selected = null;
+    }
     refreshAll();
   });
+
+  if (equalErrorBarsEl) {
+    equalErrorBarsEl.addEventListener("change", () => {
+      if (equalErrorBarsEl.checked) {
+        state.points.forEach((point) => normalizeEqualErrorBar(point));
+      }
+      refreshAll();
+    });
+  }
 
   if (clearCalibrationsBtn) {
     clearCalibrationsBtn.addEventListener("click", clearCalibrationsAndPoints);
@@ -2724,6 +2831,17 @@
     }
 
     if (isEditableElement(ae)) {
+      return;
+    }
+
+    if (e.key === "Tab" && state.activeTab === "plot" && state.points.length
+        && state.selected && (state.selected.type === "data" || state.selected.type === "data-error")) {
+      e.preventDefault();
+      const direction = e.shiftKey ? -1 : 1;
+      const index = (state.selected.index + direction + state.points.length) % state.points.length;
+      state.selected = { type: "data", index };
+      snapCursorToSelection();
+      refreshAll();
       return;
     }
 
@@ -2818,7 +2936,8 @@
       refreshAll,
       flashStatus,
       redrawCanvas,
-      readyToDigitize
+      readyToDigitize,
+      normalizeErrorBar: normalizeEqualErrorBar
     });
   }
   if (window.DigitizerColormap) {

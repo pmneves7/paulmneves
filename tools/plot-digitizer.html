@@ -10,7 +10,7 @@
   <title>Figure cleanup and digitizer | Paul M. Neves</title>
   <link rel="canonical" href="https://paulmneves.com/tools/plot-digitizer.html" />
   <link rel="icon" type="image/png" href="../media/favicon.png" />
-  <link rel="stylesheet" href="../css/site.css?v=20260723-2" />
+  <link rel="stylesheet" href="../css/site.css?v=20260723-4" />
 </head>
 <body>
   <header>
@@ -167,7 +167,7 @@
         <div class="digitizer-canvas-area">
           <div class="digitizer-canvas-column">
             <div class="digitizer-canvas-wrap is-editing" id="dig-canvas-wrap">
-              <canvas id="dig-canvas"></canvas>
+              <canvas id="dig-canvas" tabindex="0" aria-label="Digitizer image canvas"></canvas>
               <p class="digitizer-status" id="dig-status" aria-live="polite"></p>
             </div>
 
@@ -373,8 +373,9 @@
                 Tip: left-click any marker or point to select it, then use the
                 mouse snaps to pixel centers (hold <kbd>Alt</kbd>/<kbd>Option</kbd> for pixel edges),
                 and the <kbd>←</kbd> <kbd>↑</kbd> <kbd>→</kbd> <kbd>↓</kbd> keys nudge half a
-                pixel at a time (hold <kbd>Shift</kbd> for five). Press <kbd>Esc</kbd> to deselect
-                or cancel a measurement in progress.
+                pixel at a time (hold <kbd>Shift</kbd> for five). Use <kbd>Tab</kbd> and
+                <kbd>Shift</kbd>+<kbd>Tab</kbd> to move between data points. Press <kbd>Esc</kbd>
+                to deselect or cancel a measurement in progress.
               </p>
 
               <h3 class="tool-subheading digitizer-axis-options-heading">Axis options</h3>
@@ -610,6 +611,10 @@
           <div class="digitizer-data-header">
             <h2>3. Digitized points</h2>
             <div class="digitizer-data-actions">
+              <label class="digitizer-data-option">
+                <input type="checkbox" id="dig-equal-error-bars" checked />
+                Equal upper/lower error lengths
+              </label>
               <button type="button" class="button secondary" id="dig-copy-btn">Copy CSV</button>
               <button type="button" class="button secondary" id="dig-download-btn">Download CSV</button>
               <button type="button" class="button secondary" id="dig-clear-points-btn">Clear all points</button>
@@ -621,9 +626,9 @@
               <thead>
                 <tr>
                   <th>#</th>
-                  <th>X</th>
-                  <th>Y</th>
-                  <th>Error bar</th>
+                  <th id="dig-points-x-header">X</th>
+                  <th id="dig-points-y-header">Y</th>
+                  <th id="dig-points-error-header">Error bar</th>
                   <th aria-label="Actions"></th>
                 </tr>
               </thead>
@@ -669,8 +674,8 @@
 
   <script src="../js/site.js"></script>
   <script src="../js/plot-digitizer-edit.js?v=20260723-2"></script>
-  <script src="../js/plot-digitizer-auto.js?v=20260723-2"></script>
+  <script src="../js/plot-digitizer-auto.js?v=20260723-4"></script>
   <script src="../js/plot-digitizer-colormap.js?v=20260723-2"></script>
-  <script src="../js/plot-digitizer.js?v=20260723-3"></script>
+  <script src="../js/plot-digitizer.js?v=20260723-5"></script>
 </body>
 </html>

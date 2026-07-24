@@ -1923,7 +1923,19 @@ footer {
 .digitizer-data-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0.5rem;
+}
+
+.digitizer-data-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-right: 0.25rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
 }
 
 .digitizer-data-actions .button {
@@ -1977,6 +1989,20 @@ footer {
 
 .digitizer-points-table tr.digitizer-row-selected td:first-child {
   box-shadow: inset 3px 0 0 #f1c054;
+}
+
+.digitizer-points-table tbody tr {
+  cursor: pointer;
+}
+
+.digitizer-points-table tbody tr:hover td,
+.digitizer-points-table tbody tr:focus-visible td {
+  background: rgba(23, 63, 112, 0.07);
+}
+
+.digitizer-points-table tbody tr:focus-visible {
+  outline: 2px solid rgba(23, 63, 112, 0.65);
+  outline-offset: -2px;
 }
 
 .digitizer-scale-fields {

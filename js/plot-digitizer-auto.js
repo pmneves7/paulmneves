@@ -819,7 +819,7 @@
     const weights = matchedPixelMap(data, w, h, auto, auto.mask);
     return centers.map((point) => {
       const extent = traceVerticalExtent(weights, w, h, point, radius);
-      return {
+      const detected = {
         x: point.x,
         y: point.y,
         errorBar: {
@@ -827,6 +827,8 @@
           bottom: { x: point.x, y: extent.bottom }
         }
       };
+      if (hooks.normalizeErrorBar) hooks.normalizeErrorBar(detected);
+      return detected;
     });
   }
 
