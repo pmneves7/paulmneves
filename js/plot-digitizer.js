@@ -12,6 +12,9 @@
 
   const workspace = document.getElementById("dig-workspace");
   const canvasArea = document.querySelector(".digitizer-canvas-area");
+  const canvasColumn = document.querySelector(".digitizer-canvas-column");
+  const sidebar = document.querySelector(".digitizer-sidebar");
+  const cursorPreview = document.querySelector(".digitizer-sidebar-preview");
   const canvasWrap = document.getElementById("dig-canvas-wrap");
   const canvas = document.getElementById("dig-canvas");
   const zoomCanvas = document.getElementById("dig-zoom");
@@ -40,12 +43,16 @@
   const copyBtn = document.getElementById("dig-copy-btn");
   const downloadBtn = document.getElementById("dig-download-btn");
   const clearPointsBtn = document.getElementById("dig-clear-points-btn");
+  const autoClearPointsBtn = document.getElementById("dig-auto-clear-points");
   const equalErrorBarsEl = document.getElementById("dig-equal-error-bars");
   const clearCalibrationsBtn = document.getElementById("dig-clear-calibrations");
   const zoomOutBtn = document.getElementById("dig-zoom-out");
   const zoomInBtn = document.getElementById("dig-zoom-in");
   const zoomFitBtn = document.getElementById("dig-zoom-fit");
   const viewZoomEl = document.getElementById("dig-view-zoom");
+  const cursorZoomOutBtn = document.getElementById("dig-cursor-zoom-out");
+  const cursorZoomInBtn = document.getElementById("dig-cursor-zoom-in");
+  const cursorZoomValueEl = document.getElementById("dig-cursor-zoom-value");
 
   const measurementsTbody = document.getElementById("dig-measurements-tbody");
   const measurementsNote = document.getElementById("dig-measurements-note");
@@ -54,6 +61,25 @@
   const scaleDistanceInput = document.getElementById("dig-scale-distance");
   const scaleUnitInput = document.getElementById("dig-scale-unit");
   const scaleReadoutEl = document.getElementById("dig-scale-readout");
+
+  // Group the existing controls and results into the left workspace column.
+  // This only changes presentation; all elements retain their identities and listeners.
+  if (canvasArea && canvasColumn && sidebar && dataSection) {
+    const controlColumn = document.createElement("div");
+    controlColumn.className = "digitizer-control-column";
+    canvasArea.insertBefore(controlColumn, canvasColumn);
+    controlColumn.appendChild(sidebar);
+    [
+      canvasColumn.querySelector(".digitizer-edit-apply-panel[data-tab-pane='edit']"),
+      canvasColumn.querySelector(".digitizer-auto-panel[data-tab-pane='plot']"),
+      canvasColumn.querySelector(".colormap-convert-action[data-tab-pane='colormap']"),
+      canvasColumn.querySelector(".colormap-result-panel[data-tab-pane='colormap']")
+    ].forEach((panel) => {
+      if (panel) controlColumn.appendChild(panel);
+    });
+    if (cursorPreview) canvasColumn.appendChild(cursorPreview);
+    controlColumn.appendChild(dataSection);
+  }
 
   const modeButtons = Array.from(document.querySelectorAll(".digitizer-mode-btn[data-mode]"));
   const editCancelBtn = document.getElementById("dig-edit-cancel-action");
@@ -88,7 +114,8 @@
     "measure-distance": "distance",
     "measure-angle": "angle"
   };
-  const ZOOM_FACTOR = 10;
+  const DEFAULT_CURSOR_ZOOM = 10;
+  const CURSOR_ZOOM_LEVELS = [2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32, 40];
   const ZOOM_DISPLAY_SIZE = 260;
   const POINT_HIT_RADIUS_PX = 12;
   const SELECT_HIT_RADIUS_PX = 10;
@@ -96,6 +123,7 @@
   const SESSION_DB_NAME = "plot-digitizer-session";
   const SESSION_STORE_NAME = "sessions";
   const SESSION_KEY = "current";
+  const CSV_SAVE_HANDLE_KEY = "csv-save-handle";
   const MIN_VIEW_ZOOM = 0.1;
   const MAX_VIEW_ZOOM = 8;
   let sessionSaveTimer = null;
@@ -132,7 +160,8 @@
     pointDrag: null,
     suppressNextClick: false,
     viewZoom: 1,
-    viewFit: false
+    viewFit: false,
+    cursorZoom: DEFAULT_CURSOR_ZOOM
   };
 
   // --- Small helpers ------------------------------------------------------
@@ -156,6 +185,32 @@
     }, durationMs);
   }
 
+  function normalizeCursorZoom(value) {
+    const zoom = Number(value);
+    if (!Number.isFinite(zoom)) return DEFAULT_CURSOR_ZOOM;
+    const maxZoom = CURSOR_ZOOM_LEVELS[CURSOR_ZOOM_LEVELS.length - 1];
+    return Math.max(CURSOR_ZOOM_LEVELS[0], Math.min(maxZoom, zoom));
+  }
+
+  function updateCursorZoomControls() {
+    if (cursorZoomValueEl) cursorZoomValueEl.textContent = `${state.cursorZoom}×`;
+    if (cursorZoomOutBtn) cursorZoomOutBtn.disabled = state.cursorZoom <= CURSOR_ZOOM_LEVELS[0];
+    const maxZoom = CURSOR_ZOOM_LEVELS[CURSOR_ZOOM_LEVELS.length - 1];
+    if (cursorZoomInBtn) cursorZoomInBtn.disabled = state.cursorZoom >= maxZoom;
+  }
+
+  function stepCursorZoom(direction) {
+    const current = normalizeCursorZoom(state.cursorZoom);
+    const next = direction > 0
+      ? CURSOR_ZOOM_LEVELS.find((level) => level > current)
+      : CURSOR_ZOOM_LEVELS.slice().reverse().find((level) => level < current);
+    if (next == null) return;
+    state.cursorZoom = next;
+    updateCursorZoomControls();
+    drawZoom();
+    scheduleSessionSave();
+  }
+
   function displayScale() {
     const rect = canvas.getBoundingClientRect();
     if (!rect.width) return 1;
@@ -171,13 +226,14 @@
     return Math.max(0.5, Math.min(max - 0.5, Math.floor(value) + 0.5));
   }
 
-  function clientToImage(event) {
+  function clientToImage(event, forcePixelEdge = false) {
     const rect = canvas.getBoundingClientRect();
     const sx = canvas.width / Math.max(rect.width, 1);
     const sy = canvas.height / Math.max(rect.height, 1);
+    const usePixelEdge = forcePixelEdge || event.altKey;
     return {
-      x: snapPointerCoordinate((event.clientX - rect.left) * sx, canvas.width, event.altKey),
-      y: snapPointerCoordinate((event.clientY - rect.top) * sy, canvas.height, event.altKey)
+      x: snapPointerCoordinate((event.clientX - rect.left) * sx, canvas.width, usePixelEdge),
+      y: snapPointerCoordinate((event.clientY - rect.top) * sy, canvas.height, usePixelEdge)
     };
   }
 
@@ -290,6 +346,7 @@
       selected: state.selected,
       viewZoom: state.viewZoom,
       viewFit: state.viewFit,
+      cursorZoom: state.cursorZoom,
       auto,
       edit,
       colormap
@@ -350,6 +407,8 @@
       state.linkOrigin = !!restored.linkOrigin;
       state.viewZoom = Number(restored.viewZoom) || 1;
       state.viewFit = !!restored.viewFit;
+      state.cursorZoom = normalizeCursorZoom(restored.cursorZoom);
+      updateCursorZoomControls();
       state.pendingMeasurement = null;
       state.pointDrag = null;
       if (saved.originalBlob) {
@@ -487,6 +546,17 @@
     return v1 + t * (v2 - v1);
   }
 
+  function axisFraction(v1, v2, value, log) {
+    if (![v1, v2, value].every(Number.isFinite)) return null;
+    if (log) {
+      if (v1 <= 0 || v2 <= 0 || value <= 0) return null;
+      const denominator = Math.log(v2) - Math.log(v1);
+      return denominator ? (Math.log(value) - Math.log(v1)) / denominator : null;
+    }
+    const denominator = v2 - v1;
+    return denominator ? (value - v1) / denominator : null;
+  }
+
   function computeDataCoords(p) {
     if (!readyToDigitize()) return null;
     const cal = state.calibration;
@@ -538,12 +608,116 @@
     return { x: dataX, y: dataY };
   }
 
+  function computePixelCoords(dataX, dataY) {
+    if (!readyToDigitize() || !Number.isFinite(dataX) || !Number.isFinite(dataY)) return null;
+    const cal = state.calibration;
+    const y1V = Number(valueInputs.y1.value);
+    const y2V = Number(valueInputs.y2.value);
+    const x1V = Number(valueInputs.x1.value);
+    const x2V = Number(valueInputs.x2.value);
+    const a = axisFraction(x1V, x2V, dataX, logXEl.checked);
+    const yFraction = axisFraction(y1V, y2V, dataY, logYEl.checked);
+    if (!Number.isFinite(a) || !Number.isFinite(yFraction)) return null;
+
+    if (!transformedEl.checked) {
+      return {
+        x: cal.x1.x + a * (cal.x2.x - cal.x1.x),
+        y: cal.y1.y + yFraction * (cal.y2.y - cal.y1.y)
+      };
+    }
+
+    const vx = { x: cal.x2.x - cal.x1.x, y: cal.x2.y - cal.x1.y };
+    const vy = { x: cal.y2.x - cal.y1.x, y: cal.y2.y - cal.y1.y };
+    const det = vx.x * vy.y - vx.y * vy.x;
+    if (Math.abs(det) < 1e-9) return null;
+    const y1Dx = cal.y1.x - cal.x1.x;
+    const y1Dy = cal.y1.y - cal.x1.y;
+    const y1AxisFraction = (-y1Dx * vx.y + y1Dy * vx.x) / det;
+    const b = y1AxisFraction + yFraction;
+    return {
+      x: cal.x1.x + a * vx.x + b * vy.x,
+      y: cal.x1.y + a * vx.y + b * vy.y
+    };
+  }
+
   function computeErrorBarValue(p) {
     if (!p || !p.errorBar || !p.errorBar.top || !p.errorBar.bottom) return null;
     const top = computeDataCoords(p.errorBar.top);
     const bottom = computeDataCoords(p.errorBar.bottom);
     if (!top || !bottom || !Number.isFinite(top.y) || !Number.isFinite(bottom.y)) return null;
     return Math.abs(bottom.y - top.y) / 2;
+  }
+
+  function setPointPixelPosition(point, x, y) {
+    if (!point || !Number.isFinite(x) || !Number.isFinite(y)) return false;
+    const nextX = snapHalfPixel(x);
+    const nextY = snapHalfPixel(y);
+    const dx = nextX - point.x;
+    const dy = nextY - point.y;
+    point.x = nextX;
+    point.y = nextY;
+    if (point.errorBar) {
+      point.errorBar.top.x += dx;
+      point.errorBar.top.y += dy;
+      point.errorBar.bottom.x += dx;
+      point.errorBar.bottom.y += dy;
+    }
+    return true;
+  }
+
+  function setPointDataPosition(point, dataX, dataY) {
+    const error = computeErrorBarValue(point);
+    const pixel = computePixelCoords(dataX, dataY);
+    if (!pixel || !setPointPixelPosition(point, pixel.x, pixel.y)) return false;
+    if (error != null) setPointErrorValue(point, error, dataX, dataY);
+    return true;
+  }
+
+  function setPointErrorValue(point, error, dataX, dataY) {
+    if (!point || !Number.isFinite(error) || error < 0) return false;
+    if (!readyToDigitize()) {
+      point.errorBar = {
+        top: { x: point.x, y: snapHalfPixel(point.y - error) },
+        bottom: { x: point.x, y: snapHalfPixel(point.y + error) }
+      };
+      return true;
+    }
+    const center = dataX == null || dataY == null ? computeDataCoords(point) : { x: dataX, y: dataY };
+    if (!center) return false;
+    const upper = computePixelCoords(center.x, center.y + error);
+    const lower = computePixelCoords(center.x, center.y - error);
+    if (!upper || !lower) return false;
+    point.errorBar = {
+      top: { x: point.x, y: snapHalfPixel(Math.min(upper.y, lower.y)) },
+      bottom: { x: point.x, y: snapHalfPixel(Math.max(upper.y, lower.y)) }
+    };
+    return true;
+  }
+
+  function adjustPointErrorBar(point, delta) {
+    if (!point || !Number.isFinite(delta) || delta === 0) return false;
+    if (!point.errorBar) {
+      if (delta < 0) return false;
+      const halfHeight = 5 + delta;
+      point.errorBar = {
+        top: { x: point.x, y: snapHalfPixel(point.y - halfHeight) },
+        bottom: { x: point.x, y: snapHalfPixel(point.y + halfHeight) }
+      };
+      return true;
+    }
+    const topDistance = Math.abs(point.y - point.errorBar.top.y);
+    const bottomDistance = Math.abs(point.errorBar.bottom.y - point.y);
+    if (equalErrorBarsEnabled()) {
+      const halfHeight = Math.max(0, Math.max(topDistance, bottomDistance) + delta);
+      point.errorBar.top = { x: point.x, y: snapHalfPixel(point.y - halfHeight) };
+      point.errorBar.bottom = { x: point.x, y: snapHalfPixel(point.y + halfHeight) };
+    } else {
+      const nextTop = Math.max(0, topDistance + delta);
+      const nextBottom = Math.max(0, bottomDistance + delta);
+      point.errorBar.top = { x: point.x, y: snapHalfPixel(point.y - nextTop) };
+      point.errorBar.bottom = { x: point.x, y: snapHalfPixel(point.y + nextBottom) };
+    }
+    return true;
   }
 
   // --- Measurement math ---------------------------------------------------
@@ -817,7 +991,7 @@
         statusEl.textContent = "Click polygon vertices. Click the first point to close, then press Delete or Backspace.";
         return;
       }
-      statusEl.textContent = "Adjust sliders in the sidebar for live preview, then click Apply edits.";
+      statusEl.textContent = "Adjust the controls on the left for live preview, then click Apply edits.";
       return;
     }
 
@@ -1203,6 +1377,12 @@
       const p = state.points[s.index];
       return p && p.errorBar ? p.errorBar[s.key] || null : null;
     }
+    if (s.type === "auto-template-marker" && window.DigitizerAuto) {
+      return window.DigitizerAuto.getTemplateMarker();
+    }
+    if (s.type === "auto-template-handle" && window.DigitizerAuto) {
+      return window.DigitizerAuto.getTemplateHandlePoint(s.key);
+    }
     if (s.type === "scale") return state.scale[s.key];
     if (s.type === "measurement") {
       const m = state.measurements[s.index];
@@ -1219,6 +1399,15 @@
     if (sel.type === "data") return `point #${sel.index + 1}`;
     if (sel.type === "data-error") {
       return `point #${sel.index + 1} ${sel.key === "top" ? "upper" : "lower"} error cap`;
+    }
+    if (sel.type === "auto-template-marker") return "marker kernel center";
+    if (sel.type === "auto-template-handle") {
+      const labels = {
+        nw: "top-left corner", n: "top edge", ne: "top-right corner",
+        e: "right edge", se: "bottom-right corner", s: "bottom edge",
+        sw: "bottom-left corner", w: "left edge"
+      };
+      return `marker kernel ${labels[sel.key] || "boundary"}`;
     }
     if (sel.type === "scale") return sel.key === "a" ? "scale P₁" : "scale P₂";
     if (sel.type === "measurement") {
@@ -1241,6 +1430,13 @@
 
   function moveSelectedBy(dx, dy) {
     if (!state.selected) return false;
+    if (state.selected.type === "auto-template-marker") {
+      return !!(window.DigitizerAuto && window.DigitizerAuto.moveTemplateMarkerBy(dx, dy));
+    }
+    if (state.selected.type === "auto-template-handle") {
+      return !!(window.DigitizerAuto
+        && window.DigitizerAuto.moveTemplateHandleBy(state.selected.key, dx, dy));
+    }
     if (state.selected.type === "persp") {
       if (window.DigitizerImageEdit) {
         return window.DigitizerImageEdit.movePerspHandleBy(state.selected.key, dx, dy);
@@ -1280,7 +1476,29 @@
 
   function onPointDragMove(e) {
     if (!state.pointDrag || !state.image) return;
-    const p = clientToImage(e);
+    const p = clientToImage(
+      e,
+      state.selected && state.selected.type === "auto-template-handle"
+    );
+    if (state.selected && state.selected.type === "auto-template-marker") {
+      if (!window.DigitizerAuto || !window.DigitizerAuto.moveTemplateMarkerTo(p)) return;
+      const marker = window.DigitizerAuto.getTemplateMarker();
+      state.cursor = marker ? { x: marker.x, y: marker.y } : p;
+      state.pointerInside = true;
+      state.pointDrag.moved = true;
+      redrawCanvas();
+      return;
+    }
+    if (state.selected && state.selected.type === "auto-template-handle") {
+      if (!window.DigitizerAuto
+          || !window.DigitizerAuto.moveTemplateHandleTo(state.selected.key, p)) return;
+      const handle = window.DigitizerAuto.getTemplateHandlePoint(state.selected.key);
+      state.cursor = handle ? { x: handle.x, y: handle.y } : p;
+      state.pointerInside = true;
+      state.pointDrag.moved = true;
+      redrawCanvas();
+      return;
+    }
     const pt = getSelectedPoint();
     if (!pt) return;
     if (state.selected && state.selected.type === "data" && pt.errorBar) {
@@ -1741,7 +1959,8 @@
       if (preview) zoomSource = preview;
     }
 
-    const srcSize = ZOOM_DISPLAY_SIZE / ZOOM_FACTOR;
+    const cursorZoom = normalizeCursorZoom(state.cursorZoom);
+    const srcSize = ZOOM_DISPLAY_SIZE / cursorZoom;
     const half = srcSize / 2;
     const sx = state.cursor.x - half;
     const sy = state.cursor.y - half;
@@ -1759,7 +1978,7 @@
       );
     } catch (err) { /* ignore edge cases */ }
 
-    const k = ZOOM_FACTOR;
+    const k = cursorZoom;
     const marker = (p, color, fillCenter, selected) => {
       const zx = (p.x - sx) * k;
       const zy = (p.y - sy) * k;
@@ -1969,7 +2188,82 @@
 
   // --- Plot table ---------------------------------------------------------
 
+  function editableNumber(value) {
+    if (!Number.isFinite(value)) return "";
+    return String(Number(value.toPrecision(12)));
+  }
+
+  function sortPointsByX() {
+    if (state.points.length < 2) return;
+    const selectedPoint = state.selected
+      && (state.selected.type === "data" || state.selected.type === "data-error")
+      ? state.points[state.selected.index]
+      : null;
+    const decorated = state.points.map((point, index) => {
+      const data = computeDataCoords(point);
+      return {
+        point,
+        index,
+        x: data && Number.isFinite(data.x) ? data.x : point.x
+      };
+    });
+    decorated.sort((a, b) => {
+      const delta = a.x - b.x;
+      return Number.isFinite(delta) && delta !== 0 ? delta : a.index - b.index;
+    });
+    state.points = decorated.map((entry) => entry.point);
+    if (selectedPoint) {
+      const index = state.points.indexOf(selectedPoint);
+      if (index >= 0) state.selected = { ...state.selected, index };
+      else state.selected = null;
+    }
+  }
+
+  function makePointValueInput(value, label, commit) {
+    const input = document.createElement("input");
+    input.type = "number";
+    input.step = "any";
+    input.className = "digitizer-point-value-input";
+    input.value = editableNumber(value);
+    input.setAttribute("aria-label", label);
+    let ignoreNextChange = false;
+    const commitCurrentValue = () => {
+      const text = input.value.trim();
+      const next = text === "" ? null : Number(text);
+      if (next !== null && !Number.isFinite(next)) {
+        flashStatus("Enter a finite numeric value.");
+        renderPointsTable();
+        return;
+      }
+      if (!commit(next)) {
+        flashStatus("That value is not valid for the current axis calibration.");
+        renderPointsTable();
+        return;
+      }
+      refreshAll();
+    };
+    input.addEventListener("change", () => {
+      if (ignoreNextChange) {
+        ignoreNextChange = false;
+        return;
+      }
+      commitCurrentValue();
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        ignoreNextChange = true;
+        commitCurrentValue();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        renderPointsTable();
+      }
+    });
+    return input;
+  }
+
   function renderPointsTable() {
+    sortPointsByX();
     tbody.innerHTML = "";
     const ready = readyToDigitize();
     if (pointsXHeader) pointsXHeader.textContent = ready ? "X" : "X (px)";
@@ -2004,17 +2298,59 @@
       const tdIdx = document.createElement("td");
       tdIdx.textContent = String(idx + 1);
       const tdX = document.createElement("td");
-      tdX.textContent = d ? formatValue(d.x) : formatValue(p.x);
+      tdX.appendChild(makePointValueInput(
+        d ? d.x : p.x,
+        `Point ${idx + 1} ${ready ? "X" : "pixel X"}`,
+        (value) => {
+          if (value == null) return false;
+          const current = computeDataCoords(p);
+          const changed = ready
+            ? current && setPointDataPosition(p, value, current.y)
+            : setPointPixelPosition(p, value, p.y);
+          const pointIndex = state.points.indexOf(p);
+          if (changed && pointIndex >= 0) state.selected = { type: "data", index: pointIndex };
+          return !!changed;
+        }
+      ));
       const tdY = document.createElement("td");
-      tdY.textContent = d ? formatValue(d.y) : formatValue(p.y);
+      tdY.appendChild(makePointValueInput(
+        d ? d.y : p.y,
+        `Point ${idx + 1} ${ready ? "Y" : "pixel Y"}`,
+        (value) => {
+          if (value == null) return false;
+          const current = computeDataCoords(p);
+          const changed = ready
+            ? current && setPointDataPosition(p, current.x, value)
+            : setPointPixelPosition(p, p.x, value);
+          const pointIndex = state.points.indexOf(p);
+          if (changed && pointIndex >= 0) state.selected = { type: "data", index: pointIndex };
+          return !!changed;
+        }
+      ));
       const tdError = document.createElement("td");
       const error = d ? computeErrorBarValue(p) : null;
       const pixelError = p.errorBar && p.errorBar.top && p.errorBar.bottom
         ? Math.abs(p.errorBar.bottom.y - p.errorBar.top.y) / 2
         : null;
-      tdError.textContent = error != null
-        ? formatValue(error)
-        : pixelError != null ? formatValue(pixelError) : "—";
+      tdError.appendChild(makePointValueInput(
+        error != null ? error : pixelError,
+        `Point ${idx + 1} ${ready ? "error bar" : "pixel error bar"}`,
+        (value) => {
+          if (value == null) {
+            p.errorBar = null;
+            const pointIndex = state.points.indexOf(p);
+            if (state.selected && state.selected.type === "data-error"
+                && state.points[state.selected.index] === p && pointIndex >= 0) {
+              state.selected = { type: "data", index: pointIndex };
+            }
+            return true;
+          }
+          if (value < 0 || !setPointErrorValue(p, value)) return false;
+          const pointIndex = state.points.indexOf(p);
+          if (pointIndex >= 0) state.selected = { type: "data", index: pointIndex };
+          return true;
+        }
+      ));
 
       const tdAction = document.createElement("td");
       const errorBtn = document.createElement("button");
@@ -2047,6 +2383,7 @@
         selectRowPoint();
       });
       tr.addEventListener("keydown", (event) => {
+        if (event.target.closest("button, a, input, select, textarea")) return;
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
         selectRowPoint();
@@ -2075,9 +2412,19 @@
     refreshAll();
   }
 
-  function removeDataPoint(idx) {
+  function removeDataPoint(idx, selectNext = false) {
     if (idx < 0 || idx >= state.points.length) return;
     state.points.splice(idx, 1);
+    if (selectNext) {
+      if (state.points.length) {
+        state.selected = { type: "data", index: idx % state.points.length };
+        snapCursorToSelection();
+      } else {
+        state.selected = null;
+      }
+      refreshAll();
+      return;
+    }
     if (state.selected && (state.selected.type === "data" || state.selected.type === "data-error")) {
       if (state.selected.index === idx) state.selected = null;
       else if (state.selected.index > idx) state.selected = { ...state.selected, index: state.selected.index - 1 };
@@ -2164,6 +2511,18 @@
     };
 
     if (state.activeTab === "plot") {
+      if (window.DigitizerAuto) {
+        const templateHandle = window.DigitizerAuto.findTemplateHandleHit(p);
+        if (templateHandle) {
+          consider(
+            { type: "auto-template-handle", key: templateHandle },
+            window.DigitizerAuto.getTemplateHandlePoint(templateHandle)
+          );
+        }
+      }
+      if (window.DigitizerAuto && window.DigitizerAuto.findTemplateMarkerHit(p)) {
+        consider({ type: "auto-template-marker" }, window.DigitizerAuto.getTemplateMarker());
+      }
       for (const key of CALIBRATION_KEYS) consider({ type: "calibration", key }, state.calibration[key]);
       state.points.forEach((pt, i) => {
         if (pt.errorBar) {
@@ -2299,6 +2658,7 @@
 
   function buildPlotCsv() {
     if (!readyToDigitize()) return "";
+    sortPointsByX();
     return state.points
       .map((p) => {
         const d = computeDataCoords(p);
@@ -2400,6 +2760,8 @@
   if (zoomOutBtn) zoomOutBtn.addEventListener("click", () => setViewZoom((state.viewZoom || 1) / 1.25));
   if (zoomInBtn) zoomInBtn.addEventListener("click", () => setViewZoom((state.viewZoom || 1) * 1.25));
   if (zoomFitBtn) zoomFitBtn.addEventListener("click", fitViewZoom);
+  if (cursorZoomOutBtn) cursorZoomOutBtn.addEventListener("click", () => stepCursorZoom(-1));
+  if (cursorZoomInBtn) cursorZoomInBtn.addEventListener("click", () => stepCursorZoom(1));
   canvasWrap.addEventListener("wheel", (e) => {
     if (!state.image || !(e.ctrlKey || e.metaKey)) return;
     e.preventDefault();
@@ -2513,7 +2875,10 @@
   });
   canvas.addEventListener("mousedown", (e) => {
     if (!state.image || e.button !== 0) return;
-    const p = clientToImage(e);
+    const p = clientToImage(
+      e,
+      state.activeTab === "plot" && state.mode === "auto-template-rect"
+    );
 
     if (state.activeTab === "edit" && window.DigitizerImageEdit) {
       const perspHit = window.DigitizerImageEdit.findPerspHandleHit(p);
@@ -2544,6 +2909,7 @@
 
     if (state.activeTab === "plot" && window.DigitizerAuto) {
       if (window.DigitizerAuto.handleMouseDown(p)) {
+        canvas.focus({ preventScroll: true });
         e.preventDefault();
         return;
       }
@@ -2729,7 +3095,7 @@
     if (!ok) showLoadError("Could not copy to the clipboard.");
   });
 
-  downloadBtn.addEventListener("click", () => {
+  downloadBtn.addEventListener("click", async () => {
     const csv = buildPlotCsv();
     if (!csv) {
       showLoadError("Calibrate the axes and add some points before exporting.");
@@ -2737,6 +3103,50 @@
     }
     showLoadError("");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+
+    if ("showSaveFilePicker" in window) {
+      try {
+        let previousHandle = null;
+        try {
+          previousHandle = await sessionRequest("readonly", (store) => store.get(CSV_SAVE_HANDLE_KEY));
+        } catch (err) {
+          // Saving still works if private browsing prevents handle persistence.
+        }
+        const pickerOptions = {
+          id: "plot-digitizer-csv-save",
+          suggestedName: "digitized.csv",
+          types: [{
+            description: "CSV file",
+            accept: { "text/csv": [".csv"] }
+          }]
+        };
+        if (previousHandle) pickerOptions.startIn = previousHandle;
+        let handle;
+        try {
+          handle = await window.showSaveFilePicker(pickerOptions);
+        } catch (err) {
+          const staleStartLocation = previousHandle
+            && err && ["TypeError", "NotFoundError", "DataCloneError"].includes(err.name);
+          if (!staleStartLocation) throw err;
+          delete pickerOptions.startIn;
+          sessionRequest("readwrite", (store) => store.delete(CSV_SAVE_HANDLE_KEY)).catch(() => {});
+          handle = await window.showSaveFilePicker(pickerOptions);
+        }
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        try {
+          await sessionRequest("readwrite", (store) => store.put(handle, CSV_SAVE_HANDLE_KEY));
+        } catch (err) {
+          // File system handles may be unavailable to IndexedDB in some browsers.
+        }
+        return;
+      } catch (err) {
+        if (err && err.name === "AbortError") return;
+        showLoadError("The save dialog was unavailable, so the CSV was downloaded instead.");
+      }
+    }
+
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -2747,14 +3157,17 @@
     URL.revokeObjectURL(url);
   });
 
-  clearPointsBtn.addEventListener("click", () => {
+  function clearAllDataPoints() {
     if (!state.points.length) return;
     state.points = [];
     if (state.selected && (state.selected.type === "data" || state.selected.type === "data-error")) {
       state.selected = null;
     }
     refreshAll();
-  });
+  }
+
+  clearPointsBtn.addEventListener("click", clearAllDataPoints);
+  if (autoClearPointsBtn) autoClearPointsBtn.addEventListener("click", clearAllDataPoints);
 
   if (equalErrorBarsEl) {
     equalErrorBarsEl.addEventListener("change", () => {
@@ -2845,6 +3258,22 @@
       return;
     }
 
+    if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey
+        && (e.key === "ArrowUp" || e.key === "ArrowDown")
+        && state.activeTab === "plot" && state.selected
+        && (state.selected.type === "data" || state.selected.type === "data-error")) {
+      e.preventDefault();
+      const point = state.points[state.selected.index];
+      const delta = e.key === "ArrowUp" ? 0.5 : -0.5;
+      if (adjustPointErrorBar(point, delta)) {
+        snapCursorToSelection();
+        refreshAll();
+      } else {
+        flashStatus("Add an error bar before shrinking it.");
+      }
+      return;
+    }
+
     if (e.key === "Escape") {
       let changed = false;
       if (state.activeTab === "plot" && window.DigitizerAuto && window.DigitizerAuto.handleEscape(state)) {
@@ -2882,11 +3311,12 @@
     if ((e.key === "Backspace" || e.key === "Delete") && state.activeTab === "plot"
         && state.selected && (state.selected.type === "data" || state.selected.type === "data-error")) {
       e.preventDefault();
-      removeDataPoint(state.selected.index);
+      removeDataPoint(state.selected.index, true);
       return;
     }
 
     if (!state.selected) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
 
     let dx = 0;
     let dy = 0;
@@ -2898,7 +3328,7 @@
       default: return;
     }
     e.preventDefault();
-    const step = e.shiftKey ? 5 : 0.5;
+    const step = 0.5;
     if (moveSelectedBy(dx * step, dy * step)) {
       snapCursorToSelection();
       refreshAll();
@@ -2944,6 +3374,7 @@
     window.DigitizerColormap.init({ getState: () => state, refreshAll, flashStatus, redrawCanvas });
   }
 
+  updateCursorZoomControls();
   setActiveTab("edit", true);
   restoreSession().then((restored) => {
     if (!restored) loadDefaultSamplePlot();

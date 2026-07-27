@@ -388,6 +388,10 @@
     };
   }
 
+  function snapHalfPixel(value) {
+    return Math.round(value * 2) / 2;
+  }
+
   function integerTemplateBounds(rect, w, h) {
     if (!rect) return null;
     const left = clamp(Math.floor(rect.x), 0, w - 1);
@@ -396,6 +400,175 @@
     const bottom = clamp(Math.ceil(rect.y + rect.h), top + 1, h);
     if (right - left < 3 || bottom - top < 3) return null;
     return { left, top, width: right - left, height: bottom - top };
+  }
+
+  function canonicalTemplateRect(bounds) {
+    return {
+      x: bounds.left,
+      y: bounds.top,
+      w: bounds.width,
+      h: bounds.height
+    };
+  }
+
+  function defaultTemplateMarker(bounds) {
+    return {
+      x: bounds.left + bounds.width / 2,
+      y: bounds.top + bounds.height / 2
+    };
+  }
+
+  function clampTemplateMarker(marker, bounds) {
+    if (!marker || !bounds) return null;
+    return {
+      x: snapHalfPixel(clamp(marker.x, bounds.left + 0.5, bounds.left + bounds.width - 0.5)),
+      y: snapHalfPixel(clamp(marker.y, bounds.top + 0.5, bounds.top + bounds.height - 0.5))
+    };
+  }
+
+  function templateBoundsForState(state) {
+    if (!state || !state.image) return null;
+    const w = state.auto.maskW || state.image.width;
+    const h = state.auto.maskH || state.image.height;
+    return w && h ? integerTemplateBounds(state.auto.templateRect, w, h) : null;
+  }
+
+  function canonicalizeTemplateGeometry(state) {
+    const bounds = templateBoundsForState(state);
+    if (!bounds) return;
+    const rect = state.auto.templateRect;
+    const legacyEdges = rect && (
+      !Number.isInteger(rect.x)
+      || !Number.isInteger(rect.y)
+      || !Number.isInteger(rect.w)
+      || !Number.isInteger(rect.h)
+    );
+    state.auto.templateRect = canonicalTemplateRect(bounds);
+    state.auto.templateMarker = legacyEdges || !state.auto.templateMarker
+      ? defaultTemplateMarker(bounds)
+      : clampTemplateMarker(state.auto.templateMarker, bounds);
+  }
+
+  function getTemplateMarker() {
+    const state = hooks.getState();
+    ensureAutoState(state);
+    return state.auto.templateRect ? state.auto.templateMarker : null;
+  }
+
+  function templateHandlePoints(rect) {
+    if (!rect) return {};
+    const left = rect.x;
+    const right = rect.x + rect.w;
+    const top = rect.y;
+    const bottom = rect.y + rect.h;
+    const centerX = (left + right) / 2;
+    const centerY = (top + bottom) / 2;
+    return {
+      nw: { x: left, y: top },
+      n: { x: centerX, y: top },
+      ne: { x: right, y: top },
+      e: { x: right, y: centerY },
+      se: { x: right, y: bottom },
+      s: { x: centerX, y: bottom },
+      sw: { x: left, y: bottom },
+      w: { x: left, y: centerY }
+    };
+  }
+
+  function getTemplateHandlePoint(key) {
+    const state = hooks.getState();
+    ensureAutoState(state);
+    return templateHandlePoints(state.auto.templateRect)[key] || null;
+  }
+
+  function findTemplateHandleHit(p) {
+    const state = hooks.getState();
+    ensureAutoState(state);
+    if (!state.auto.templateRect || !p) return null;
+    const radius = 9 * hooks.displayScale();
+    let bestKey = null;
+    let bestDistance = Infinity;
+    Object.entries(templateHandlePoints(state.auto.templateRect)).forEach(([key, point]) => {
+      const distance = Math.hypot(point.x - p.x, point.y - p.y);
+      if (distance < radius && distance < bestDistance) {
+        bestKey = key;
+        bestDistance = distance;
+      }
+    });
+    return bestKey;
+  }
+
+  function findTemplateMarkerHit(p) {
+    const marker = getTemplateMarker();
+    if (!marker || !p) return false;
+    return Math.hypot(marker.x - p.x, marker.y - p.y) < 10 * hooks.displayScale();
+  }
+
+  function moveTemplateMarkerTo(p) {
+    const state = hooks.getState();
+    ensureAutoState(state);
+    const bounds = templateBoundsForState(state);
+    if (!bounds || !p) return false;
+    const next = clampTemplateMarker(p, bounds);
+    if (!next) return false;
+    if (!state.auto.templateMarker) state.auto.templateMarker = next;
+    else {
+      state.auto.templateMarker.x = next.x;
+      state.auto.templateMarker.y = next.y;
+    }
+    requestLiveAutoDigitize();
+    return true;
+  }
+
+  function moveTemplateMarkerBy(dx, dy) {
+    const marker = getTemplateMarker();
+    if (!marker) return false;
+    return moveTemplateMarkerTo({ x: marker.x + dx, y: marker.y + dy });
+  }
+
+  function moveTemplateHandleTo(key, p) {
+    const state = hooks.getState();
+    ensureAutoState(state);
+    const bounds = templateBoundsForState(state);
+    if (!bounds || !p || !key) return false;
+
+    let left = bounds.left;
+    let right = bounds.left + bounds.width;
+    let top = bounds.top;
+    let bottom = bounds.top + bounds.height;
+    const imageW = state.auto.maskW || state.image.width;
+    const imageH = state.auto.maskH || state.image.height;
+    const nextX = clamp(Math.round(p.x), 0, imageW);
+    const nextY = clamp(Math.round(p.y), 0, imageH);
+
+    if (key.includes("w")) left = Math.min(nextX, right - 3);
+    if (key.includes("e")) right = Math.max(nextX, left + 3);
+    if (key.includes("n")) top = Math.min(nextY, bottom - 3);
+    if (key.includes("s")) bottom = Math.max(nextY, top + 3);
+
+    left = clamp(left, 0, imageW - 3);
+    right = clamp(right, left + 3, imageW);
+    top = clamp(top, 0, imageH - 3);
+    bottom = clamp(bottom, top + 3, imageH);
+
+    const nextBounds = { left, top, width: right - left, height: bottom - top };
+    state.auto.templateRect = canonicalTemplateRect(nextBounds);
+    state.auto.templateMarker = clampTemplateMarker(
+      state.auto.templateMarker || defaultTemplateMarker(nextBounds),
+      nextBounds
+    );
+    updateTemplateReadout(state);
+    requestLiveAutoDigitize();
+    return true;
+  }
+
+  function moveTemplateHandleBy(key, dx, dy) {
+    const point = getTemplateHandlePoint(key);
+    if (!point) return false;
+    return moveTemplateHandleTo(key, {
+      x: point.x + (dx ? Math.sign(dx) : 0),
+      y: point.y + (dy ? Math.sign(dy) : 0)
+    });
   }
 
   function evenlySpacedIndices(size, count) {
@@ -444,7 +617,7 @@
     return energy > 1e-8 ? { samples, energy } : null;
   }
 
-  function templateScoreAt(data, imageW, originX, originY, kernel) {
+  function templateScoreAt(data, imageW, originX, originY, kernel, mask) {
     let sumR = 0;
     let sumG = 0;
     let sumB = 0;
@@ -454,7 +627,10 @@
     const samples = kernel.samples;
     for (let k = 0; k < samples.length; k++) {
       const sample = samples[k];
-      const i = ((originY + sample.y) * imageW + originX + sample.x) * 4;
+      const x = originX + sample.x;
+      const y = originY + sample.y;
+      if (mask && !mask[maskIndex(x, y, imageW)]) return -1;
+      const i = (y * imageW + x) * 4;
       const r = data[i] / 255;
       const g = data[i + 1] / 255;
       const b = data[i + 2] / 255;
@@ -488,9 +664,10 @@
     if (!bounds || !auto.mask) return [];
     const kernel = buildTemplateKernel(data, w, bounds);
     if (!kernel) return [];
+    const marker = clampTemplateMarker(auto.templateMarker || defaultTemplateMarker(bounds), bounds);
     const appearance = {
-      markerX: (bounds.width - 1) / 2,
-      markerY: (bounds.height - 1) / 2
+      markerX: marker.x - bounds.left,
+      markerY: marker.y - bounds.top
     };
     const maxOriginX = w - bounds.width;
     const maxOriginY = h - bounds.height;
@@ -506,10 +683,10 @@
       const oy = gy * step;
       for (let gx = 0; gx < cols; gx++) {
         const ox = gx * step;
-        const markerX = Math.round(ox + appearance.markerX);
-        const markerY = Math.round(oy + appearance.markerY);
+        const markerX = clamp(Math.floor(ox + appearance.markerX), 0, w - 1);
+        const markerY = clamp(Math.floor(oy + appearance.markerY), 0, h - 1);
         if (!auto.mask[maskIndex(markerX, markerY, w)]) continue;
-        response[gy * cols + gx] = templateScoreAt(data, w, ox, oy, kernel);
+        response[gy * cols + gx] = templateScoreAt(data, w, ox, oy, kernel, auto.mask);
       }
     }
 
@@ -562,7 +739,7 @@
         oy <= Math.min(maxOriginY, candidate.oy + refineRadius); oy++) {
         for (let ox = Math.max(0, candidate.ox - refineRadius);
           ox <= Math.min(maxOriginX, candidate.ox + refineRadius); ox++) {
-          const score = templateScoreAt(data, w, ox, oy, kernel);
+          const score = templateScoreAt(data, w, ox, oy, kernel, auto.mask);
           if (score > bestScore) {
             bestScore = score;
             bestX = ox + appearance.markerX;
@@ -575,9 +752,15 @@
           sumY += (oy + appearance.markerY) * weight;
         }
       }
-      const point = auto.templatePeakPosition === "centroid" && sumW > 0
+      let point = auto.templatePeakPosition === "centroid" && sumW > 0
         ? { x: sumX / sumW, y: sumY / sumW }
         : { x: bestX, y: bestY };
+      const pointX = clamp(Math.floor(point.x), 0, w - 1);
+      const pointY = clamp(Math.floor(point.y), 0, h - 1);
+      if (!auto.mask[maskIndex(pointX, pointY, w)]) {
+        point = { x: bestX, y: bestY };
+      }
+      if (bestScore < threshold) return;
       if (points.some((other) => Math.hypot(other.x - point.x, other.y - point.y) < minDist)) return;
       points.push(point);
     });
@@ -723,20 +906,38 @@
     return result;
   }
 
+  function verticalTraceColumns(x, w) {
+    // Image-coordinate pixel centers are n + 0.5. Interpolate between the
+    // neighboring center columns so an exact center samples one column and an
+    // exact pixel edge samples the two adjacent columns equally.
+    const centerIndex = x - 0.5;
+    const left = Math.floor(centerIndex);
+    const fraction = centerIndex - left;
+    const samples = [];
+    const add = (column, weight) => {
+      if (column >= 0 && column < w && weight > 1e-8) samples.push({ column, weight });
+    };
+    add(left, 1 - fraction);
+    add(left + 1, fraction);
+    if (!samples.length) {
+      return [{ column: clamp(Math.floor(x), 0, w - 1), weight: 1 }];
+    }
+    const total = samples.reduce((sum, sample) => sum + sample.weight, 0);
+    samples.forEach((sample) => { sample.weight /= total; });
+    return samples;
+  }
+
   function traceVerticalExtent(weights, w, h, point, radius) {
-    const halfWidth = Math.max(1, Math.round(radius * 0.18));
-    const cx = Math.round(point.x);
-    const rows = new Uint8Array(h);
+    const columns = verticalTraceColumns(point.x, w);
+    const rows = new Float32Array(h);
     for (let y = 0; y < h; y++) {
-      for (let x = Math.max(0, cx - halfWidth); x <= Math.min(w - 1, cx + halfWidth); x++) {
-        if (weights[maskIndex(x, y, w)] > 0) {
-          rows[y] = 1;
-          break;
-        }
-      }
+      rows[y] = columns.reduce(
+        (sum, sample) => sum + weights[maskIndex(sample.column, y, w)] * sample.weight,
+        0
+      );
     }
 
-    const center = clamp(Math.round(point.y), 0, h - 1);
+    const center = clamp(Math.floor(point.y), 0, h - 1);
     const markerFallback = () => {
       let top = Infinity;
       let bottom = -Infinity;
@@ -759,10 +960,10 @@
       return { top: point.y - radius / 2, bottom: point.y + radius / 2 };
     };
     let seed = center;
-    if (!rows[seed]) {
+    if (rows[seed] <= 0) {
       let bestDistance = Infinity;
-      for (let y = Math.max(0, center - halfWidth - 2); y <= Math.min(h - 1, center + halfWidth + 2); y++) {
-        if (rows[y] && Math.abs(y - center) < bestDistance) {
+      for (let y = Math.max(0, center - 3); y <= Math.min(h - 1, center + 3); y++) {
+        if (rows[y] > 0 && Math.abs(y - center) < bestDistance) {
           seed = y;
           bestDistance = Math.abs(y - center);
         }
@@ -779,7 +980,7 @@
       let edge = seed;
       let gap = 0;
       for (let y = seed + direction; y >= 0 && y < h; y += direction) {
-        if (rows[y]) {
+        if (rows[y] > 0) {
           edge = y;
           gap = 0;
         } else {
@@ -851,9 +1052,15 @@
   function replacePointsWithDetection(state, includeErrorBars) {
     syncParamsFromInputs(state);
     const detected = includeErrorBars === false ? runMarkerDetection(state) : runAutoDigitize(state);
+    const keepTemplateMarkerSelected = state.selected
+      && (state.selected.type === "auto-template-marker"
+        || state.selected.type === "auto-template-handle")
+      && state.auto.templateMarker;
     state.points = detected;
     if (detected.length) {
-      state.selected = { type: "data", index: detected.length - 1 };
+      if (!keepTemplateMarkerSelected) {
+        state.selected = { type: "data", index: detected.length - 1 };
+      }
       if (state.modeByTab) state.modeByTab.plot = "add";
       state.mode = "add";
     } else if (state.selected && (state.selected.type === "data" || state.selected.type === "data-error")) {
@@ -1047,7 +1254,7 @@
   function onMaskDragMove(e) {
     const state = hooks.getState();
     if (!state.auto || !state.auto.maskDrag) return;
-    const p = hooks.clientToImage(e);
+    const p = hooks.clientToImage(e, state.auto.maskDrag.kind === "template");
     state.auto.maskDrag.currentPt = p;
     state.auto.maskDrag.moved = true;
     if (state.auto.maskDrag.kind === "lasso") {
@@ -1076,11 +1283,14 @@
       const info = getDisplayImageData(state);
       const bounds = info ? integerTemplateBounds(rect, info.w, info.h) : null;
       if (info && bounds) {
-        state.auto.templateRect = rect;
-        state.auto.templateMarker = {
-          x: bounds.left + (bounds.width - 1) / 2,
-          y: bounds.top + (bounds.height - 1) / 2
+        state.auto.templateRect = canonicalTemplateRect(bounds);
+        state.auto.templateMarker = defaultTemplateMarker(bounds);
+        state.selected = { type: "auto-template-marker" };
+        state.cursor = {
+          x: state.auto.templateMarker.x,
+          y: state.auto.templateMarker.y
         };
+        state.pointerInside = true;
         state.auto.detectMode = "template";
         syncParamsToInputs(state);
         hooks.flashStatus(`Marker kernel set (${bounds.width} × ${bounds.height} px).`);
@@ -1162,7 +1372,7 @@
     ctx.restore();
   }
 
-  function drawTemplateOverlay(ctx, rect, marker, scale, isDraft) {
+  function drawTemplateOverlay(ctx, rect, marker, scale, isDraft, selectedMarker, selectedHandle) {
     if (!rect || rect.w <= 0 || rect.h <= 0) return;
     const s = scale || 1;
     ctx.save();
@@ -1171,7 +1381,7 @@
     ctx.lineWidth = 2 * s;
     ctx.setLineDash(isDraft ? [5 * s, 4 * s] : []);
     ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
-    ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w, rect.h);
+    ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
     if (marker) {
       const r = 5 * s;
       ctx.setLineDash([]);
@@ -1181,6 +1391,24 @@
       ctx.moveTo(marker.x, marker.y - r);
       ctx.lineTo(marker.x, marker.y + r);
       ctx.stroke();
+      if (selectedMarker) {
+        ctx.strokeStyle = "#f1c054";
+        ctx.lineWidth = 2.5 * s;
+        ctx.beginPath();
+        ctx.arc(marker.x, marker.y, 8 * s, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    if (!isDraft) {
+      const handleSize = 7 * s;
+      Object.entries(templateHandlePoints(rect)).forEach(([key, point]) => {
+        ctx.setLineDash([]);
+        ctx.fillStyle = key === selectedHandle ? "#f1c054" : "#fff";
+        ctx.strokeStyle = "#7e3f98";
+        ctx.lineWidth = 1.5 * s;
+        ctx.fillRect(point.x - handleSize / 2, point.y - handleSize / 2, handleSize, handleSize);
+        ctx.strokeRect(point.x - handleSize / 2, point.y - handleSize / 2, handleSize, handleSize);
+      });
     }
     ctx.restore();
   }
@@ -1201,7 +1429,17 @@
     drawExcludedMaskOverlay(ctx, auto.mask, w, h);
 
     if (auto.templateRect) {
-      drawTemplateOverlay(ctx, auto.templateRect, auto.templateMarker, s, false);
+      drawTemplateOverlay(
+        ctx,
+        auto.templateRect,
+        auto.templateMarker,
+        s,
+        false,
+        state.selected && state.selected.type === "auto-template-marker",
+        state.selected && state.selected.type === "auto-template-handle"
+          ? state.selected.key
+          : null
+      );
     }
 
     if (auto.maskDrag && auto.maskDrag.kind === "template" && auto.maskDrag.moved) {
@@ -1210,7 +1448,9 @@
         normalizedRect(auto.maskDrag.startPt, auto.maskDrag.currentPt),
         null,
         s,
-        true
+        true,
+        false,
+        null
       );
     }
 
@@ -1423,6 +1663,9 @@
     if (els.colorSettings) {
       els.colorSettings.hidden = state.auto.detectMode === "template" && !state.auto.traceErrorBars;
     }
+    if (els.colorGroup) {
+      els.colorGroup.hidden = state.auto.detectMode === "template" && !state.auto.traceErrorBars;
+    }
     if (els.colorToolButtons) {
       const hideColorTools = state.auto.detectMode === "template" && !state.auto.traceErrorBars;
       els.colorToolButtons.forEach((button) => { button.hidden = hideColorTools; });
@@ -1456,6 +1699,7 @@
     els.templateThresholdRow = document.getElementById("dig-auto-template-threshold-row");
     els.peakPositionRow = document.getElementById("dig-auto-peak-position-row");
     els.colorSettings = document.getElementById("dig-auto-color-settings");
+    els.colorGroup = document.getElementById("dig-auto-color-group");
     els.colorToolButtons = document.querySelectorAll(
       '.digitizer-auto-mode-bar [data-mode="auto-pick-data"], '
       + '.digitizer-auto-mode-bar [data-mode="auto-pick-bg"]'
@@ -1591,6 +1835,10 @@
         ensureAutoState(state);
         state.auto.templateRect = null;
         state.auto.templateMarker = null;
+        if (state.selected && (state.selected.type === "auto-template-marker"
+            || state.selected.type === "auto-template-handle")) {
+          state.selected = null;
+        }
         updateTemplateReadout(state);
         if (state.auto.detectMode === "template") {
           state.points = [];
@@ -1635,6 +1883,7 @@
     restoreState(state) {
       ensureAutoState(state);
       resizeMaskIfNeeded(state);
+      canonicalizeTemplateGeometry(state);
       cancelInProgress(state);
       syncParamsToInputs(state);
     },
@@ -1651,6 +1900,14 @@
     handleCanvasClick,
     handleMouseDown,
     handleEscape,
+    findTemplateHandleHit,
+    findTemplateMarkerHit,
+    getTemplateHandlePoint,
+    getTemplateMarker,
+    moveTemplateHandleTo,
+    moveTemplateHandleBy,
+    moveTemplateMarkerTo,
+    moveTemplateMarkerBy,
     drawOverlays,
     drawZoomOverlays,
     updateStatus,
