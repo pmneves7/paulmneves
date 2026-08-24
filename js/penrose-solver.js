@@ -60,8 +60,26 @@
     if (n > limits.maxComponentTiles) return null;
 
 
+    // Assign tiles in an order that finishes small constraints first: the
+    // pruning tests only fire once a constraint is fully assigned, so a poor
+    // order can cost orders of magnitude on a wide frontier.
+    const bySize = component.constraints.slice().sort((a, b) => a.tiles.length - b.tiles.length);
     const localIndex = scratch.slot;
-    for (let i = 0; i < n; i += 1) localIndex[tiles[i]] = i;
+    const ordered = [];
+    for (const c of bySize) {
+      for (const t of c.tiles) {
+        if (localIndex[t] === -1) {
+          localIndex[t] = ordered.length;
+          ordered.push(t);
+        }
+      }
+    }
+    for (const t of tiles) {
+      if (localIndex[t] === -1) {
+        localIndex[t] = ordered.length;
+        ordered.push(t);
+      }
+    }
 
     const constraints = component.constraints.map((c) => ({
       idx: c.tiles.map((t) => localIndex[t]),
@@ -136,7 +154,7 @@
     search(0, 0);
     for (let i = 0; i < n; i += 1) localIndex[tiles[i]] = -1;
     if (overflowed || solutions === 0) return null;
-    return { tiles, size: n, achievable, mineAt, clearAt };
+    return { tiles: ordered, size: n, achievable, mineAt, clearAt };
   }
 
   function splitComponents(constraints, scratch) {

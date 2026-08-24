@@ -36,7 +36,7 @@
   const MAX_ZOOM = 14;
   const DRAG_THRESHOLD = 5;
   const LONG_PRESS_MS = 450;
-  const GENERATE_BUDGET_MS = 4000;
+  const GENERATE_BUDGET_MS = 6000;
   const GENERATE_MAX_ROUNDS = 100000;
 
   const latticeSelect = document.getElementById("ms-lattice");
