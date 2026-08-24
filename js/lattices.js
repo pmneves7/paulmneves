@@ -245,6 +245,90 @@
     return Math.abs(total) / 2;
   }
 
+  function pointInPolygon(x, y, points) {
+    let inside = false;
+    for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+      const [xi, yi] = points[i];
+      const [xj, yj] = points[j];
+      if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  }
+
+  function distanceToBoundary(x, y, points) {
+    let best = Infinity;
+    for (let i = 0; i < points.length; i += 1) {
+      const [ax, ay] = points[i];
+      const [bx, by] = points[(i + 1) % points.length];
+      const dx = bx - ax;
+      const dy = by - ay;
+      const lengthSq = dx * dx + dy * dy;
+      let t = lengthSq ? ((x - ax) * dx + (y - ay) * dy) / lengthSq : 0;
+      t = Math.max(0, Math.min(1, t));
+      const distance = Math.hypot(x - (ax + dx * t), y - (ay + dy * t));
+      if (distance < best) best = distance;
+    }
+    return best;
+  }
+
+  /**
+   * Where to draw a tile's number or glyph, and how big it can be: the point
+   * furthest from the tile's boundary, found by a coarse grid then refined.
+   * The centroid will not do — on a dart it sits near the concave notch, and on
+   * a thin triangle it is far off the incentre.
+   */
+  function labelPoint(points) {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const [x, y] of points) {
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+
+    let bestX = (minX + maxX) / 2;
+    let bestY = (minY + maxY) / 2;
+    let best = pointInPolygon(bestX, bestY, points) ? distanceToBoundary(bestX, bestY, points) : -1;
+
+    const steps = 7;
+    for (let i = 1; i < steps; i += 1) {
+      for (let j = 1; j < steps; j += 1) {
+        const x = minX + ((maxX - minX) * i) / steps;
+        const y = minY + ((maxY - minY) * j) / steps;
+        if (!pointInPolygon(x, y, points)) continue;
+        const distance = distanceToBoundary(x, y, points);
+        if (distance > best) {
+          best = distance;
+          bestX = x;
+          bestY = y;
+        }
+      }
+    }
+
+    let span = Math.max(maxX - minX, maxY - minY) / steps;
+    for (let round = 0; round < 4; round += 1) {
+      for (let i = -1; i <= 1; i += 1) {
+        for (let j = -1; j <= 1; j += 1) {
+          if (!i && !j) continue;
+          const x = bestX + i * span;
+          const y = bestY + j * span;
+          if (!pointInPolygon(x, y, points)) continue;
+          const distance = distanceToBoundary(x, y, points);
+          if (distance > best) {
+            best = distance;
+            bestX = x;
+            bestY = y;
+          }
+        }
+      }
+      span /= 2;
+    }
+    return { x: bestX, y: bestY, inradius: Math.max(best, 1e-6) };
+  }
+
   function polygonPerimeter(points) {
     let total = 0;
     for (let i = 0; i < points.length; i += 1) {
@@ -260,7 +344,69 @@
    * the `tileCount` closest to the origin, index their corners, and read the
    * adjacency off shared corners.
    */
-  function assemble(candidates, tileCount, shapeOf) {
+  /**
+   * Link tiles whose corner falls partway along another tile's edge. Needed for
+   * tilings that are not edge-to-edge — the pinwheel above all — where two tiles
+   * can be plainly adjacent without sharing any corner.
+   */
+  function addEdgeContacts(tiles, sets, vertexAt, tolerance) {
+    const cell = Math.max(tolerance * 20, 0.25);
+    const buckets = new Map();
+    vertexAt.forEach((owners, key) => {
+      const [x, y] = key;
+      const bk = Math.round(x / cell) + ":" + Math.round(y / cell);
+      let list = buckets.get(bk);
+      if (!list) {
+        list = [];
+        buckets.set(bk, list);
+      }
+      list.push({ x, y, owners });
+    });
+
+    for (const tile of tiles) {
+      const points = tile.points;
+      for (let i = 0; i < points.length; i += 1) {
+        const [ax, ay] = points[i];
+        const [bx, by] = points[(i + 1) % points.length];
+        const dx = bx - ax;
+        const dy = by - ay;
+        const lengthSq = dx * dx + dy * dy;
+        if (lengthSq === 0) continue;
+        const steps = Math.max(1, Math.ceil(Math.hypot(dx, dy) / cell));
+        const seen = new Set();
+        for (let step = 0; step <= steps; step += 1) {
+          const t = step / steps;
+          const bi = Math.round((ax + dx * t) / cell);
+          const bj = Math.round((ay + dy * t) / cell);
+          for (let di = -1; di <= 1; di += 1) {
+            for (let dj = -1; dj <= 1; dj += 1) {
+              const bk = bi + di + ":" + (bj + dj);
+              if (seen.has(bk)) continue;
+              seen.add(bk);
+              const list = buckets.get(bk);
+              if (!list) continue;
+              for (const point of list) {
+                // Distance from the corner to this edge, ignoring its own ends.
+                const u = ((point.x - ax) * dx + (point.y - ay) * dy) / lengthSq;
+                if (u <= 1e-9 || u >= 1 - 1e-9) continue;
+                const px = ax + dx * u;
+                const py = ay + dy * u;
+                if (Math.hypot(point.x - px, point.y - py) > tolerance) continue;
+                for (const other of point.owners) {
+                  if (other === tile.id) continue;
+                  sets[tile.id].add(other);
+                  sets[other].add(tile.id);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  function assemble(candidates, tileCount, shapeOf, options) {
+    const settings = options || {};
     candidates.sort((a, b) => a.cx * a.cx + a.cy * a.cy - (b.cx * b.cx + b.cy * b.cy));
     const kept = candidates.slice(0, Math.min(tileCount, candidates.length));
 
@@ -292,13 +438,16 @@
         list.push(i);
       }
       const points = tile.points.map(([x, y]) => [x - shiftX, y - shiftY]);
+      const label = labelPoint(points);
       return {
         id: i,
         shape: shapeOf(tile),
         points,
         cx: tile.cx - shiftX,
         cy: tile.cy - shiftY,
-        inradius: (2 * polygonArea(points)) / polygonPerimeter(points)
+        labelX: label.x,
+        labelY: label.y,
+        inradius: label.inradius
       };
     });
 
@@ -310,6 +459,15 @@
           sets[list[k]].add(list[i]);
         }
       }
+    }
+
+    if (settings.edgeContacts) {
+      const vertexAt = new Map();
+      vertexTiles.forEach((owners, vid) => {
+        const p = index.points[vid];
+        vertexAt.set([p[0] - shiftX, p[1] - shiftY], owners);
+      });
+      addEdgeContacts(tiles, sets, vertexAt, settings.contactTolerance || 1e-6);
     }
 
     return {
@@ -363,6 +521,139 @@
     return assemble(candidates, wanted, (tile) => sides.indexOf(tile.n));
   }
 
+  /* --------------------------------------- de Bruijn grid quasicrystals */
+
+  /**
+   * De Bruijn's dual-grid construction, generalised from the pentagrid that
+   * produces Penrose P3 to any number of line families. N families of equally
+   * spaced parallel lines, at pi/N to one another, dualise to a rhombic tiling
+   * with 2N-fold orientational order: N=4 gives Ammann-Beenker (squares and
+   * 45-degree rhombs, 8-fold), N=6 gives the dodecagonal rhombic tiling
+   * (squares, 60- and 30-degree rhombs, 12-fold).
+   *
+   * Each intersection of a line from family r with one from family s becomes a
+   * rhombus whose corners are the four grid regions meeting there, so tile
+   * corners come out as exact integer combinations of the basis vectors.
+   */
+  const GRID_TILINGS = [
+    {
+      id: "ammann-beenker",
+      name: "Ammann–Beenker",
+      note: "8-fold quasicrystal",
+      families: 4,
+      // Generic offsets: the construction needs no three lines concurrent.
+      offsets: [0.11, 0.29, -0.17, 0.23]
+    },
+    {
+      id: "dodecagonal",
+      name: "Dodecagonal",
+      note: "12-fold quasicrystal",
+      families: 6,
+      offsets: [0.13, -0.07, 0.29, 0.19, -0.23, 0.09]
+    }
+  ];
+
+  function gridBasis(n) {
+    const basis = [];
+    for (let j = 0; j < n; j += 1) {
+      basis.push([Math.cos((Math.PI * j) / n), Math.sin((Math.PI * j) / n)]);
+    }
+    return basis;
+  }
+
+  // Rhombi from families r and s have acute angle min(d, N-d) * pi/N, so their
+  // area is sin(m*pi/N). Shape 0 is the largest, matching the periodic tilings.
+  function rhombShape(n, d) {
+    return Math.floor(n / 2) - Math.min(d, n - d);
+  }
+
+  function gridShapeNames(n) {
+    const names = [];
+    for (let m = Math.floor(n / 2); m >= 1; m -= 1) {
+      const degrees = Math.round((180 * m) / n);
+      names.push(degrees === 90 ? "Square" : degrees + "° rhomb");
+    }
+    return names;
+  }
+
+  function collectGridRhombi(spec, basis, gridRadius) {
+    const n = spec.families;
+    const offsets = spec.offsets;
+    const candidates = [];
+    const kLimit = Math.ceil(gridRadius) + 1;
+    const radiusSq = gridRadius * gridRadius;
+
+    for (let r = 0; r < n; r += 1) {
+      for (let s = r + 1; s < n; s += 1) {
+        const [ar, br] = basis[r];
+        const [as, bs] = basis[s];
+        const det = ar * bs - br * as;
+        const shape = rhombShape(n, s - r);
+
+        for (let kr = -kLimit; kr <= kLimit; kr += 1) {
+          const cr = kr - offsets[r];
+          for (let ks = -kLimit; ks <= kLimit; ks += 1) {
+            const cs = ks - offsets[s];
+            const px = (cr * bs - br * cs) / det;
+            const py = (ar * cs - cr * as) / det;
+            if (px * px + py * py > radiusSq) continue;
+
+            const indices = new Array(n);
+            for (let j = 0; j < n; j += 1) {
+              if (j === r) indices[j] = kr;
+              else if (j === s) indices[j] = ks;
+              else indices[j] = Math.ceil(px * basis[j][0] + py * basis[j][1] + offsets[j]);
+            }
+
+            let bx = 0;
+            let by = 0;
+            for (let j = 0; j < n; j += 1) {
+              bx += indices[j] * basis[j][0];
+              by += indices[j] * basis[j][1];
+            }
+            const points = [
+              [bx, by],
+              [bx + basis[r][0], by + basis[r][1]],
+              [bx + basis[r][0] + basis[s][0], by + basis[r][1] + basis[s][1]],
+              [bx + basis[s][0], by + basis[s][1]]
+            ];
+            candidates.push({
+              shape,
+              points,
+              cx: (points[0][0] + points[2][0]) / 2,
+              cy: (points[0][1] + points[2][1]) / 2
+            });
+          }
+        }
+      }
+    }
+    return candidates;
+  }
+
+  function buildGridTiling(spec, tileCount) {
+    const n = spec.families;
+    const basis = gridBasis(n);
+    const wanted = Math.max(1, Math.floor(tileCount));
+
+    // Intersections per unit area for a pair of families is sin of the angle
+    // between them, and each intersection yields one tile.
+    let density = 0;
+    for (let r = 0; r < n; r += 1) {
+      for (let s = r + 1; s < n; s += 1) density += Math.sin(((s - r) * Math.PI) / n);
+    }
+
+    let gridRadius = 1.35 * Math.sqrt(wanted / (Math.PI * density)) + 2;
+    let candidates = collectGridRhombi(spec, basis, gridRadius);
+    let guard = 0;
+    while (candidates.length < wanted && guard < 8) {
+      gridRadius *= 1.4;
+      candidates = collectGridRhombi(spec, basis, gridRadius);
+      guard += 1;
+    }
+
+    return assemble(candidates, wanted, (tile) => tile.shape);
+  }
+
   /* ---------------------------------------------------------------- registry */
 
   /**
@@ -383,7 +674,9 @@
     rhombitrihexagonal: 8.09,
     "truncated-hexagonal": 5.89,
     "truncated-trihexagonal": 6.14,
-    "truncated-square": 5.98
+    "truncated-square": 5.98,
+    "ammann-beenker": 9.38,
+    dodecagonal: 9.17
   };
 
   const LATTICES = [
@@ -396,7 +689,10 @@
         const tiling = global.PenroseTiling.buildPenroseTiling(tileCount);
         for (const tile of tiling.tiles) {
           tile.shape = tile.fat ? 0 : 1;
-          tile.inradius = (2 * polygonArea(tile.points)) / polygonPerimeter(tile.points);
+          const label = labelPoint(tile.points);
+          tile.labelX = label.x;
+          tile.labelY = label.y;
+          tile.inradius = label.inradius;
         }
         return tiling;
       }
@@ -404,6 +700,19 @@
   ];
 
   const SHAPE_NAMES = { 3: "Triangle", 4: "Square", 6: "Hexagon", 8: "Octagon", 12: "Dodecagon" };
+
+  for (const spec of GRID_TILINGS) {
+    LATTICES.push({
+      id: spec.id,
+      name: spec.name + " (" + spec.note + ")",
+      vertexConfig: spec.note,
+      shapeNames: gridShapeNames(spec.families),
+      spec,
+      build(tileCount) {
+        return buildGridTiling(spec, tileCount);
+      }
+    });
+  }
 
   for (const spec of ARCHIMEDEAN) {
     LATTICES.push({
@@ -422,16 +731,34 @@
 
   const byId = new Map(LATTICES.map((lattice) => [lattice.id, lattice]));
 
+  /**
+   * Add a lattice defined in another file. Constructions that are neither
+   * periodic nor dual-grid (substitution tilings, Voronoi) live separately but
+   * register here so the game sees one list.
+   */
+  function register(lattice) {
+    if (byId.has(lattice.id)) return;
+    if (lattice.avgNeighbors === undefined) lattice.avgNeighbors = AVG_NEIGHBORS[lattice.id];
+    LATTICES.push(lattice);
+    byId.set(lattice.id, lattice);
+  }
+
   global.Lattices = {
     LATTICES,
     ARCHIMEDEAN,
     AVG_NEIGHBORS,
     get: (id) => byId.get(id) || byId.get("penrose"),
+    register,
+    assemble,
+    makeVertexIndex,
     buildPeriodic,
+    buildGridTiling,
+    GRID_TILINGS,
     regularPolygon,
     circumradius,
     apothem,
     polygonArea,
-    polygonPerimeter
+    polygonPerimeter,
+    labelPoint
   };
 })(typeof window !== "undefined" ? window : globalThis);

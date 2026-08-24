@@ -160,8 +160,8 @@
   function addNumber(id, tile, value) {
     const text = document.createElementNS(SVG_NS, "text");
     text.setAttribute("class", "ms-number ms-number-" + value);
-    text.setAttribute("x", tile.cx.toFixed(4));
-    text.setAttribute("y", tile.cy.toFixed(4));
+    text.setAttribute("x", tile.labelX.toFixed(4));
+    text.setAttribute("y", tile.labelY.toFixed(4));
     text.setAttribute("font-size", (tile.inradius * 1.15).toFixed(4));
     text.textContent = String(value);
     addMark(id, text);
@@ -171,7 +171,7 @@
     const s = tile.inradius * 1.12;
     const flag = document.createElementNS(SVG_NS, "g");
     flag.setAttribute("class", "ms-flag" + (wrong ? " is-wrong" : ""));
-    flag.setAttribute("transform", "translate(" + tile.cx.toFixed(4) + " " + tile.cy.toFixed(4) + ") scale(" + s.toFixed(4) + ")");
+    flag.setAttribute("transform", "translate(" + tile.labelX.toFixed(4) + " " + tile.labelY.toFixed(4) + ") scale(" + s.toFixed(4) + ")");
 
     const pole = document.createElementNS(SVG_NS, "path");
     pole.setAttribute("class", "ms-flag-pole");
@@ -196,7 +196,7 @@
     const s = tile.inradius;
     const mine = document.createElementNS(SVG_NS, "g");
     mine.setAttribute("class", "ms-mine" + (hit ? " is-hit" : ""));
-    mine.setAttribute("transform", "translate(" + tile.cx.toFixed(4) + " " + tile.cy.toFixed(4) + ") scale(" + s.toFixed(4) + ")");
+    mine.setAttribute("transform", "translate(" + tile.labelX.toFixed(4) + " " + tile.labelY.toFixed(4) + ") scale(" + s.toFixed(4) + ")");
 
     const spikes = document.createElementNS(SVG_NS, "path");
     spikes.setAttribute("class", "ms-mine-spikes");

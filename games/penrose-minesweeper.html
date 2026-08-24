@@ -30,10 +30,11 @@
     <header class="page-header">
       <h1>Penrose minesweeper</h1>
       <p class="lead">
-        Ordinary minesweeper rules on tilings that are not square grids: an aperiodic Penrose
-        rhombus tiling, or any of the eleven Archimedean tilings. Two tiles are neighbours when
-        they share at least one corner. On the Penrose board the pattern never repeats, so no two
-        neighbourhoods look quite the same.
+        Ordinary minesweeper rules on tilings that are not square grids: the eleven Archimedean
+        tilings, two Penrose tilings, a pair of quasicrystals with eight- and twelve-fold symmetry,
+        a substitution tiling, and the cells of a random point set. Two tiles are neighbours when
+        they share at least one corner. On the aperiodic boards the pattern never repeats, so no
+        two neighbourhoods look quite the same.
       </p>
     </header>
 
@@ -147,7 +148,7 @@
       </ul>
       <h2>Rules</h2>
       <p>
-        Every rhombus either hides a mine or, when revealed, shows how many of its neighbours are
+        Every tile either hides a mine or, when revealed, shows how many of its neighbours are
         mined. A tile with no mined neighbours opens up and keeps opening its neighbours until it
         reaches tiles that do touch a mine. Clear every tile that is not a mine and you win. Your
         first click is always safe.
@@ -160,15 +161,25 @@
       </p>
       <h2>Lattices</h2>
       <p>
-        The Penrose board is a P3 rhombus tiling from de Bruijn's pentagrid construction; on a large
-        board the ratio of fat to thin rhombi approaches the golden ratio, φ ≈ 1.618. The other
-        twelve options are the eleven Archimedean tilings — every edge-to-edge tiling by regular
-        polygons in which all vertices look alike — named by the polygons around a vertex, so
-        <em>3.4.6.4</em> means triangle, square, hexagon, square.
+        Eleven of the seventeen are the <strong>Archimedean tilings</strong> — every edge-to-edge
+        tiling by regular polygons in which all vertices look alike — named by the polygons around a
+        vertex, so <em>3.4.6.4</em> means triangle, square, hexagon, square.
+      </p>
+      <p>
+        The rest do not repeat. <strong>Penrose P3</strong> uses fat and thin rhombi and comes from
+        de Bruijn's pentagrid; on a large board the ratio of the two approaches the golden ratio,
+        φ ≈ 1.618. <strong>Penrose P2</strong> is the original kites and darts, grown by repeated
+        subdivision, and its kite-to-dart ratio approaches φ as well. Widening the pentagrid to four
+        and six line families gives the <strong>Ammann–Beenker</strong> tiling, an eight-fold
+        quasicrystal of squares and 45° rhombs whose rhomb-to-square ratio is √2, and a
+        <strong>dodecagonal</strong> twelve-fold one. The <strong>pinwheel</strong> is Conway and
+        Radin's tiling by a single 1-2-√5 right triangle, which appears in unboundedly many
+        orientations. <strong>Voronoi</strong> is the cells of a random point set, so it has no
+        repeating structure at all and is different every game.
       </p>
       <p class="ms-rules-note">
         Tiles per board are the same on every lattice, but the number of neighbours is not: it runs
-        from 6 on the hexagonal tiling to 12 on the triangular one. Mine counts are set so that the
+        from 6 on the hexagonal tiling to 13 on the pinwheel. Mine counts are set so that the
         average number of mines <em>per clue</em> matches across lattices, which is what actually
         governs how hard a board is to read. On the square lattice that reproduces classic
         minesweeper's own densities almost exactly.
@@ -185,6 +196,7 @@
   <script src="../js/site.js"></script>
   <script src="../js/penrose-tiling.js"></script>
   <script src="../js/lattices.js"></script>
+  <script src="../js/lattices-extra.js"></script>
   <script src="../js/penrose-solver.js"></script>
   <script src="../js/penrose-minesweeper.js"></script>
 </body>

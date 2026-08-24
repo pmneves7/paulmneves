@@ -433,7 +433,8 @@
       revealed: revealedCount,
       target,
       stuck,
-      revealedMask: revealed
+      revealedMask: revealed,
+      knownMask: known
     };
   }
 
