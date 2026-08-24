@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Minesweeper played on an aperiodic Penrose rhombus tiling, with beginner through expert boards and classic chording controls." />
+  <title>Penrose minesweeper | Paul M. Neves</title>
+  <link rel="canonical" href="https://paulmneves.com/games/penrose-minesweeper.html" />
+  <link rel="icon" type="image/png" href="../media/favicon.png" />
+  <link rel="stylesheet" href="../css/site.css" />
+</head>
+<body>
+  <header>
+    <nav aria-label="Main navigation">
+      <a class="site-title" href="../index.html">Paul M. Neves</a>
+      <div class="nav-links">
+        <a href="../index.html#biography">Biography</a>
+        <a href="../research.html">Research</a>
+        <a href="../publications.html">Publications</a>
+        <a href="../news.html">News</a>
+        <a href="../gallery.html">Gallery</a>
+        <a href="../tools.html">Tools</a>
+        <a href="../games.html">Games</a>
+        <a href="../index.html#contact">Contact</a>
+      </div>
+    </nav>
+  </header>
+
+  <main class="game-main">
+    <header class="page-header">
+      <h1>Penrose minesweeper</h1>
+      <p class="lead">
+        Ordinary minesweeper rules on tilings that are not square grids: an aperiodic Penrose
+        rhombus tiling, or any of the eleven Archimedean tilings. Two tiles are neighbours when
+        they share at least one corner. On the Penrose board the pattern never repeats, so no two
+        neighbourhoods look quite the same.
+      </p>
+    </header>
+
+    <div class="tool-panel tool-panel-wide ms-shell">
+      <div class="ms-controls">
+        <div class="tool-field ms-field">
+          <label for="ms-lattice">Lattice</label>
+          <select id="ms-lattice"></select>
+        </div>
+        <div class="tool-field ms-field">
+          <label for="ms-difficulty">Difficulty</label>
+          <select id="ms-difficulty">
+            <option value="beginner">Beginner</option>
+            <option value="medium" selected>Medium</option>
+            <option value="hard">Hard</option>
+            <option value="expert">Expert</option>
+            <option value="custom">Custom…</option>
+          </select>
+        </div>
+        <div class="ms-custom" id="ms-custom-fields" hidden>
+          <div class="tool-field ms-field">
+            <label for="ms-custom-tiles">Tiles</label>
+            <input id="ms-custom-tiles" type="number" min="20" max="5000" step="10" value="600" />
+          </div>
+          <div class="tool-field ms-field">
+            <label for="ms-custom-mines">Mines</label>
+            <input id="ms-custom-mines" type="number" min="1" max="4999" step="1" value="90" />
+          </div>
+          <p class="ms-density" id="ms-custom-density">15.0% mine density</p>
+        </div>
+        <button type="button" id="ms-new" class="button primary ms-new">New game</button>
+      </div>
+
+      <div class="ms-statusbar">
+        <div class="ms-readout" title="Mines left to flag">
+          <span class="ms-readout-icon" aria-hidden="true">
+            <svg viewBox="-1 -1 2 2" class="ms-icon-flag" focusable="false" aria-hidden="true">
+              <path d="M0.06 -0.66 L0.06 0.5 M-0.42 0.6 L0.46 0.6" />
+              <path class="ms-icon-banner" d="M0.02 -0.66 L-0.6 -0.3 L0.02 0.04 Z" />
+            </svg>
+          </span>
+          <span id="ms-mines" class="ms-readout-value">0</span>
+          <span class="visually-hidden">mines remaining</span>
+        </div>
+        <button type="button" id="ms-face" class="ms-face" title="Start a new game" aria-label="Start a new game">🙂</button>
+        <div class="ms-readout" title="Elapsed time">
+          <span class="ms-readout-icon" aria-hidden="true">
+            <svg viewBox="-1 -1 2 2" class="ms-icon-clock" focusable="false" aria-hidden="true">
+              <circle r="0.72" />
+              <path d="M0 -0.4 L0 0.05 L0.32 0.28" />
+            </svg>
+          </span>
+          <span id="ms-timer" class="ms-readout-value">0:00</span>
+          <span class="visually-hidden">elapsed time</span>
+        </div>
+      </div>
+
+      <div class="ms-board-wrap" id="ms-board-wrap">
+        <svg id="ms-board" class="ms-board" role="application" aria-label="Penrose minesweeper board" viewBox="0 0 100 100">
+          <g id="ms-layer"></g>
+          <g id="ms-highlight" class="ms-highlight"></g>
+          <g id="ms-marks" class="ms-marks"></g>
+        </svg>
+        <div class="ms-zoom" role="group" aria-label="Board zoom">
+          <button type="button" data-zoom="in" aria-label="Zoom in">+</button>
+          <button type="button" data-zoom="out" aria-label="Zoom out">−</button>
+          <button type="button" data-zoom="fit">Fit</button>
+        </div>
+        <div class="ms-generating" id="ms-generating" hidden>Finding a board with no guesses…</div>
+        <div class="ms-overlay" id="ms-overlay" hidden>
+          <div class="ms-overlay-card">
+            <span class="ms-overlay-face" id="ms-overlay-face" aria-hidden="true">😎</span>
+            <p class="ms-overlay-text">
+              <strong id="ms-overlay-title">Cleared!</strong>
+              <span id="ms-overlay-body"></span>
+            </p>
+            <button type="button" id="ms-overlay-new" class="button primary ms-overlay-button">Play again</button>
+            <button type="button" id="ms-overlay-close" class="ms-overlay-close" aria-label="Dismiss this message">×</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="ms-toolrow">
+        <div class="ms-options">
+          <label class="ms-option" title="Only deal boards that can be finished by logic alone, with no guessing">
+            <input type="checkbox" id="ms-no-guess" checked />
+            No guessing
+          </label>
+          <label class="ms-option" title="Clicking or tapping places a flag instead of revealing">
+            <input type="checkbox" id="ms-flag-mode" />
+            Flag mode
+          </label>
+        </div>
+        <p class="ms-status-line" id="ms-status-line" role="status" aria-live="polite"></p>
+      </div>
+    </div>
+
+    <section class="tool-note-panel ms-rules">
+      <h2>Controls</h2>
+      <ul class="ms-rules-list">
+        <li><strong>Left click</strong> — reveal a tile.</li>
+        <li><strong>Right click</strong> — place or remove a flag.</li>
+        <li><strong>Left + right together</strong> (or middle click, or double click) on a revealed
+          number — <em>chord</em>: if you have flagged exactly that many neighbours, every other
+          neighbour is revealed at once.</li>
+        <li><strong>Hover</strong> a tile to outline the tiles that count as its neighbours —
+          worth leaning on, since corner-sharing is much harder to eyeball than a square grid.</li>
+        <li><strong>Scroll</strong> to zoom, <strong>drag</strong> to pan.</li>
+        <li><strong>Touch</strong> — tap to reveal, long press to flag, tap a number to chord,
+          pinch to zoom. Or switch on <em>flag mode</em> and tap to flag.</li>
+      </ul>
+      <h2>Rules</h2>
+      <p>
+        Every rhombus either hides a mine or, when revealed, shows how many of its neighbours are
+        mined. A tile with no mined neighbours opens up and keeps opening its neighbours until it
+        reaches tiles that do touch a mine. Clear every tile that is not a mine and you win. Your
+        first click is always safe.
+      </p>
+      <p>
+        With <strong>no guessing</strong> switched on, the board is dealt only after your first
+        click and is checked by a solver first: every tile can be worked out by logic, so you never
+        have to flip a coin — including at the very end, where the mine counter is part of the
+        reasoning. Switch it off for a plain random board.
+      </p>
+      <h2>Lattices</h2>
+      <p>
+        The Penrose board is a P3 rhombus tiling from de Bruijn's pentagrid construction; on a large
+        board the ratio of fat to thin rhombi approaches the golden ratio, φ ≈ 1.618. The other
+        twelve options are the eleven Archimedean tilings — every edge-to-edge tiling by regular
+        polygons in which all vertices look alike — named by the polygons around a vertex, so
+        <em>3.4.6.4</em> means triangle, square, hexagon, square.
+      </p>
+      <p class="ms-rules-note">
+        Tiles per board are the same on every lattice, but the number of neighbours is not: it runs
+        from 6 on the hexagonal tiling to 12 on the triangular one. Mine counts are set so that the
+        average number of mines <em>per clue</em> matches across lattices, which is what actually
+        governs how hard a board is to read. On the square lattice that reproduces classic
+        minesweeper's own densities almost exactly.
+      </p>
+    </section>
+
+    <p class="back-link-panel"><a href="../games.html">← Back to games</a></p>
+  </main>
+
+  <footer>
+    © <span id="year"></span> Paul M. Neves. All rights reserved.
+  </footer>
+
+  <script src="../js/site.js"></script>
+  <script src="../js/penrose-tiling.js"></script>
+  <script src="../js/lattices.js"></script>
+  <script src="../js/penrose-solver.js"></script>
+  <script src="../js/penrose-minesweeper.js"></script>
+</body>
+</html>

@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="News and updates from Paul M. Neves." />
-  <title>News | Paul M. Neves</title>
-  <link rel="canonical" href="https://paulmneves.com/news.html" />
+  <meta name="description" content="Browser games and puzzles by Paul M. Neves." />
+  <title>Games | Paul M. Neves</title>
+  <link rel="canonical" href="https://paulmneves.com/games.html" />
   <link rel="icon" type="image/png" href="media/favicon.png" />
   <link rel="stylesheet" href="css/site.css" />
 </head>
@@ -28,13 +28,23 @@
 
   <main>
     <header class="page-header">
-      <h1>News</h1>
-      <p class="lead">Updates on publications, research, and career milestones.</p>
+      <h1>Games</h1>
+      <p class="lead">
+        Small browser games built on ideas from physics and mathematics. Everything runs locally
+        in your browser.
+      </p>
     </header>
 
-    <section aria-label="News updates">
-      <ul class="news-list" id="full-news-list"></ul>
-    </section>
+    <div class="grid">
+      <a class="card card-link" href="games/penrose-minesweeper.html">
+        <img class="card-thumb" src="media/games/penrose-minesweeper.svg" alt="" loading="lazy" />
+        <h2>Penrose minesweeper</h2>
+        <p>
+          Classic minesweeper played on an aperiodic Penrose rhombus tiling. The pattern never
+          repeats, so every neighbourhood is its own little puzzle.
+        </p>
+      </a>
+    </div>
 
     <p class="back-link-panel spaced"><a href="index.html">← Back to home</a></p>
   </main>
@@ -44,9 +54,5 @@
   </footer>
 
   <script src="js/site.js"></script>
-  <script src="js/news.js"></script>
-  <script>
-    renderNewsList("full-news-list");
-  </script>
 </body>
 </html>

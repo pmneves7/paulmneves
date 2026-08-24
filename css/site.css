@@ -3905,3 +3905,546 @@ body.laue-page.laue-nav-hidden .crystal-panel-restore {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Penrose minesweeper
+   --------------------------------------------------------------------------- */
+
+main.game-main {
+  max-width: 1280px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.ms-shell {
+  /* Covered tiles carry saturated colour, one hue per polygon shape; cleared
+     tiles drop to a near-white wash of the same hue. So saturation reads as
+     "covered vs cleared" and hue reads as "which shape", and neither has to
+     give way to the other. Up to three shapes appear in one tiling (4.6.12). */
+  --ms-hidden-0: #6f76e8;
+  --ms-hidden-1: #e493dd;
+  --ms-hidden-2: #efb254;
+  --ms-hover-0: #8b91ee;
+  --ms-hover-1: #ecaee7;
+  --ms-hover-2: #f4c77a;
+  --ms-open-0: #eef0fd;
+  --ms-open-1: #fcf0fb;
+  --ms-open-2: #fdf6e9;
+  --ms-line: #46506b;
+  --ms-readout-bg: #1e2a36;
+  --ms-readout-ink: #ff5d4d;
+  display: grid;
+  gap: 1rem;
+}
+
+.ms-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1rem;
+}
+
+.ms-controls .ms-field {
+  margin-bottom: 0;
+}
+
+.ms-controls > .ms-field {
+  flex: 1 1 16rem;
+  max-width: 24rem;
+}
+
+.ms-custom[hidden] {
+  display: none;
+}
+
+.ms-custom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem 1rem;
+}
+
+.ms-custom .ms-field {
+  width: 7.5rem;
+}
+
+.ms-density {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0 0 0.6rem;
+}
+
+.ms-new {
+  margin-left: auto;
+}
+
+.ms-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  background: linear-gradient(#eef2f7, #e1e8f0);
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.ms-readout {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-width: 6.25rem;
+  padding: 0.3rem 0.75rem;
+  border-radius: 0.55rem;
+  background: var(--ms-readout-bg);
+  color: var(--ms-readout-ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 1.3rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.03em;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+
+.ms-readout-icon {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.95rem;
+  opacity: 0.9;
+}
+
+.ms-readout-icon svg {
+  width: 1.05em;
+  height: 1.05em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 0.16;
+  stroke-linecap: round;
+  overflow: visible;
+}
+
+.ms-readout-icon svg .ms-icon-banner,
+.ms-readout-icon svg .ms-icon-solid {
+  fill: currentColor;
+  stroke: none;
+}
+
+.ms-face {
+  width: 3rem;
+  height: 3rem;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.65rem;
+  line-height: 1;
+  background: linear-gradient(#ffffff, #e5ebf3);
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.ms-face:hover {
+  box-shadow: 0 6px 16px rgba(31, 41, 51, 0.16);
+}
+
+.ms-face:active {
+  transform: translateY(1px);
+}
+
+.ms-face:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.ms-board-wrap {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  overflow: hidden;
+  background: #dfe5ec;
+}
+
+.ms-board {
+  display: block;
+  width: 100%;
+  height: clamp(340px, 62vh, 760px);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  background: radial-gradient(circle at 50% 40%, #f6f7fa, #e4e8ef);
+}
+
+.ms-board-wrap.is-panning .ms-board {
+  cursor: grabbing;
+}
+
+.ms-tile > *:not(polygon) {
+  pointer-events: none;
+}
+
+.ms-tile polygon {
+  fill: var(--ms-hidden-0);
+  stroke: var(--ms-line);
+  stroke-width: 1;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.ms-tile.ms-s1 polygon { fill: var(--ms-hidden-1); }
+.ms-tile.ms-s2 polygon { fill: var(--ms-hidden-2); }
+
+.ms-tile.is-revealed polygon { fill: var(--ms-open-0); }
+.ms-tile.ms-s1.is-revealed polygon { fill: var(--ms-open-1); }
+.ms-tile.ms-s2.is-revealed polygon { fill: var(--ms-open-2); }
+
+.ms-board-wrap:not(.is-over) .ms-tile:not(.is-revealed):hover polygon {
+  fill: var(--ms-hover-0);
+}
+
+.ms-board-wrap:not(.is-over) .ms-tile.ms-s1:not(.is-revealed):hover polygon {
+  fill: var(--ms-hover-1);
+}
+
+.ms-board-wrap:not(.is-over) .ms-tile.ms-s2:not(.is-revealed):hover polygon {
+  fill: var(--ms-hover-2);
+}
+
+.ms-tile.is-mine.is-hit polygon {
+  fill: #e2685c;
+}
+
+.ms-tile.is-flag-wrong polygon {
+  fill: #e8d6d6;
+}
+
+@keyframes ms-nudge {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.ms-tile.is-nudge polygon {
+  animation: ms-nudge 0.24s ease;
+}
+
+.ms-number {
+  text-anchor: middle;
+  dominant-baseline: central;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 700;
+}
+
+.ms-number-1 { fill: #1560c4; }
+.ms-number-2 { fill: #1f7a33; }
+.ms-number-3 { fill: #c62828; }
+.ms-number-4 { fill: #1a237e; }
+.ms-number-5 { fill: #8a2b1c; }
+.ms-number-6 { fill: #00757f; }
+.ms-number-7 { fill: #1f2933; }
+.ms-number-8 { fill: #5d6b7a; }
+.ms-number-9 { fill: #6a1b9a; }
+.ms-number-10 { fill: #ad1457; }
+.ms-number-11 { fill: #4e342e; }
+
+.ms-flag-pole {
+  fill: none;
+  stroke: #33404f;
+  stroke-width: 0.16;
+  stroke-linecap: round;
+}
+
+.ms-flag-banner {
+  fill: #d92b2b;
+  stroke: #ffffff;
+  stroke-width: 0.1;
+  stroke-linejoin: round;
+}
+
+.ms-flag.is-wrong .ms-flag-banner {
+  fill: #98a3b1;
+}
+
+.ms-flag-cross {
+  fill: none;
+  stroke: #c62828;
+  stroke-width: 0.17;
+  stroke-linecap: round;
+}
+
+.ms-mine-body {
+  fill: #1f2933;
+  stroke: #ffffff;
+  stroke-width: 0.09;
+}
+
+.ms-mine-spikes {
+  fill: none;
+  stroke: #1f2933;
+  stroke-width: 0.16;
+  stroke-linecap: round;
+}
+
+.ms-mine-glint {
+  fill: #ffffff;
+  opacity: 0.85;
+}
+
+.ms-mine.is-hit .ms-mine-body {
+  fill: #2b0b07;
+}
+
+.ms-mine.is-hit .ms-mine-spikes {
+  fill: none;
+  stroke: #2b0b07;
+}
+
+.ms-highlight,
+.ms-marks {
+  pointer-events: none;
+}
+
+.ms-highlight-neighbor,
+.ms-highlight-self {
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+}
+
+/* Green sits outside every tile hue, so hovering shifts the neighbourhood
+   towards green whatever it is sitting on. The neighbourhood is delineated
+   mostly by outline, with the fill reserved for the tile under the cursor. */
+.ms-highlight-neighbor {
+  fill: rgba(22, 163, 74, 0.34);
+  stroke: #14532d;
+  stroke-width: 2.25;
+}
+
+.ms-highlight-self {
+  fill: rgba(21, 128, 61, 0.66);
+  stroke: #052e16;
+  stroke-width: 3.2;
+}
+
+.ms-zoom {
+  position: absolute;
+  right: 0.7rem;
+  bottom: 0.7rem;
+  display: flex;
+  gap: 0.35rem;
+  z-index: 2;
+}
+
+.ms-zoom button {
+  min-width: 2.1rem;
+  height: 2.1rem;
+  padding: 0 0.55rem;
+  font-size: 0.95rem;
+  font-weight: 650;
+  color: var(--accent-dark);
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  cursor: pointer;
+}
+
+.ms-zoom button:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.ms-overlay {
+  position: absolute;
+  left: 50%;
+  top: 0.7rem;
+  transform: translateX(-50%);
+  max-width: calc(100% - 1.4rem);
+  z-index: 3;
+}
+
+.ms-overlay-card {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 12px 32px rgba(31, 41, 51, 0.22);
+  padding: 0.4rem 0.5rem 0.4rem 0.9rem;
+}
+
+.ms-overlay-face {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.ms-overlay-text {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.35;
+}
+
+.ms-overlay-text strong {
+  margin-right: 0.3rem;
+}
+
+.ms-overlay-text span {
+  color: var(--muted);
+}
+
+.ms-overlay-button {
+  flex: none;
+  padding: 0.45rem 0.95rem;
+  font-size: 0.9rem;
+}
+
+.ms-overlay-close {
+  flex: none;
+  width: 1.9rem;
+  height: 1.9rem;
+  font-size: 1.15rem;
+  line-height: 1;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.ms-overlay-close:hover {
+  background: rgba(31, 41, 51, 0.08);
+  color: var(--text);
+}
+
+.ms-toolrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+}
+
+.ms-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+}
+
+.ms-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.92rem;
+}
+
+.ms-generating {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 4;
+  padding: 0.65rem 1.1rem;
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 12px 32px rgba(31, 41, 51, 0.22);
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--accent-dark);
+}
+
+.ms-board-wrap.is-generating .ms-board {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.ms-status-line {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.ms-rules {
+  margin: 1.5rem 0 0;
+}
+
+.ms-rules h2 {
+  font-size: 1.1rem;
+  margin: 0 0 0.6rem;
+}
+
+.ms-rules h2 + p,
+.ms-rules ul + h2 {
+  margin-top: 0;
+}
+
+.ms-rules ul + h2 {
+  margin-top: 1.2rem;
+}
+
+.ms-rules p {
+  margin: 0 0 0.6rem;
+}
+
+.ms-rules-list {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.ms-rules-note {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0.4rem 0 0;
+}
+
+.ms-rules + .back-link-panel {
+  margin-top: 1.5rem;
+}
+
+@media (max-width: 760px) {
+  .ms-controls > .ms-field {
+    flex-basis: 100%;
+    max-width: none;
+  }
+
+  .ms-new {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .ms-board {
+    height: clamp(300px, 58vh, 520px);
+  }
+
+  .ms-readout {
+    min-width: 5.25rem;
+    font-size: 1.1rem;
+  }
+
+  .ms-overlay-card {
+    flex-wrap: wrap;
+    justify-content: center;
+    border-radius: 1rem;
+    padding: 0.6rem 0.75rem;
+    text-align: center;
+  }
+}
