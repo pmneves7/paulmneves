@@ -25,9 +25,9 @@
   const MIN_DENSITY = 0.06;
   const MAX_DENSITY = 0.26;
 
-  function minesForPreset(preset, lattice) {
+  function minesForPreset(preset, lattice, tiles) {
     const density = Math.min(MAX_DENSITY, Math.max(MIN_DENSITY, preset.minesPerClue / lattice.avgNeighbors));
-    return Math.max(1, Math.round(preset.tiles * density));
+    return Math.max(1, Math.round((tiles === undefined ? preset.tiles : tiles) * density));
   }
 
   const MIN_TILES = 20;
@@ -799,13 +799,31 @@
     latticeSelect.value = "penrose";
   }
 
+  /**
+   * A board rarely lands on exactly the requested tile count: tiles are taken
+   * in whole rings so the edge stays symmetric, and loose ones are trimmed off.
+   * Build each preset once per lattice so the menu can quote real numbers.
+   */
+  const boardSizes = new Map();
+
+  function presetSizes(lattice) {
+    let sizes = boardSizes.get(lattice.id);
+    if (sizes) return sizes;
+    sizes = {};
+    for (const key in DIFFICULTIES) sizes[key] = lattice.build(DIFFICULTIES[key].tiles).tiles.length;
+    boardSizes.set(lattice.id, sizes);
+    return sizes;
+  }
+
   function refreshDifficultyLabels() {
     const lattice = currentLattice();
+    const sizes = presetSizes(lattice);
     for (const option of difficultySelect.options) {
       const preset = DIFFICULTIES[option.value];
       if (!preset) continue;
+      const tiles = sizes[option.value];
       option.textContent =
-        preset.label + " — " + preset.tiles + " tiles, " + minesForPreset(preset, lattice) + " mines";
+        preset.label + " — " + tiles + " tiles, " + minesForPreset(preset, lattice, tiles) + " mines";
     }
   }
 
@@ -820,7 +838,7 @@
     wantTiles = Math.min(MAX_TILES, Math.max(MIN_TILES, wantTiles));
     let wantMines = Math.round(Number(customMinesInput.value));
     if (!Number.isFinite(wantMines)) {
-      wantMines = minesForPreset({ tiles: wantTiles, minesPerClue: 1.24 }, currentLattice());
+      wantMines = minesForPreset({ minesPerClue: 1.24 }, currentLattice(), wantTiles);
     }
     wantMines = Math.min(wantTiles - 1, Math.max(1, wantMines));
     customTilesInput.value = String(wantTiles);
@@ -844,7 +862,9 @@
     startTime = 0;
 
     buildBoard(setup.tiles);
-    mineCount = Math.min(setup.mines, tileCount - 1);
+    const preset = DIFFICULTIES[difficultySelect.value];
+    const wanted = preset ? minesForPreset(preset, currentLattice(), tileCount) : setup.mines;
+    mineCount = Math.min(wanted, tileCount - 1);
 
     mines = new Uint8Array(tileCount);
     counts = new Uint8Array(tileCount);

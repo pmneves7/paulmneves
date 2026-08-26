@@ -128,10 +128,12 @@
       vertexConfig: "3.3.3.4.4",
       t1: [1, 0],
       t2: [0.5, 1 + SQRT3 / 2],
+      // Centred on a square, the tiling's own 2-fold point, so the board comes
+      // out symmetric; off it, the cut has no symmetry to respect at all.
       faces: [
-        { n: 4, c: [0.5, 0.5], rot: 45 },
-        { n: 3, c: [0.5, 1 + SQRT3 / 6], rot: 90 },
-        { n: 3, c: [1, 1 + SQRT3 / 3], rot: 270 }
+        { n: 4, c: [0, 0], rot: 45 },
+        { n: 3, c: [0, 0.5 + SQRT3 / 6], rot: 90 },
+        { n: 3, c: [0.5, 0.5 + SQRT3 / 3], rot: 270 }
       ]
     },
     {
@@ -405,10 +407,195 @@
     }
   }
 
+  /**
+   * Choose which tiles make up the board.
+   *
+   * Ranking by a tile's *furthest corner* rather than its centre is what keeps
+   * the edge clean: a tile is taken only once it fits entirely inside the
+   * cut radius, so nothing pokes out. Spiky thin rhombi, whose centres sit
+   * close in but whose tips reach far, were the main source of jaggedness.
+   *
+   * Tiles at equal reach are then kept or dropped as a group. On a lattice with
+   * n-fold symmetry about the origin those groups are whole orbits, so the edge
+   * comes out symmetric instead of stopping part-way round a ring. Among the
+   * ring boundaries near the requested size, the one with the largest step out
+   * to the next ring wins, which also drops rings that would jut out.
+   */
+  function selectTiles(candidates, tileCount, tolerance) {
+    for (const tile of candidates) {
+      let reach = 0;
+      for (const [x, y] of tile.points) {
+        const d = Math.hypot(x, y);
+        if (d > reach) reach = d;
+      }
+      tile.reach = reach;
+    }
+    candidates.sort((a, b) => a.reach - b.reach || a.cx - b.cx || a.cy - b.cy);
+
+    // Ends of each ring of equal-reach tiles.
+    const ends = [];
+    let i = 0;
+    while (i < candidates.length) {
+      let j = i;
+      while (j < candidates.length && candidates[j].reach - candidates[i].reach < 1e-6) j += 1;
+      ends.push(j);
+      i = j;
+    }
+
+    // Within a tolerance on the size, cut where the step out to the next ring
+    // is biggest. That both avoids stopping part-way round a ring and skips
+    // rings that jut out, which is what leaves nubs on the edge otherwise.
+    // Score each candidate cut: a big step out to the next ring is worth having,
+    // but not at the cost of badly missing the requested size. Edges are one
+    // unit long, so a gap of half a tile is worth about an eight percent miss.
+    const slack = tolerance === undefined ? 0.08 : tolerance;
+    const lo = tileCount * (1 - slack);
+    const hi = tileCount * (1 + slack);
+    let best = -1;
+    let bestScore = -Infinity;
+    for (const end of ends) {
+      if (end < lo || end > hi) continue;
+      const gap = end >= candidates.length
+        ? 1
+        : Math.min(1, candidates[end].reach - candidates[end - 1].reach);
+      const score = gap - 4 * Math.abs(end - tileCount) / tileCount;
+      if (score > bestScore) {
+        bestScore = score;
+        best = end;
+      }
+    }
+    if (best < 0) {
+      let bestDiff = Infinity;
+      for (const end of ends) {
+        const diff = Math.abs(end - tileCount);
+        if (diff < bestDiff) {
+          bestDiff = diff;
+          best = end;
+        }
+      }
+    }
+    return candidates.slice(0, best < 0 ? Math.min(tileCount, candidates.length) : best);
+  }
+
+  function adjacencyOf(tiles, settings) {
+    const index = makeVertexIndex(1e-6);
+    const vertexTiles = new Map();
+    tiles.forEach((tile, i) => {
+      for (const [x, y] of tile.points) {
+        const vid = index.id(x, y);
+        let list = vertexTiles.get(vid);
+        if (!list) {
+          list = [];
+          vertexTiles.set(vid, list);
+        }
+        list.push(i);
+      }
+    });
+
+    const sets = tiles.map(() => new Set());
+    for (const list of vertexTiles.values()) {
+      for (let a = 0; a < list.length; a += 1) {
+        for (let b = a + 1; b < list.length; b += 1) {
+          sets[list[a]].add(list[b]);
+          sets[list[b]].add(list[a]);
+        }
+      }
+    }
+
+    if (settings.edgeContacts) {
+      const vertexAt = new Map();
+      vertexTiles.forEach((owners, vid) => vertexAt.set(index.points[vid], owners));
+      const shim = tiles.map((tile, i) => ({ id: i, points: tile.points }));
+      addEdgeContacts(shim, sets, vertexAt, settings.contactTolerance || 1e-6);
+    }
+    return sets;
+  }
+
+  /**
+   * Drop tiles clinging to the board by a single neighbour, then keep only the
+   * largest connected piece. Without this the edge grows little spurs — a lone
+   * triangle hanging off a corner — which look like noise and play badly.
+   */
+  function trimLooseEdges(tiles, sets) {
+    const alive = tiles.map(() => true);
+
+    // A tile barely attached to the rest reads as a nub on the edge. How few
+    // neighbours counts as "barely" depends on the lattice — six on a hexagonal
+    // board is normal, on a triangular one it is half — so compare against the
+    // board's own median rather than a fixed number. Applied once, so it shaves
+    // the outline without eating into it.
+    const degrees = sets.map((set) => set.size).sort((a, b) => a - b);
+    const median = degrees[Math.floor(degrees.length / 2)] || 0;
+    const floor = Math.max(2, Math.round(median * 0.45));
+    for (let i = 0; i < tiles.length; i += 1) {
+      if (sets[i].size < floor) alive[i] = false;
+    }
+
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (let i = 0; i < tiles.length; i += 1) {
+        if (!alive[i]) continue;
+        let degree = 0;
+        for (const j of sets[i]) if (alive[j]) degree += 1;
+        if (degree < 2) {
+          alive[i] = false;
+          changed = true;
+        }
+      }
+    }
+
+    let bestRoot = -1;
+    let bestSize = 0;
+    const label = new Int32Array(tiles.length).fill(-1);
+    for (let i = 0; i < tiles.length; i += 1) {
+      if (!alive[i] || label[i] !== -1) continue;
+      const stack = [i];
+      label[i] = i;
+      let size = 0;
+      while (stack.length) {
+        const c = stack.pop();
+        size += 1;
+        for (const j of sets[c]) {
+          if (alive[j] && label[j] === -1) {
+            label[j] = i;
+            stack.push(j);
+          }
+        }
+      }
+      if (size > bestSize) {
+        bestSize = size;
+        bestRoot = i;
+      }
+    }
+    for (let i = 0; i < tiles.length; i += 1) if (alive[i] && label[i] !== bestRoot) alive[i] = false;
+    return alive;
+  }
+
   function assemble(candidates, tileCount, shapeOf, options) {
     const settings = options || {};
-    candidates.sort((a, b) => a.cx * a.cx + a.cy * a.cy - (b.cx * b.cx + b.cy * b.cy));
-    const kept = candidates.slice(0, Math.min(tileCount, candidates.length));
+
+    // Trimming loose edges costs tiles, and how many varies by lattice, so
+    // over-ask and correct: each round grows the request by the shortfall.
+    function shellsThenTrim(request) {
+      const chosen = selectTiles(candidates, request);
+      const alive = trimLooseEdges(chosen, adjacencyOf(chosen, settings));
+      return chosen.filter((_, i) => alive[i]);
+    }
+
+    let request = Math.round(tileCount * 1.04);
+    let kept = shellsThenTrim(request);
+    for (let attempt = 0; attempt < 4 && kept.length < tileCount; attempt += 1) {
+      request = Math.round(request * (1 + (tileCount - kept.length) / tileCount + 0.02));
+      const grown = shellsThenTrim(request);
+      if (grown.length <= kept.length) break;
+      kept = grown;
+    }
+    if (kept.length > tileCount) {
+      const trimmed = shellsThenTrim(tileCount);
+      // Only take the smaller board if it is not a worse fit than the larger.
+      if (Math.abs(trimmed.length - tileCount) <= Math.abs(kept.length - tileCount)) kept = trimmed;
+    }
 
     let minX = Infinity;
     let minY = Infinity;
@@ -425,18 +612,7 @@
     const shiftX = (minX + maxX) / 2;
     const shiftY = (minY + maxY) / 2;
 
-    const index = makeVertexIndex(1e-6);
-    const vertexTiles = new Map();
     const tiles = kept.map((tile, i) => {
-      for (const [x, y] of tile.points) {
-        const vid = index.id(x, y);
-        let list = vertexTiles.get(vid);
-        if (!list) {
-          list = [];
-          vertexTiles.set(vid, list);
-        }
-        list.push(i);
-      }
       const points = tile.points.map(([x, y]) => [x - shiftX, y - shiftY]);
       const label = labelPoint(points);
       return {
@@ -451,24 +627,7 @@
       };
     });
 
-    const sets = tiles.map(() => new Set());
-    for (const list of vertexTiles.values()) {
-      for (let i = 0; i < list.length; i += 1) {
-        for (let k = i + 1; k < list.length; k += 1) {
-          sets[list[i]].add(list[k]);
-          sets[list[k]].add(list[i]);
-        }
-      }
-    }
-
-    if (settings.edgeContacts) {
-      const vertexAt = new Map();
-      vertexTiles.forEach((owners, vid) => {
-        const p = index.points[vid];
-        vertexAt.set([p[0] - shiftX, p[1] - shiftY], owners);
-      });
-      addEdgeContacts(tiles, sets, vertexAt, settings.contactTolerance || 1e-6);
-    }
+    const sets = adjacencyOf(kept, settings);
 
     return {
       tiles,
