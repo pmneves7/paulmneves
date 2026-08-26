@@ -583,10 +583,6 @@
       return chosen.filter((_, i) => alive[i]);
     }
 
-    if (global.__latticeNoTrim) {
-      const only = selectTiles(candidates, tileCount);
-      return finish(only, settings, shapeOf);
-    }
     let request = Math.round(tileCount * 1.04);
     let kept = shellsThenTrim(request);
     for (let attempt = 0; attempt < 4 && kept.length < tileCount; attempt += 1) {
