@@ -855,26 +855,43 @@
     "truncated-hexagonal": 5.89,
     "truncated-trihexagonal": 6.14,
     "truncated-square": 5.98,
+    "penrose-5": 9.47,
     "ammann-beenker": 9.38,
     dodecagonal: 9.17
   };
 
-  const LATTICES = [
-    {
-      id: "penrose",
-      name: "Penrose (P3 rhombs)",
-      group: "Quasicrystals",
-      order: 1,
-      vertexConfig: "aperiodic",
-      shapeNames: ["Fat rhomb", "Thin rhomb"],
-      build(tileCount) {
-        // Turned so a five-pointed star sits upright at the centre, which puts
-        // one of the tiling's mirror lines on the vertical.
-        const candidates = global.PenroseTiling.collectPenroseCandidates(tileCount, { rotation: 90 });
-        return assemble(candidates, Math.max(1, Math.floor(tileCount)), (tile) => tile.shape);
-      }
-    }
+  /**
+   * Two Penrose P3 boards, differing only in the pentagrid offsets.
+   *
+   * Equal offsets make the construction commute with a 72-degree rotation, so
+   * the patch is symmetric either way; which symmetry you get depends on the
+   * value. Offsets of 1/2 give a ten-fold rosette, but sum to 5/2, so that is a
+   * generalised Penrose tiling in de Bruijn's sense. Offsets of 1/5 sum to a
+   * whole number, giving a genuine Penrose tiling that obeys the matching
+   * rules, with a five-fold rosette. Both are turned so a mirror line stands
+   * vertical. Offsets of 0 are the one value to avoid — there the grid is
+   * singular and the dual comes out with gaps and overlaps.
+   */
+  const PENROSE_VARIANTS = [
+    { id: "penrose", name: "Penrose P3 rhombs (ten-fold)", offsets: 0.5, order: 1 },
+    { id: "penrose-5", name: "Penrose P3 rhombs (five-fold)", offsets: 0.2, order: 2 }
   ];
+
+  const LATTICES = PENROSE_VARIANTS.map((variant) => ({
+    id: variant.id,
+    name: variant.name,
+    group: "Quasicrystals",
+    order: variant.order,
+    vertexConfig: "aperiodic",
+    shapeNames: ["Fat rhomb", "Thin rhomb"],
+    build(tileCount) {
+      const candidates = global.PenroseTiling.collectPenroseCandidates(tileCount, {
+        offsets: [variant.offsets, variant.offsets, variant.offsets, variant.offsets, variant.offsets],
+        rotation: 90
+      });
+      return assemble(candidates, Math.max(1, Math.floor(tileCount)), (tile) => tile.shape);
+    }
+  }));
 
   const SHAPE_NAMES = { 3: "Triangle", 4: "Square", 6: "Hexagon", 8: "Octagon", 12: "Dodecagon" };
 
@@ -883,7 +900,7 @@
       id: spec.id,
       name: spec.name + " (" + spec.note + ")",
       group: "Quasicrystals",
-      order: 3,
+      order: 4,
       vertexConfig: spec.note,
       shapeNames: gridShapeNames(spec.families),
       spec,
