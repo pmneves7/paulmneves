@@ -4,8 +4,7 @@
  * Five families of equally spaced parallel lines are laid over the plane; each
  * intersection of a line from family r with a line from family s maps to one
  * rhombus of the dual tiling. See N. G. de Bruijn, Indagationes Mathematicae 43
- * (1981) 39-66. The offsets gamma_j sum to an integer, which is the condition
- * for the dual to be a genuine Penrose tiling rather than a generalised one.
+ * (1981) 39-66.
  */
 (function (global) {
   "use strict";
@@ -19,9 +18,17 @@
     BASIS.push([Math.cos((TAU * j) / FAMILIES), Math.sin((TAU * j) / FAMILIES)]);
   }
 
-  // Generic offsets summing to 1. Avoiding a symmetric choice keeps three or
-  // more grid lines from ever meeting at a point, which would break the dual.
-  const DEFAULT_OFFSETS = [0.3, 0.2, 0.15, 0.25, 0.1];
+  /**
+   * Equal offsets make the whole construction commute with a 72-degree
+   * rotation, so the patch comes out with exact five-fold symmetry and five
+   * mirror lines. The value matters: when the offsets sum to a whole number the
+   * grid is singular — three lines meet at a point, `ceil` lands on an exact
+   * integer and the dual breaks — which is why 0 leaves gaps and overlaps and
+   * 0.2 loses the symmetry. Summing to 2.5 avoids that. It does mean this is a
+   * generalised Penrose tiling in de Bruijn's sense rather than one satisfying
+   * the matching rules, but it is the same two rhombi in the same golden ratio.
+   */
+  const DEFAULT_OFFSETS = [0.5, 0.5, 0.5, 0.5, 0.5];
 
   // Empirical: a pentagrid disc of radius R yields about this many rhombi.
   const TILES_PER_GRID_AREA = 24.2;
@@ -109,93 +116,50 @@
   }
 
   /**
-   * Build a roughly circular patch of exactly `tileCount` rhombi with unit edge
-   * length, centred on the origin, together with an adjacency list. Two tiles
-   * are neighbours when they share at least one corner, which mirrors the
-   * eight-way adjacency of a square minesweeper grid (Penrose tiles average
-   * about eight such neighbours too).
+   * Every rhombus of a patch big enough to cut a board of `tileCount` from,
+   * as raw candidates. Selecting which ones make up the board — and the
+   * adjacency — is left to the shared assembler in lattices.js, so Penrose gets
+   * the same clean, symmetric edge treatment as every other lattice.
    */
-  function buildPenroseTiling(tileCount, options) {
+  function collectPenroseCandidates(tileCount, options) {
     const settings = options || {};
     const offsets = settings.offsets || DEFAULT_OFFSETS;
     const wanted = Math.max(1, Math.floor(tileCount));
+    const rotation = (settings.rotation || 0) * (Math.PI / 180);
+    const cos = Math.cos(rotation);
+    const sin = Math.sin(rotation);
 
-    // Over-generate, then keep the innermost tiles so the patch edge is clean.
-    let gridRadius = 1.35 * Math.sqrt(wanted / TILES_PER_GRID_AREA) + 2;
+    // Generous margin: rhombi right at the edge of the generated disc are
+    // clipped by floating-point luck rather than symmetrically, so keep that
+    // edge well outside the part of the patch the board is cut from.
+    let gridRadius = 1.7 * Math.sqrt(wanted / TILES_PER_GRID_AREA) + 3;
     let rhombi = collectRhombi(gridRadius, offsets);
     let guard = 0;
-    while (rhombi.length < wanted && guard < 8) {
+    while (rhombi.length < wanted * 1.5 && guard < 8) {
       gridRadius *= 1.4;
       rhombi = collectRhombi(gridRadius, offsets);
       guard += 1;
     }
 
-    rhombi.sort((a, b) => a.cx * a.cx + a.cy * a.cy - (b.cx * b.cx + b.cy * b.cy));
-    const kept = rhombi.slice(0, Math.min(wanted, rhombi.length));
-
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const tile of kept) {
-      for (const [x, y] of tile.points) {
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
+    for (const tile of rhombi) {
+      if (rotation) {
+        tile.points = tile.points.map(([x, y]) => [x * cos - y * sin, x * sin + y * cos]);
       }
+      tile.cx = (tile.points[0][0] + tile.points[2][0]) / 2;
+      tile.cy = (tile.points[0][1] + tile.points[2][1]) / 2;
+      tile.shape = tile.fat ? 0 : 1;
     }
-    const shiftX = (minX + maxX) / 2;
-    const shiftY = (minY + maxY) / 2;
+    return rhombi;
+  }
 
-    const vertexTiles = new Map();
-    const tiles = kept.map((tile, index) => {
-      const points = tile.points.map(([x, y]) => [x - shiftX, y - shiftY]);
-      for (const corner of tile.corners) {
-        const key = vertexKey(corner);
-        const list = vertexTiles.get(key);
-        if (list) {
-          list.push(index);
-        } else {
-          vertexTiles.set(key, [index]);
-        }
-      }
-      return {
-        id: index,
-        fat: tile.fat,
-        points,
-        cx: tile.cx - shiftX,
-        cy: tile.cy - shiftY
-      };
-    });
-
-    const neighborSets = tiles.map(() => new Set());
-    for (const list of vertexTiles.values()) {
-      for (let i = 0; i < list.length; i += 1) {
-        for (let k = i + 1; k < list.length; k += 1) {
-          neighborSets[list[i]].add(list[k]);
-          neighborSets[list[k]].add(list[i]);
-        }
-      }
-    }
-    const neighbors = neighborSets.map((set) => Array.from(set));
-
-    return {
-      tiles,
-      neighbors,
-      bounds: {
-        minX: minX - shiftX,
-        minY: minY - shiftY,
-        maxX: maxX - shiftX,
-        maxY: maxY - shiftY,
-        width: maxX - minX,
-        height: maxY - minY
-      }
-    };
+  function buildPenroseTiling(tileCount, options) {
+    const candidates = collectPenroseCandidates(tileCount, options);
+    return global.Lattices.assemble(candidates, Math.max(1, Math.floor(tileCount)), (tile) => tile.shape);
   }
 
   global.PenroseTiling = {
     buildPenroseTiling,
+    collectPenroseCandidates,
     BASIS,
     DEFAULT_OFFSETS
   };

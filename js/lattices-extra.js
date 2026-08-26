@@ -275,9 +275,11 @@
   function buildPenroseP2(tileCount) {
     const wanted = Math.max(1, Math.floor(tileCount));
     // Five kites meeting at their 72-degree tips: the "sun" vertex.
+    // Turned a quarter turn so the tiling's mirror line stands vertical, to
+    // match the P3 board.
     const halves = [];
     for (let i = 0; i < 5; i += 1) {
-      const base = (72 * i * Math.PI) / 180;
+      const base = ((72 * i + 90) * Math.PI) / 180;
       const spread = (36 * Math.PI) / 180;
       const axisEnd = [PHI * Math.cos(base), PHI * Math.sin(base)];
       halves.push([0, [0, 0], axisEnd, [PHI * Math.cos(base + spread), PHI * Math.sin(base + spread)]]);
@@ -330,6 +332,8 @@
   L.register({
     id: "penrose-p2",
     name: "Penrose P2 (kites and darts)",
+    group: "Quasicrystals",
+    order: 2,
     vertexConfig: "aperiodic",
     shapeNames: ["Kite", "Dart"],
     avgNeighbors: 8.74,
@@ -340,6 +344,7 @@
   L.register({
     id: "pinwheel",
     name: "Pinwheel (substitution tiling)",
+    group: "Other non-periodic",
     vertexConfig: "aperiodic",
     shapeNames: ["Right triangle"],
     avgNeighbors: 12.83,
@@ -349,6 +354,7 @@
   L.register({
     id: "voronoi",
     name: "Voronoi (random cells)",
+    group: "Other non-periodic",
     vertexConfig: "random",
     shapeNames: ["Hexagonal cell", "Fewer than 6 sides", "More than 6 sides"],
     avgNeighbors: 6.0,

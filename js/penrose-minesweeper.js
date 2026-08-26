@@ -789,12 +789,32 @@
 
   /* --------------------------------------------------------------- setup */
 
+  // Deliberate menu order, rather than whichever file registered first.
+  const GROUP_ORDER = ["Quasicrystals", "Archimedean tilings", "Other non-periodic"];
+
   function populateLattices() {
-    for (const lattice of window.Lattices.LATTICES) {
+    const groups = new Map();
+    const sorted = window.Lattices.LATTICES.slice().sort((a, b) => {
+      const ga = GROUP_ORDER.indexOf(a.group || "");
+      const gb = GROUP_ORDER.indexOf(b.group || "");
+      if (ga !== gb) return (ga < 0 ? 99 : ga) - (gb < 0 ? 99 : gb);
+      const oa = a.order === undefined ? 99 : a.order;
+      const ob = b.order === undefined ? 99 : b.order;
+      return oa - ob;
+    });
+    for (const lattice of sorted) {
+      const name = lattice.group || "Other";
+      let group = groups.get(name);
+      if (!group) {
+        group = document.createElement("optgroup");
+        group.label = name;
+        groups.set(name, group);
+        latticeSelect.appendChild(group);
+      }
       const option = document.createElement("option");
       option.value = lattice.id;
       option.textContent = lattice.name;
-      latticeSelect.appendChild(option);
+      group.appendChild(option);
     }
     latticeSelect.value = "penrose";
   }

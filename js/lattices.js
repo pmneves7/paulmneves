@@ -583,6 +583,10 @@
       return chosen.filter((_, i) => alive[i]);
     }
 
+    if (global.__latticeNoTrim) {
+      const only = selectTiles(candidates, tileCount);
+      return finish(only, settings, shapeOf);
+    }
     let request = Math.round(tileCount * 1.04);
     let kept = shellsThenTrim(request);
     for (let attempt = 0; attempt < 4 && kept.length < tileCount; attempt += 1) {
@@ -597,6 +601,10 @@
       if (Math.abs(trimmed.length - tileCount) <= Math.abs(kept.length - tileCount)) kept = trimmed;
     }
 
+    return finish(kept, settings, shapeOf);
+  }
+
+  function finish(kept, settings, shapeOf) {
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
@@ -609,8 +617,12 @@
         if (y > maxY) maxY = y;
       }
     }
-    const shiftX = (minX + maxX) / 2;
-    const shiftY = (minY + maxY) / 2;
+    // Keep the origin as the centre rather than re-centring on the bounding
+    // box. Tiles were selected by distance from the origin, so that already is
+    // the middle — and for a 5-fold symmetric board the bounding box centre is
+    // *not* the symmetry centre, so re-centring would destroy the symmetry.
+    const shiftX = 0;
+    const shiftY = 0;
 
     const tiles = kept.map((tile, i) => {
       const points = tile.points.map(([x, y]) => [x - shiftX, y - shiftY]);
@@ -700,15 +712,20 @@
       name: "Ammann–Beenker",
       note: "8-fold quasicrystal",
       families: 4,
-      // Generic offsets: the construction needs no three lines concurrent.
-      offsets: [0.11, 0.29, -0.17, 0.23]
+      // Equal offsets put a mirror line of the tiling through the origin. For an
+      // even number of families the family at 90 degrees reflects onto itself
+      // with a sign flip, so unlike the pentagrid this buys a mirror rather than
+      // full rotational symmetry. The rotation stands that mirror upright.
+      offsets: [0.25, 0.25, 0.25, 0.25],
+      rotation: 22.5
     },
     {
       id: "dodecagonal",
       name: "Dodecagonal",
       note: "12-fold quasicrystal",
       families: 6,
-      offsets: [0.13, -0.07, 0.29, 0.19, -0.23, 0.09]
+      offsets: [0.25, 0.25, 0.25, 0.25, 0.25, 0.25],
+      rotation: 15
     }
   ];
 
@@ -738,6 +755,9 @@
   function collectGridRhombi(spec, basis, gridRadius) {
     const n = spec.families;
     const offsets = spec.offsets;
+    const spin = (spec.rotation || 0) * DEG;
+    const spinCos = Math.cos(spin);
+    const spinSin = Math.sin(spin);
     const candidates = [];
     const kLimit = Math.ceil(gridRadius) + 1;
     const radiusSq = gridRadius * gridRadius;
@@ -770,12 +790,13 @@
               bx += indices[j] * basis[j][0];
               by += indices[j] * basis[j][1];
             }
-            const points = [
+            let points = [
               [bx, by],
               [bx + basis[r][0], by + basis[r][1]],
               [bx + basis[r][0] + basis[s][0], by + basis[r][1] + basis[s][1]],
               [bx + basis[s][0], by + basis[s][1]]
             ];
+            if (spin) points = points.map(([x, y]) => [x * spinCos - y * spinSin, x * spinSin + y * spinCos]);
             candidates.push({
               shape,
               points,
@@ -842,18 +863,15 @@
     {
       id: "penrose",
       name: "Penrose (P3 rhombs)",
+      group: "Quasicrystals",
+      order: 1,
       vertexConfig: "aperiodic",
       shapeNames: ["Fat rhomb", "Thin rhomb"],
       build(tileCount) {
-        const tiling = global.PenroseTiling.buildPenroseTiling(tileCount);
-        for (const tile of tiling.tiles) {
-          tile.shape = tile.fat ? 0 : 1;
-          const label = labelPoint(tile.points);
-          tile.labelX = label.x;
-          tile.labelY = label.y;
-          tile.inradius = label.inradius;
-        }
-        return tiling;
+        // Turned so a five-pointed star sits upright at the centre, which puts
+        // one of the tiling's mirror lines on the vertical.
+        const candidates = global.PenroseTiling.collectPenroseCandidates(tileCount, { rotation: 90 });
+        return assemble(candidates, Math.max(1, Math.floor(tileCount)), (tile) => tile.shape);
       }
     }
   ];
@@ -864,6 +882,8 @@
     LATTICES.push({
       id: spec.id,
       name: spec.name + " (" + spec.note + ")",
+      group: "Quasicrystals",
+      order: 3,
       vertexConfig: spec.note,
       shapeNames: gridShapeNames(spec.families),
       spec,
@@ -873,10 +893,12 @@
     });
   }
 
-  for (const spec of ARCHIMEDEAN) {
+  ARCHIMEDEAN.forEach((spec, index) => {
     LATTICES.push({
+      order: index,
       id: spec.id,
       name: spec.name + " (" + spec.vertexConfig + ")",
+      group: "Archimedean tilings",
       vertexConfig: spec.vertexConfig,
       shapeNames: shapeOrder(spec).map((n) => SHAPE_NAMES[n] || n + "-gon"),
       spec,
@@ -884,7 +906,7 @@
         return buildPeriodic(spec, tileCount);
       }
     });
-  }
+  });
 
   for (const lattice of LATTICES) lattice.avgNeighbors = AVG_NEIGHBORS[lattice.id];
 
