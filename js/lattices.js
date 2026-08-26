@@ -869,8 +869,8 @@
    * singular and the dual comes out with gaps and overlaps.
    */
   const PENROSE_VARIANTS = [
-    { id: "penrose", name: "Penrose P3 rhombs (ten-fold)", offsets: 0.5, order: 1 },
-    { id: "penrose-5", name: "Penrose P3 rhombs (five-fold)", offsets: 0.2, order: 2 }
+    { id: "penrose-5", name: "Penrose P3 rhombs (five-fold)", offsets: 0.2, order: 1 },
+    { id: "penrose", name: "Penrose P3 rhombs (ten-fold)", offsets: 0.5, order: 2 }
   ];
 
   const LATTICES = PENROSE_VARIANTS.map((variant) => ({

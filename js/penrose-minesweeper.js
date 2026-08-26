@@ -816,7 +816,7 @@
       option.textContent = lattice.name;
       group.appendChild(option);
     }
-    latticeSelect.value = "penrose";
+    latticeSelect.value = "penrose-5";
   }
 
   /**
