@@ -110,9 +110,11 @@
           <p class="tool-note">
             Upload a standard image, paste from the clipboard (<kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>V</kbd>),
             or load a NorthStar <code>.hs2</code> or NeXus/HDF5 file (<code>.nxs</code>, <code>.h5</code>, <code>.hdf5</code>, <code>.nexus</code>).
+            With no image loaded, the simulated pattern is drawn on a blank detector.
           </p>
           <div class="laue-loader">
             <button type="button" class="button secondary" id="laue-upload-btn">Choose file…</button>
+            <button type="button" class="button secondary" id="laue-clear-image-btn" disabled>Clear image</button>
             <input type="file" id="laue-file-input" accept="image/*,.hs2,.nxs,.nexus,.h5,.hdf5,.nxs.ngv" hidden />
           </div>
           <p class="tool-note laue-load-error" id="laue-load-error" hidden></p>

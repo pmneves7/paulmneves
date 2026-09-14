@@ -6,6 +6,7 @@
   const IMAGE_DB_VERSION = 1;
   const IMAGE_STORE_NAME = "image";
   const IMAGE_CACHE_KEY = "last";
+  const BLANK_DETECTOR_LONG_SIDE_PX = 1024;
 
   const canvas = document.getElementById("laue-canvas");
   const overlayCanvas = document.getElementById("laue-overlay-canvas");
@@ -19,6 +20,8 @@
   const viewerPlaceholder = document.getElementById("laue-viewer-placeholder");
   const colorbarMaxEl = document.getElementById("laue-colorbar-max");
   const colorbarMinEl = document.getElementById("laue-colorbar-min");
+  const colorbarColumn = document.querySelector(".laue-colorbar-column");
+  const clearImageBtn = document.getElementById("laue-clear-image-btn");
   const statusEl = document.getElementById("laue-status");
   const loadError = document.getElementById("laue-load-error");
   const peaksTbody = document.getElementById("laue-peaks-tbody");
@@ -107,6 +110,8 @@
 
   let imagePersistTimer = null;
   let reprocessTimer = null;
+  /** Long side of the blank stand-in; follows the last cleared image so pixel offsets keep their meaning. */
+  let blankLongSidePx = BLANK_DETECTOR_LONG_SIDE_PX;
 
   const modeButtons = Array.from(document.querySelectorAll(".laue-mode-btn[data-mode]"));
 
@@ -515,17 +520,25 @@
 
   function renderDisplayOnly() {
     if (!state.displayData) return;
-    const display = readDisplaySettings();
-    const limits = displayIntensityLimits();
-    state.imageData = LaueFormats.renderToImageData(state.displayData, {
-      ...display,
-      vmin: limits.min,
-      vmax: limits.max
-    });
+    const blank = isBlankDetector();
+    if (blank) {
+      state.imageData = new ImageData(state.displayData.width, state.displayData.height);
+      state.imageData.data.fill(255);
+    } else {
+      const display = readDisplaySettings();
+      const limits = displayIntensityLimits();
+      state.imageData = LaueFormats.renderToImageData(state.displayData, {
+        ...display,
+        vmin: limits.min,
+        vmax: limits.max
+      });
+    }
     canvas.width = state.displayData.width;
     canvas.height = state.displayData.height;
     viewerPlaceholder.hidden = true;
     viewerFrame.hidden = false;
+    if (colorbarColumn) colorbarColumn.hidden = blank;
+    if (clearImageBtn) clearImageBtn.disabled = !state.rawData;
     updateColorbar();
     drawCurveEditor();
     redraw();
@@ -582,7 +595,7 @@
 
   function setIntensityLimitsToDataRange() {
     const source = state.displayData || state.transformedData;
-    if (!source) {
+    if (!source || isBlankDetector()) {
       setStatus("Load an image first.");
       return;
     }
@@ -601,7 +614,7 @@
 
   function setIntensityLimitsToPercentiles() {
     const source = state.displayData || state.transformedData;
-    if (!source) {
+    if (!source || isBlankDetector()) {
       setStatus("Load an image first.");
       return;
     }
@@ -692,7 +705,7 @@
   }
 
   function updateColorbar() {
-    if (!state.displayData || !colorbarCanvas) return;
+    if (!state.displayData || isBlankDetector() || !colorbarCanvas) return;
     syncColorbarHeight();
     const display = readDisplaySettings();
     const limits = displayIntensityLimits();
@@ -895,7 +908,7 @@
 
   function openImageCacheDb() {
     return new Promise((resolve, reject) => {
-      if (!global.indexedDB) {
+      if (!window.indexedDB) {
         reject(new Error("IndexedDB unavailable"));
         return;
       }
@@ -934,7 +947,7 @@
   }
 
   async function restoreCachedImage() {
-    if (!global.indexedDB) return false;
+    if (!window.indexedDB) return false;
     const db = await openImageCacheDb();
     const record = await new Promise((resolve, reject) => {
       const tx = db.transaction(IMAGE_STORE_NAME, "readonly");
@@ -974,8 +987,77 @@
     }, 400);
   }
 
+  async function deleteImageCache() {
+    if (!window.indexedDB) return;
+    const db = await openImageCacheDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(IMAGE_STORE_NAME, "readwrite");
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => reject(tx.error);
+      tx.objectStore(IMAGE_STORE_NAME).delete(IMAGE_CACHE_KEY);
+    });
+  }
+
+  function isBlankDetector() {
+    return !!(state.displayData && state.displayData.blank);
+  }
+
+  /** Pixel size of the blank stand-in: the detector's aspect ratio, so mm map to px evenly. */
+  function blankDetectorSize() {
+    const dw = num("laue-det-width");
+    const dh = num("laue-det-height");
+    const aspect = dw > 0 && dh > 0 ? dw / dh : 1;
+    const long = blankLongSidePx;
+    return aspect >= 1
+      ? { width: long, height: Math.max(16, Math.round(long / aspect)) }
+      : { width: Math.max(16, Math.round(long * aspect)), height: long };
+  }
+
+  /** Show a blank detector when no image is loaded so the simulated pattern can still be viewed. */
+  function showBlankDetector() {
+    const { width, height } = blankDetectorSize();
+    state.rawData = null;
+    state.transformedData = null;
+    state.rawIntensityRange = null;
+    state.displayData = { width, height, intensities: new Float32Array(width * height), blank: true };
+    state.instrument.beamX = width / 2;
+    state.instrument.beamY = height / 2;
+    renderDisplayOnly();
+    resetViewToFit();
+    requestAnimationFrame(() => resetViewToFit());
+  }
+
+  /** Rebuild the blank detector when the detector aspect ratio changes. */
+  function syncBlankDetectorShape() {
+    if (!isBlankDetector()) return;
+    const { width, height } = blankDetectorSize();
+    if (width === state.displayData.width && height === state.displayData.height) return;
+    showBlankDetector();
+  }
+
+  async function clearImage() {
+    if (!state.rawData) return;
+    if (imagePersistTimer) {
+      window.clearTimeout(imagePersistTimer);
+      imagePersistTimer = null;
+    }
+    blankLongSidePx = Math.max(state.rawData.width, state.rawData.height);
+    state.lastLoadedFileName = "";
+    showError("");
+    showBlankDetector();
+    updatePredictions();
+    persistConfig();
+    setStatus(`Image cleared. ${statusEl.textContent}`);
+    try {
+      await deleteImageCache();
+    } catch (_) { /* cache unavailable */ }
+  }
+
   function setDetectorSizeFromImage() {
-    if (!state.displayData) {
+    if (!state.displayData || isBlankDetector()) {
       setStatus("Load an image first.");
       return;
     }
@@ -1008,6 +1090,7 @@
   function updatePredictions() {
     if (spaceGroupFieldsLink) spaceGroupFieldsLink.sync();
     if (!state.displayData) return;
+    syncBlankDetectorShape();
     state.crystal = readCrystal();
     const inst = readInstrument();
     state.instrument = { ...state.instrument, ...inst };
@@ -1024,7 +1107,7 @@
       renderPeaksTable();
       const onImage = state.predictedPeaks.filter((p) => p.onImage).length;
       const total = state.predictedPeaks.length;
-      const scaleHint = detectorScaleHint(state.instrument, imageSize);
+      const scaleHint = isBlankDetector() ? "" : detectorScaleHint(state.instrument, imageSize);
       if (!total) {
         setStatus(
           "No predicted peaks in Q range (check lattice, space group, sample orientation, and Q min/max)." +
@@ -1490,6 +1573,7 @@
     writeOverlaySettingsToForm(state.overlay);
     if (spaceGroupFieldsLink) spaceGroupFieldsLink.sync();
     if (state.rawData) reprocessImage();
+    else if (isBlankDetector()) updatePredictions();
     else applyViewTransform();
     drawCurveEditor();
   }
@@ -1510,6 +1594,10 @@
 
   function runAutoDetect() {
     if (!state.displayData) return;
+    if (isBlankDetector()) {
+      setStatus("Load an image first.");
+      return;
+    }
     const inst = readInstrument();
     const display = readDisplaySettings();
     const range = LaueFormats.intensityRange(state.displayData.intensities);
@@ -2050,6 +2138,7 @@
     document.getElementById("laue-upload-btn").addEventListener("click", () => {
       document.getElementById("laue-file-input").click();
     });
+    if (clearImageBtn) clearImageBtn.addEventListener("click", clearImage);
 
     document.addEventListener("paste", (e) => {
       const items = e.clipboardData && e.clipboardData.items;
@@ -2467,12 +2556,18 @@
     ensureCurveEndpoints();
     drawCurveEditor();
     restoreConfig();
+    let restored = false;
     try {
-      if (await restoreCachedImage()) {
+      restored = await restoreCachedImage();
+      if (restored) {
         rematchObservedPeaksIfAny();
         redraw();
       }
     } catch (_) { /* ignore cache read errors */ }
+    if (!restored) {
+      showBlankDetector();
+      updatePredictions();
+    }
     setMode("pan-orientation");
   }
 

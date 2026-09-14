@@ -280,6 +280,12 @@ h3 {
   transform: translateY(1px);
 }
 
+.button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .button.primary {
   background: var(--accent);
   color: white;
@@ -2560,6 +2566,10 @@ body.laue-page.laue-nav-hidden .laue-viewer-panel {
   justify-content: center;
   min-height: 0;
   overflow: hidden;
+}
+
+.laue-colorbar-column[hidden] {
+  display: none !important;
 }
 
 .laue-colorbar-column {
