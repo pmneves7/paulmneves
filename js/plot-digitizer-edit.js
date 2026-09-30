@@ -1124,6 +1124,7 @@
       if (dist(edit.lensCenter, c) > 0.5) return true;
     }
     if (edit.transparencyEnabled && edit.transparencyKeys && edit.transparencyKeys.length) return true;
+    if (edit.transparencyPreviewBgEnabled) return true;
     return false;
   }
 
@@ -1436,10 +1437,25 @@
     if (!state.image) return null;
     ensurePreview(true);
     if (state.activeTab === "edit" && (hasPendingEdits(state.edit, state.image) || isTransparencyActive(state.edit))) {
-      return (previewMeta && previewMeta.finalCanvas) || previewCanvas || state.image;
+      return bakeNewBackground((previewMeta && previewMeta.finalCanvas) || previewCanvas || state.image, state);
     }
     if (canvasHasAlpha(state.image)) return state.image;
     return state.image;
+  }
+
+  function bakeNewBackground(src, state) {
+    const fill = getAlphaPreviewBackgroundFill(state);
+    if (!fill) return src;
+    const out = document.createElement("canvas");
+    out.width = src.width;
+    out.height = src.height;
+    const ctx = out.getContext("2d");
+    ctx.fillStyle = fill;
+    ctx.fillRect(0, 0, out.width, out.height);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(src, 0, 0);
+    out._hasAlpha = false;
+    return out;
   }
 
   function resetEditState(state, keepCorners) {
@@ -2344,7 +2360,7 @@
     const mapFn = (pt) => previewMeta.mapSourceToFinal(pt);
 
     remapAllPoints(mapFn);
-    state.image = cloneCanvas(previewMeta.finalCanvas || previewMeta.preChromaCanvas || previewCanvas);
+    state.image = cloneCanvas(bakeNewBackground(previewMeta.finalCanvas || previewMeta.preChromaCanvas || previewCanvas, state));
     state.image._hasAlpha = canvasHasAlpha(state.image);
     resetEditState(state, true);
     previewDirty = true;
@@ -2616,6 +2632,7 @@
     if (els.transparencyPreviewBgEnabled) {
       els.transparencyPreviewBgEnabled.addEventListener("change", () => {
         syncPreviewBgFromInputs(hooks.getState());
+        markPreviewDirty();
         hooks.refreshAll();
       });
     }
@@ -2623,6 +2640,7 @@
     if (els.transparencyPreviewBgColor && els.transparencyPreviewBgHex) {
       const onPreviewBgColorChange = () => {
         syncPreviewBgFromInputs(hooks.getState());
+        markPreviewDirty();
         hooks.refreshAll();
       };
       els.transparencyPreviewBgColor.addEventListener("input", () => {
