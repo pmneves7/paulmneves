@@ -12,12 +12,6 @@ const GALLERY_ITEMS = [
     caption: "",
   },
   {
-    src: "media/gallery/dinner.JPG",
-    alt: "",
-    title: "",
-    caption: "",
-  },
-  {
     src: "media/gallery/crystals.jpeg",
     alt: "",
     title: "",
@@ -30,37 +24,13 @@ const GALLERY_ITEMS = [
     caption: "",
   },
   {
-    src: "media/gallery/IMG_4068.jpeg",
-    alt: "",
-    title: "",
-    caption: "",
-  },
-  {
     src: "media/gallery/IMG_3310.jpeg",
     alt: "",
     title: "",
     caption: "",
   },
   {
-    src: "media/gallery/defense_celebration.PNG",
-    alt: "",
-    title: "",
-    caption: "",
-  },
-  {
-    src: "media/gallery/discourse.jpeg",
-    alt: "",
-    title: "",
-    caption: "",
-  },
-  {
     src: "media/gallery/MIT.jpeg",
-    alt: "",
-    title: "",
-    caption: "",
-  },
-  {
-    src: "media/gallery/march_meeting.jpeg",
     alt: "",
     title: "",
     caption: "",
@@ -79,12 +49,6 @@ const GALLERY_ITEMS = [
   },
   {
     src: "media/gallery/dinner.jpeg",
-    alt: "",
-    title: "",
-    caption: "",
-  },
-  {
-    src: "media/gallery/32c927da-b67c-4459-b3f7-408665b0b7f2.jpg",
     alt: "",
     title: "",
     caption: "",
@@ -164,6 +128,12 @@ const GALLERY_ITEMS = [
   {
     src: "media/gallery/rotator.jpg",
     alt: "",
+    title: "",
+    caption: "",
+  },
+  {
+    src: "media/gallery/ripples.jpeg",
+    alt: "Sunlight patterns on rippling water",
     title: "",
     caption: "",
   },
