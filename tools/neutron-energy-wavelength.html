@@ -293,7 +293,7 @@
       if (updating) return;
 
       const energyEv = energyFromInput(id);
-      if (energyEv === null) {
+      if (!Number.isFinite(energyEv) || energyEv <= 0) {
         updating = true;
         Object.entries(inputs).forEach(([otherId, input]) => {
           if (otherId !== id) input.value = "";
@@ -301,8 +301,6 @@
         updating = false;
         return;
       }
-
-      if (!Number.isFinite(energyEv) || energyEv <= 0) return;
 
       const values = valuesFromEnergy(energyEv);
       updating = true;
@@ -436,7 +434,11 @@
       if (source === "distance") qValue = qFromDistance(value);
       if (source === "q") qValue = value;
       if (source === "twoTheta") {
-        if (!wavelength || value >= 180) return;
+        if (!wavelength || value > 180) {
+          momentumDistanceInput.value = "";
+          momentumQInput.value = "";
+          return;
+        }
         qValue = qFromTwoTheta(value, wavelength);
       }
 
@@ -465,10 +467,10 @@
       const value = parseFloat(sourceInput.value);
       if (!sourceInput.value.trim() || !Number.isFinite(value) || value <= 0) {
         updatingNeutron = true;
-        if (source !== "energy" && !neutronEnergyInput.value.trim()) neutronEnergyInput.value = "";
-        if (source !== "wavelength" && !neutronWavelengthInput.value.trim()) neutronWavelengthInput.value = "";
-        if (source !== "wavevector" && !neutronWavevectorInput.value.trim()) neutronWavevectorInput.value = "";
-        if (source !== "velocity" && !neutronVelocityInput.value.trim()) neutronVelocityInput.value = "";
+        if (source !== "energy") neutronEnergyInput.value = "";
+        if (source !== "wavelength") neutronWavelengthInput.value = "";
+        if (source !== "wavevector") neutronWavevectorInput.value = "";
+        if (source !== "velocity") neutronVelocityInput.value = "";
         updatingNeutron = false;
         updateMomentumTwoTheta();
         return;

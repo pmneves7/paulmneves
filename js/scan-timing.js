@@ -72,6 +72,7 @@ function formatNumberShort(n, maxFrac = 3) {
 function formatHMS(seconds) {
   if (!Number.isFinite(seconds)) return "n/a";
   if (seconds < 0) return `−${formatHMS(-seconds)}`;
+  seconds = Math.round(seconds * 1000) / 1000;
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds - hours * 3600) / 60);
   const secs = seconds - hours * 3600 - minutes * 60;
@@ -321,11 +322,14 @@ function readPlanRate() {
 }
 
 function renderResultCard(label, value, note = "") {
+  const escape = text => String(text).replace(/[&<>"']/g, ch => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]
+  ));
   return `
     <div class="tool-result-card">
-      <h3>${label}</h3>
-      <p>${value}</p>
-      ${note ? `<span>${note}</span>` : ""}
+      <h3>${escape(label)}</h3>
+      <p>${escape(value)}</p>
+      ${note ? `<span>${escape(note)}</span>` : ""}
     </div>
   `;
 }
@@ -376,16 +380,20 @@ function renderPlanResults(plan, solveFor, startSecOpt) {
   ));
   cards.push(renderResultCard(
     "Total run time",
-    formatHMS(plan.total),
-    `${formatNumberShort(plan.total)} s`
+    formatHMS(plan.totalElapsed),
+    `${formatNumberShort(plan.totalElapsed)} s`
   ));
+  if (solveFor === "num" && plan.total > plan.totalElapsed) {
+    cards.push(renderResultCard("Unused time budget", formatHMS(plan.total - plan.totalElapsed),
+      `from a ${formatHMS(plan.total)} budget`));
+  }
 
   if (Number.isFinite(startSecOpt)) {
-    const endSec = startSecOpt + plan.total;
+    const endSec = startSecOpt + plan.totalElapsed;
     cards.push(renderResultCard(
       "Estimated end time",
       formatTimeOfDay(endSec),
-      `start ${formatTimeOfDay(startSecOpt)} + ${formatHMS(plan.total)}`
+      `start ${formatTimeOfDay(startSecOpt)} + ${formatHMS(plan.totalElapsed)}`
     ));
   }
 
@@ -444,7 +452,7 @@ function recalcPlan() {
     if (plan.num > 1) {
       summary += `, separated by ${formatHMS(plan.dead)} of dead time`;
     }
-    summary += `, for a total run of ${formatHMS(plan.total)}.`;
+    summary += `, for a total run of ${formatHMS(plan.totalElapsed)}.`;
     planSummary.textContent = summary;
 
     renderPlanResults(plan, solveFor, Number.isFinite(startSec) ? startSec : null);

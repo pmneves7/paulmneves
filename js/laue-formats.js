@@ -757,6 +757,26 @@
     return intensities[sy * width + sx];
   }
 
+  function transformDisplayPoint(point, width, height, transform, inverse = false) {
+    const { rotate90 = 0, flipH = false, flipV = false } = transform || {};
+    const rot = ((rotate90 % 4) + 4) % 4;
+    let x = point.x, y = point.y;
+    if (inverse) {
+      if (rot === 1) [x,y] = [y,height-1-x];
+      else if (rot === 2) [x,y] = [width-1-x,height-1-y];
+      else if (rot === 3) [x,y] = [width-1-y,x];
+      if (flipH) x = width-1-x;
+      if (flipV) y = height-1-y;
+    } else {
+      if (flipH) x = width-1-x;
+      if (flipV) y = height-1-y;
+      if (rot === 1) [x,y] = [height-1-y,x];
+      else if (rot === 2) [x,y] = [width-1-x,height-1-y];
+      else if (rot === 3) [x,y] = [y,width-1-x];
+    }
+    return { ...point, x, y };
+  }
+
   function applyDisplayTransform(data, transform) {
     const { width, height, intensities } = data;
     const { rotate90 = 0, flipH = false, flipV = false } = transform || {};
@@ -1032,6 +1052,7 @@
     renderToImageData,
     renderColorbar,
     applyDisplayTransform,
+    transformDisplayPoint,
     applyCorrections,
     gaussianBlur,
     radialNormalize,

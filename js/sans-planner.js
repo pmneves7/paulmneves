@@ -672,11 +672,11 @@
       }
 
       qRangeEl.textContent = `|Q| = ${formatNum(qMin)} – ${formatNum(qMax)} Å⁻¹`;
-      const qMagMin = M.qMagFromQPerp(qMin, p.lambdaAngstrom);
-      const qMagMax = M.qMagFromQPerp(qMax, p.lambdaAngstrom);
+      const qMagMin = qMin;
+      const qMagMax = qMax;
       dRangeEl.textContent = `d = ${formatNum(M.distanceFromQ(qMagMax))} – ${formatNum(M.distanceFromQ(qMagMin))} Å`;
-      const twoThetaMin = M.twoThetaDegFromQPerp(qMin, p.lambdaAngstrom);
-      const twoThetaMax = M.twoThetaDegFromQPerp(qMax, p.lambdaAngstrom);
+      const twoThetaMin = M.twoThetaDegFromQ(qMin, p.lambdaAngstrom);
+      const twoThetaMax = M.twoThetaDegFromQ(qMax, p.lambdaAngstrom);
       twoThetaRangeEl.textContent = `2θ = ${formatNum(twoThetaMin)} – ${formatNum(twoThetaMax)}°`;
 
       const geom = M.geometryCurve(p);
@@ -695,20 +695,20 @@
         } else {
           interest = M.instrumentResolution(qInt, p);
           qPerpInterest = M.qPerpFromQ(qInt, p.lambdaAngstrom);
-          if (qPerpInterest == null || qPerpInterest < qMin || qPerpInterest > qMax) {
+          if (qPerpInterest == null || qInt < qMin || qInt > qMax) {
             interestNote = `|Q| = ${formatNum(qInt)} Å⁻¹ is outside the visible detector range (${formatNum(qMin)}–${formatNum(qMax)} Å⁻¹); marker omitted from plots.`;
           }
         }
       }
 
-      const markerVisible = interest && qPerpInterest != null && qPerpInterest >= qMin && qPerpInterest <= qMax;
+      const markerVisible = interest && qPerpInterest != null && qInt >= qMin && qInt <= qMax;
 
       drawLinePlot(plotCanvases.qVsTwoTheta, {
         xLabel: "2θ (deg)",
         yLabel: "|Q| (Å⁻¹)",
         series: geom.map((pt) => ({ x: pt.twoThetaDeg, y: pt.q })),
         marker: markerVisible && interest
-          ? { x: interest.twoThetaDeg, y: qPerpInterest }
+          ? { x: interest.twoThetaDeg, y: qInt }
           : null
       });
 

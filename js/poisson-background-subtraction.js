@@ -94,7 +94,7 @@ function parsePositiveInput(input, label) {
 
 function parseNonNegativeInput(input, label) {
   const value = Number(input.value);
-  if (!Number.isFinite(value) || value < 0) throw new Error(`${label} must be zero or greater.`);
+  if (!input.value.trim() || !Number.isFinite(value) || value < 0) throw new Error(`${label} must be zero or greater.`);
   return value;
 }
 
@@ -106,7 +106,6 @@ function poissonRates() {
   const netRate = grossSignalRate - backgroundRate;
 
   if (grossSignalRate <= 0) throw new Error("The signal channel rate must be greater than zero.");
-  if (backgroundRate <= 0) throw new Error("Background rate Y must be greater than zero for an optimized background count.");
 
   return { enteredSignalRate, grossSignalRate, backgroundRate, netRate, isGross };
 }
@@ -143,7 +142,7 @@ function poissonPlan() {
   const signalCounts = grossSignalRate * signalTime;
   const backgroundCounts = backgroundRate * backgroundTime;
   const signalRateSigma = Math.sqrt(signalCounts) / signalTime;
-  const backgroundRateSigma = Math.sqrt(backgroundCounts) / backgroundTime;
+  const backgroundRateSigma = backgroundRate === 0 ? 0 : Math.sqrt(backgroundCounts) / backgroundTime;
   const netRateSigma = Math.sqrt(signalRateSigma ** 2 + backgroundRateSigma ** 2);
   const relativeSigma = netRate === 0 ? Infinity : Math.abs(netRateSigma / netRate);
   const subtractedCounts = netRate * signalTime;
@@ -268,12 +267,12 @@ function renderPoissonPlan() {
         ? "Sig figs come from σ_X and σ_Y; the total time and target are treated as exact."
         : "Sig figs are taken from the input values and propagated to each output.";
 
-    poissonSummary.textContent = `${signalModel} ${precisionNote}`;
+    poissonSummary.textContent = `${signalModel} ${precisionNote}${plan.backgroundRate === 0 ? " Background is assumed known to be zero; all time goes to the signal." : ""}`;
     poissonResults.innerHTML = `
       <div class="tool-result-grid">
         ${renderPoissonCard(
           "Ideal count-time ratio",
-          `${formatToSigFigs(plan.timeRatio, sf.ratio)} : 1`,
+          plan.backgroundRate === 0 ? "1 : 0" : `${formatToSigFigs(plan.timeRatio, sf.ratio)} : 1`,
           "signal time : background time = sqrt(signal channel rate) : sqrt(background rate)"
         )}
         ${renderPoissonCard(

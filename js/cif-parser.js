@@ -203,12 +203,13 @@
         }
         return { value: parts.join("\n").trim(), nextIndex: i };
       }
+      if (/^(?:_|loop_|data_|save_|global_)/i.test(trimmed)) return { value: "", nextIndex: i };
       return { value: firstCifToken(trimmed), nextIndex: i + 1 };
     }
     return { value: "", nextIndex: i };
   }
 
-  function parseCif(text) {
+  function parseCifBlock(text) {
     if (typeof text !== "string") {
       throw new Error("Expected CIF text input.");
     }
@@ -304,6 +305,29 @@
     }
 
     return result;
+  }
+
+  function parseCif(text) {
+    if (typeof text !== "string") throw new Error("Expected CIF text input.");
+    // Data-block tags are scoped to their block. Never combine cells, space
+    // groups or sites from separate structures. Ignore headers inside text fields.
+    const blocks = [];
+    let lines = [];
+    let inText = false;
+    for (const line of text.split(/\r?\n/)) {
+      if (line.startsWith(";")) inText = !inText;
+      if (!inText && /^data_/i.test(line.trim())) {
+        if (lines.length) blocks.push(lines.join("\n"));
+        lines = [line];
+      } else lines.push(line);
+    }
+    if (lines.length) blocks.push(lines.join("\n"));
+    const parsed = blocks.map(parseCifBlock);
+    const structures = parsed.filter(block => [block.a, block.b, block.c].every(v => Number.isFinite(v) && v > 0));
+    if (structures.length > 1) {
+      throw new Error("This CIF contains multiple crystal structures. Import a CIF with a single structure data block.");
+    }
+    return structures[0] || parsed[0] || {};
   }
 
   function describeCif(data) {

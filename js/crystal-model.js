@@ -395,6 +395,7 @@
   function compactAtomOverride(label, override) {
     const row = [label];
     if (override.color) row.push(compactColor(override.color));
+    else if (override.radius != null || override.visible != null) row.push("");
     if (override.radius != null) row.push(compactNumber(override.radius, 5));
     else if (override.visible != null) row.push("");
     if (override.visible != null) row.push(override.visible ? 1 : 0);
@@ -619,43 +620,25 @@
     const spaceGroup = textControl(controls, "crystal-spacegroup", "");
     const settingHallSymbol = textControl(controls, "crystal-spacegroup-setting", "");
     const operations = resolvedSymmetryOperations(spaceGroup, settingHallSymbol, recipe.symmetryOperations);
-    if (operations.length) {
+    let siteIndex = 0;
+    return atoms.flatMap(atom => {
+      const cached = !isP1SpaceGroup(spaceGroup) && atom.wyckoffPositions &&
+        atom.wyckoffPositions.some(position => symmetryKey({ ...atom, ...position }) === symmetryKey(atom));
+      const positions = cached ? atom.wyckoffPositions : operations.length
+        ? operations.map(operation => applySymmetryOperation(operation, atom)).filter(Boolean) : [atom];
       const seen = new Set();
       const expanded = [];
-      atoms.forEach((atom) => {
-        operations.forEach((operation) => {
-          const coords = applySymmetryOperation(operation, atom);
-          if (!coords) return;
-          const expandedAtom = {
-            ...atom,
-            fractX: coords.fractX,
-            fractY: coords.fractY,
-            fractZ: coords.fractZ,
-            sourceLabel: atom.label
-          };
-          const key = symmetryKey(expandedAtom);
-          if (seen.has(key)) return;
-          seen.add(key);
-          expandedAtom.label = `${atom.label}_${expanded.length + 1}`;
-          expanded.push(expandedAtom);
-        });
+      positions.forEach(coords => {
+        const site = { ...atom, fractX: coords.fractX, fractY: coords.fractY, fractZ: coords.fractZ, sourceLabel: atom.label };
+        const key = symmetryKey(site);
+        if (seen.has(key)) return;
+        seen.add(key);
+        siteIndex += 1;
+        site.label = positions.length === 1 ? atom.label : `${atom.label}_${siteIndex}`;
+        expanded.push(site);
       });
-      return expanded.length > atoms.length ? expanded : atoms;
-    }
-    if (!isP1SpaceGroup(spaceGroup) && atoms.some((atom) => Array.isArray(atom.wyckoffPositions) && atom.wyckoffPositions.length)) {
-      return atoms.flatMap((atom) => {
-        if (!Array.isArray(atom.wyckoffPositions) || !atom.wyckoffPositions.length) return [atom];
-        return atom.wyckoffPositions.map((position, index) => ({
-          ...atom,
-          label: `${atom.label}_${index + 1}`,
-          fractX: position.fractX,
-          fractY: position.fractY,
-          fractZ: position.fractZ,
-          sourceLabel: atom.label
-        }));
-      });
-    }
-    return atoms;
+      return expanded;
+    });
   }
 
   function latticeVectorsFromControls(controls) {
@@ -1631,6 +1614,9 @@
       const data = file.bytes;
       const crc = crc32(data);
       const offset = out.length;
+      // USDZ requires every stored file payload to start on a 64-byte boundary.
+      let padding = (64 - ((offset + 30 + nameBytes.length) % 64)) % 64;
+      if (padding > 0 && padding < 4) padding += 64;
       writeUint32(out, 0x04034b50);
       writeUint16(out, 20);
       writeUint16(out, 0);
@@ -1641,8 +1627,13 @@
       writeUint32(out, data.length);
       writeUint32(out, data.length);
       writeUint16(out, nameBytes.length);
-      writeUint16(out, 0);
+      writeUint16(out, padding);
       pushBytes(out, nameBytes);
+      if (padding) {
+        writeUint16(out, 0x1986); // padding extra-field ID
+        writeUint16(out, padding - 4);
+        for (let i = 4; i < padding; i++) out.push(0);
+      }
       pushBytes(out, data);
 
       writeUint32(central, 0x02014b50);
@@ -1809,6 +1800,7 @@
     createStl,
     createUsdz,
     defaultViewRotationMatrix,
+    generatedAtomSites,
     downloadGlb,
     downloadPowerPointGlb,
     downloadObj,

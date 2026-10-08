@@ -86,8 +86,7 @@
   };
 
   const DEFAULT_ATOMS = [
-    { label: "Si1", element: "Si", fractX: 0, fractY: 0, fractZ: 0, occupancy: 1 },
-    { label: "Si2", element: "Si", fractX: 0.25, fractY: 0.25, fractZ: 0.25, occupancy: 1 }
+    { label: "Si1", element: "Si", fractX: 0, fractY: 0, fractZ: 0, occupancy: 1 }
   ];
 
   const state = {
@@ -298,13 +297,15 @@
     const atoms = generatedAtomSites();
     if (!atoms.length) return null;
     let molarMass = 0;
+    let hasKnownMass = false;
     atoms.forEach((atom) => {
       const weight = weights[sanitizeElement(atom.element)];
       if (!weight) return;
-      const occupancy = atom.occupancy == null ? 1 : Number(atom.occupancy) || 1;
+      hasKnownMass = true;
+      const occupancy = atom.occupancy == null || atom.occupancy === "" || !Number.isFinite(Number(atom.occupancy)) ? 1 : Number(atom.occupancy);
       molarMass += weight * occupancy;
     });
-    if (molarMass <= 0) return null;
+    if (!hasKnownMass || molarMass < 0) return null;
     return (molarMass / AVOGADRO) / (volumeAngstrom3 * 1e-24);
   }
 
@@ -510,7 +511,7 @@
       fractX: wrapFraction(Number(atom.fractX) || 0),
       fractY: wrapFraction(Number(atom.fractY) || 0),
       fractZ: wrapFraction(Number(atom.fractZ) || 0),
-      occupancy: atom.occupancy == null ? 1 : Number(atom.occupancy) || 1,
+      occupancy: atom.occupancy == null || atom.occupancy === "" || !Number.isFinite(Number(atom.occupancy)) ? 1 : Number(atom.occupancy),
       wyckoff: atom.wyckoff || atom.wyckoffSymbol || "",
       wyckoffPositions: Array.isArray(atom.wyckoffPositions) ?
         atom.wyckoffPositions.map((position) => ({
@@ -534,7 +535,7 @@
   function resolvedSymmetry() {
     const spaceGroup = text("crystal-spacegroup", "");
     if (isP1SpaceGroup(spaceGroup)) return { operations: [], source: "none", group: null };
-    if (!text("crystal-spacegroup-setting", "") && Array.isArray(state.symmetryOperations) && state.symmetryOperations.length) {
+    if (Array.isArray(state.symmetryOperations) && state.symmetryOperations.length) {
       return { operations: state.symmetryOperations, source: "cif", group: resolvedSpaceGroup() };
     }
     const group = resolvedSpaceGroup();
@@ -608,6 +609,14 @@
   }
 
   function generatedAtomSites() {
+    if (window.CrystalModel?.generatedAtomSites) {
+      return window.CrystalModel.generatedAtomSites({
+        atoms: state.atoms,
+        symmetryOperations: state.symmetryOperations,
+        controls: { "crystal-spacegroup": text("crystal-spacegroup", ""),
+          "crystal-spacegroup-setting": text("crystal-spacegroup-setting", "") }
+      }).map(normalizeAtom);
+    }
     const symmetry = resolvedSymmetry();
     if (symmetry.operations.length) {
       return expandAtomsBySymmetry(state.atoms, symmetry.operations).atoms.map((atom, index) => normalizeAtom(atom, index));
@@ -2710,6 +2719,9 @@
       gamma: $("crystal-gamma"),
       spaceGroup: $("crystal-spacegroup")
     });
+    updateSpaceGroupSettingOptions();
+    const setting = $("crystal-spacegroup-setting");
+    if (setting && preset.spaceGroupSetting) setting.value = preset.spaceGroupSetting;
     const presetAtoms = atomsForPreset(preset);
     if (presetAtoms) {
       state.atoms = presetAtoms;
@@ -2839,6 +2851,18 @@
     if (!saved || !Array.isArray(saved.atoms)) return false;
     applyControlState(saved.controls);
     state.atoms = saved.atoms.map(normalizeAtom);
+    // Migrate the original default Si cell, which listed the same orbit twice
+    // and selected the incompatible origin-2 setting on first render.
+    const oldDefault = !saved.lastImportName && state.atoms.length === 2 &&
+      state.atoms.every((atom,i) => atom.label === `Si${i+1}` && atom.element === "Si" && atom.occupancy === 1 &&
+        [atom.fractX,atom.fractY,atom.fractZ].every(v => v === i * .25)) &&
+      ["crystal-a","crystal-b","crystal-c"].every(id => num(id,0) === 5.431) &&
+      ["crystal-alpha","crystal-beta","crystal-gamma"].every(id => num(id,0) === 90) &&
+      text("crystal-spacegroup", "").replace(/\s+/g, "") === "Fd-3m";
+    if (oldDefault) {
+      state.atoms = state.atoms.slice(0,1);
+      $("crystal-spacegroup-setting").value = "F 4d 2 3 -1d";
+    }
     state.radiusMode = RADIUS_DATA[saved.radiusMode] ? saved.radiusMode : text("radius-mode", "atomic");
     state.colorScheme = COLOR_SCHEMES[saved.colorScheme] ? saved.colorScheme : text("color-scheme", "jmol");
     state.elementStyles = saved.elementStyles && typeof saved.elementStyles === "object" ? saved.elementStyles : {};
@@ -2966,6 +2990,8 @@
     if (spaceGroupInput) {
       spaceGroupInput.addEventListener("change", () => {
         if (isP1SpaceGroup(spaceGroupInput.value)) promoteGeneratedAtomsToEditable();
+        state.symmetryOperations = [];
+        state.atoms.forEach(atom => { delete atom.wyckoffPositions; atom.wyckoff = ""; });
         updateSpaceGroupSettingOptions();
         refreshControls();
         render();
@@ -2982,6 +3008,8 @@
     const spaceGroupSetting = $("crystal-spacegroup-setting");
     if (spaceGroupSetting) {
       spaceGroupSetting.addEventListener("change", () => {
+        state.symmetryOperations = [];
+        state.atoms.forEach(atom => { delete atom.wyckoffPositions; atom.wyckoff = ""; });
         refreshControls();
         render();
       });

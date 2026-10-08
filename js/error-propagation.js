@@ -106,27 +106,27 @@ class Parser {
   }
 
   parseMultiplicative() {
-    let expression = this.parsePower();
+    let expression = this.parseUnary();
 
     while (this.peek()?.type === "*" || this.peek()?.type === "/") {
       const op = this.peek().type;
       this.position += 1;
-      expression = binary(op, expression, this.parsePower());
+      expression = binary(op, expression, this.parseUnary());
     }
 
     return expression;
   }
 
   parsePower() {
-    const expression = this.parseUnary();
+    const expression = this.parsePrimary();
     if (!this.match("^")) return expression;
-    return binary("^", expression, this.parsePower());
+    return binary("^", expression, this.parseUnary());
   }
 
   parseUnary() {
     if (this.match("+")) return this.parseUnary();
     if (this.match("-")) return unary("-", this.parseUnary());
-    return this.parsePrimary();
+    return this.parsePower();
   }
 
   parsePrimary() {
@@ -195,11 +195,11 @@ function isNumber(expression, value) {
 }
 
 function sameExpression(left, right) {
-  return formatExpression(left) === formatExpression(right);
+  return expressionKey(left) === expressionKey(right);
 }
 
 function expressionKey(expression) {
-  if (expression.type === "number") return `number:${formatNumber(expression.value)}`;
+  if (expression.type === "number") return `number:${expression.value}`;
   if (expression.type === "identifier") return `identifier:${expression.name}`;
   if (expression.type === "unary") return `unary:${expression.op}:${expressionKey(expression.argument)}`;
   if (expression.type === "function") return `function:${expression.name}:${expressionKey(expression.argument)}`;
@@ -403,9 +403,8 @@ function simplify(expression) {
   }
 
   if (expression.op === "^") {
-    if (left.type === "binary" && left.op === "^" && left.right.type === "number" && right.type === "number") {
-      return simplify(binary("^", left.left, number(left.right.value * right.value)));
-    }
+    // Nested fractional powers cannot be flattened without domain assumptions:
+    // (x^2)^0.5 is abs(x), not x.
     if (isNumber(right, 0)) return number(1);
     if (isNumber(right, 1)) return left;
     if (isNumber(left, 0)) return number(0);
@@ -464,16 +463,16 @@ function derivative(expression, variable) {
 }
 
 function precedence(expression) {
+  if (expression.type === "number" && expression.value < 0) return 3;
   if (expression.type === "number" || expression.type === "identifier" || expression.type === "function") return 5;
-  if (expression.type === "unary") return 4;
-  if (expression.op === "^") return 3;
+  if (expression.type === "unary") return 3;
+  if (expression.op === "^") return 4;
   if (expression.op === "*" || expression.op === "/") return 2;
   return 1;
 }
 
 function formatNumber(value) {
-  if (Number.isInteger(value)) return String(value);
-  return Number(value.toPrecision(8)).toString();
+  return String(value);
 }
 
 function formatExpression(expression, parentPrecedence = 0) {
@@ -486,20 +485,23 @@ function formatExpression(expression, parentPrecedence = 0) {
     text = `${simplified.name}(${formatExpression(simplified.argument)})`;
   }
   if (simplified.type === "unary") {
-    const argumentPrecedence = simplified.argument.type === "binary"
-      && (simplified.argument.op === "+" || simplified.argument.op === "-")
-      ? precedence(simplified)
-      : precedence(simplified.argument);
-    text = `-${formatExpression(simplified.argument, argumentPrecedence)}`;
+    text = `-${formatExpression(simplified.argument, precedence(simplified))}`;
   }
   if (simplified.type === "binary") {
     const currentPrecedence = precedence(simplified);
-    const left = formatExpression(simplified.left, currentPrecedence);
-    const rightPrecedence = simplified.op === "^" || simplified.op === "-" || simplified.op === "/"
+    const left = formatExpression(simplified.left, currentPrecedence + (simplified.op === "^" ? 1 : 0));
+    const rightPrecedence = simplified.op === "-" || simplified.op === "/"
       ? currentPrecedence + 1
       : currentPrecedence;
     const right = formatExpression(simplified.right, rightPrecedence);
-    text = `${left}${simplified.op}${right}`;
+    const rightNode = simplify(simplified.right);
+    if (simplified.op === "+" && rightNode.type === "unary" && rightNode.op === "-") {
+      text = `${left}-${formatExpression(rightNode.argument, currentPrecedence + 1)}`;
+    } else if (simplified.op === "+" && rightNode.type === "number" && rightNode.value < 0) {
+      text = `${left}-${formatNumber(-rightNode.value)}`;
+    } else {
+      text = `${left}${simplified.op}${right}`;
+    }
   }
 
   return precedence(simplified) < parentPrecedence ? `(${text})` : text;

@@ -228,19 +228,22 @@
 
   function invertLensPoint(p, center, k, w, h) {
     if (!k) return copyPoint(p);
-    let x = p.x;
-    let y = p.y;
-    for (let i = 0; i < 8; i++) {
-      const nx = (x - center.x) / Math.max(w, 1);
-      const ny = (y - center.y) / Math.max(h, 1);
-      const r2 = nx * nx + ny * ny;
-      const factor = 1 + k * r2;
-      const fx = center.x + (p.x - center.x) * factor;
-      const fy = center.y + (p.y - center.y) * factor;
-      x -= (fx - p.x) * 0.85;
-      y -= (fy - p.y) * 0.85;
+    const dx = p.x - center.x, dy = p.y - center.y;
+    const rd = Math.hypot(dx / Math.max(w, 1), dy / Math.max(h, 1));
+    if (rd === 0) return copyPoint(p);
+    // Invert rd = r*(1+k*r^2) on the monotonic branch containing the center.
+    let lo = 0, hi = k < 0 ? Math.sqrt(-1 / (3 * k)) : rd;
+    if (k < 0 && rd > hi * (1 + k * hi * hi) + 1e-12) return { x: NaN, y: NaN };
+    let r = Math.min(rd, hi);
+    for (let i = 0; i < 40; i++) {
+      const residual = r * (1 + k * r * r) - rd;
+      if (Math.abs(residual) < 1e-13) break;
+      if (residual > 0) hi = r; else lo = r;
+      const next = r - residual / (1 + 3 * k * r * r);
+      r = Number.isFinite(next) && next > lo && next < hi ? next : (lo + hi) / 2;
     }
-    return { x, y };
+    const scale = r / rd;
+    return { x: center.x + dx * scale, y: center.y + dy * scale };
   }
 
   function solveLinear8(a, b) {
@@ -389,6 +392,7 @@
   }
 
   function sampleBilinear(data, w, h, x, y) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return [0, 0, 0, 0];
     const x0 = Math.floor(x);
     const y0 = Math.floor(y);
     const x1 = x0 + 1;
@@ -1080,7 +1084,7 @@
         pt = coonsPatch(lensCorners, u, v);
       }
       pt = invertLensPoint(pt, center, k, srcW, srcH);
-      return pt;
+      return Number.isFinite(pt.x) && Number.isFinite(pt.y) ? pt : null;
     }
 
     return {

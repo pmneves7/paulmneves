@@ -63,7 +63,7 @@
   function countSentences(text) {
     const trimmed = text.trim();
     if (!trimmed) return 0;
-    const parts = trimmed.split(/[.!?]+(?:\s+|$)/).filter((part) => part.trim().length > 0);
+    const parts = trimmed.split(/[.!?]+["'”’»\)\]]*(?:\s+|$)/).filter((part) => part.trim().length > 0);
     return parts.length;
   }
 
@@ -74,7 +74,7 @@
   }
 
   function normalizeWord(word) {
-    return word.toLowerCase().replace(/^[^\w]+|[^\w]+$/g, "");
+    return word.normalize("NFC").toLowerCase().replace(/^[^\p{L}\p{N}\p{M}_]+|[^\p{L}\p{N}\p{M}_]+$/gu, "");
   }
 
   function mostCommonWords(text, limit) {
@@ -120,37 +120,59 @@
   }
 
   function diffTokens(oldTokens, newTokens) {
-    const n = oldTokens.length;
-    const m = newTokens.length;
-    const dp = Array.from({ length: n + 1 }, () => Array(m + 1).fill(0));
-
-    for (let i = 1; i <= n; i += 1) {
-      for (let j = 1; j <= m; j += 1) {
-        if (oldTokens[i - 1] === newTokens[j - 1]) {
-          dp[i][j] = dp[i - 1][j - 1] + 1;
-        } else {
-          dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+    // Trim unchanged ends and use a bounded Myers search. Large rewrites fall
+    // back to one replacement, preserving every token without a quadratic table.
+    let prefix = 0;
+    while (prefix < oldTokens.length && prefix < newTokens.length && oldTokens[prefix] === newTokens[prefix]) prefix++;
+    let suffix = 0;
+    while (suffix < oldTokens.length - prefix && suffix < newTokens.length - prefix &&
+      oldTokens[oldTokens.length - 1 - suffix] === newTokens[newTokens.length - 1 - suffix]) suffix++;
+    const a = oldTokens.slice(prefix, oldTokens.length - suffix);
+    const b = newTokens.slice(prefix, newTokens.length - suffix);
+    const v = new Map([[1, 0]]);
+    const trace = [];
+    let middle = null;
+    let work = 0;
+    search: for (let d = 0; d <= Math.min(a.length + b.length, 512); d++) {
+      trace.push(new Map(v));
+      for (let k = -d; k <= d; k += 2) {
+        if (++work > 1000000) break search;
+        let x = k === -d || (k !== d && (v.get(k - 1) ?? -Infinity) < (v.get(k + 1) ?? -Infinity))
+          ? (v.get(k + 1) ?? 0) : (v.get(k - 1) ?? 0) + 1;
+        let y = x - k;
+        while (x < a.length && y < b.length && a[x] === b[y]) {
+          x++; y++;
+          if (++work > 1000000) break search;
+        }
+        v.set(k, x);
+        if (x >= a.length && y >= b.length) {
+          middle = [];
+          for (let depth = d; depth >= 0; depth--) {
+            const prev = trace[depth];
+            const diagonal = x - y;
+            const prevK = diagonal === -depth || (diagonal !== depth &&
+              (prev.get(diagonal - 1) ?? -Infinity) < (prev.get(diagonal + 1) ?? -Infinity))
+              ? diagonal + 1 : diagonal - 1;
+            const prevX = prev.get(prevK) ?? 0;
+            const prevY = prevX - prevK;
+            while (x > prevX && y > prevY) {
+              middle.push({ type: "equal", value: a[--x] });
+              y--;
+            }
+            if (depth > 0) {
+              if (x === prevX) middle.push({ type: "insert", value: b[--y] });
+              else middle.push({ type: "delete", value: a[--x] });
+            }
+          }
+          middle.reverse();
+          break search;
         }
       }
     }
-
-    const result = [];
-    let i = n;
-    let j = m;
-    while (i > 0 || j > 0) {
-      if (i > 0 && j > 0 && oldTokens[i - 1] === newTokens[j - 1]) {
-        result.unshift({ type: "equal", value: oldTokens[i - 1] });
-        i -= 1;
-        j -= 1;
-      } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-        result.unshift({ type: "insert", value: newTokens[j - 1] });
-        j -= 1;
-      } else {
-        result.unshift({ type: "delete", value: oldTokens[i - 1] });
-        i -= 1;
-      }
-    }
-    return result;
+    if (!middle) middle = a.map(value => ({ type: "delete", value }))
+      .concat(b.map(value => ({ type: "insert", value })));
+    return oldTokens.slice(0, prefix).map(value => ({ type: "equal", value })).concat(
+      middle, oldTokens.slice(oldTokens.length - suffix).map(value => ({ type: "equal", value })));
   }
 
   function escapeHtml(text) {
@@ -169,7 +191,16 @@
     }
 
     const parts = diffTokens(tokenize(oldText), tokenize(newText));
-    const html = parts.map((part) => {
+    // Group neighboring edits so a large replacement creates two spans rather
+    // than one element for every word and whitespace token.
+    const groups = [];
+    for (const part of parts) {
+      const previous = groups[groups.length - 1];
+      if (previous?.type === part.type) previous.values.push(part.value);
+      else groups.push({ type: part.type, values: [part.value] });
+    }
+    const html = groups.map((group) => {
+      const part = { type: group.type, value: group.values.join("") };
       const safe = escapeHtml(part.value);
       if (part.type === "delete") return `<span class="diff-removed">${safe}</span>`;
       if (part.type === "insert") return `<span class="diff-added">${safe}</span>`;
@@ -197,8 +228,10 @@
   window.addEventListener("resize", () => {
     growInputs.forEach(autoGrow);
   });
-  diffOld.addEventListener("input", updateDiff);
-  diffNew.addEventListener("input", updateDiff);
+  let diffTimer;
+  const scheduleDiff = () => { clearTimeout(diffTimer); diffTimer = setTimeout(updateDiff, 100); };
+  diffOld.addEventListener("input", scheduleDiff);
+  diffNew.addEventListener("input", scheduleDiff);
 
   updateCounter();
   updateDiff();

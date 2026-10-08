@@ -1,5 +1,5 @@
 import numpy as np
-from numpy._typing import ArrayLike
+from numpy.typing import ArrayLike
 
 
 class NDRebin:
@@ -158,9 +158,9 @@ class NDRebin:
         fractional: bool = False,
         normalize: bool = True,
     ):
-        self.data = data
-        self.coords = coords
-        self.data_errs = data_errs
+        self.data = np.asarray(data, dtype=float)
+        self.coords = np.asarray(coords, dtype=float)
+        self.data_errs = None if data_errs is None else np.asarray(data_errs, dtype=float)
         self.axes = axes
         self.upper = upper
         self.lower = lower
@@ -238,6 +238,9 @@ class NDRebin:
         # Identify number of points
         self.Nvals = int(self.data.size)
 
+        if self.Nvals == 0 or self.coords.size == 0:
+            raise ValueError("Data and coordinates must not be empty.")
+
         # Identify number of dimensions
         Ndims = self.coords.size / self.Nvals
 
@@ -273,7 +276,9 @@ class NDRebin:
             self.dim_axis = -1
         else:
             # search if any axis is size Ndims
-            self.dim_axis = next(i for i, s in enumerate(self.coords.shape) if s == self.Ndims)
+            self.dim_axis = next((i for i, s in enumerate(self.coords.shape) if s == self.Ndims), None)
+            if self.dim_axis is None:
+                raise ValueError("Coordinates must have an axis of length Ndims.")
 
         if not self.coords.shape[self.dim_axis] == self.Ndims:
             raise ValueError("The coords have to have one dimension which is "
@@ -290,6 +295,9 @@ class NDRebin:
 
     def _project_axes(self):
         # now project the data into the axes
+        self.axes = np.asarray(self.axes, dtype=float)
+        if self.axes.shape != (self.Ndims, self.Ndims):
+            raise ValueError("Axes must be a square Ndims by Ndims matrix.")
         self.axes_inv = np.linalg.inv(self.axes)
         self.coords_flat = np.tensordot(self.coords_flat, self.axes_inv, axes=([1], [0]))
 
@@ -345,7 +353,12 @@ class NDRebin:
         self.step_size = []
         # if provided just one num_bin for 1D as a scalar, make it a list
         # for formatting purposes
-        self.num_bins = np.atleast_1d(self.num_bins)
+        if self.num_bins is None:
+            raise ValueError("Provide num_bins or step_size.")
+        self.num_bins = np.atleast_1d(self.num_bins).astype(float)
+        if not np.all(np.isfinite(self.num_bins) & (self.num_bins >= 1) & (self.num_bins == np.floor(self.num_bins))):
+            raise ValueError("num_bins must contain positive integers.")
+        self.num_bins = self.num_bins.astype(int)
         if self.num_bins.size != self.Ndims:
             raise ValueError("num_bins must be None or a 1D iterable of length Ndims.")
         for ind in range(self.Ndims):
@@ -362,7 +375,9 @@ class NDRebin:
         self.num_bins = []
         # if provided just one step_size for 1D as a scalar, make it a list
         # for formatting purposes
-        self.step_size = np.atleast_1d(self.step_size)
+        self.step_size = np.atleast_1d(self.step_size).astype(float)
+        if np.any(np.isnan(self.step_size) | (self.step_size <= 0)):
+            raise ValueError("step_size must be positive (infinity integrates an axis).")
         if self.step_size.size != self.Ndims:
             raise ValueError("step_size must be None or a 1D iterable of length Ndims.")
         for ind in range(self.Ndims):
@@ -384,13 +399,17 @@ class NDRebin:
         # create the bin inds for each data point as a Nvals x Ndims long vector
         self.bin_inds = np.zeros((self.Nvals, self.Ndims))
         for ind in range(self.Ndims):
-            this_min = self.bins_list[ind][0]
-            this_step = self.step_size[ind]
-            self.bin_inds[:, ind] = (self.coords_flat[:,ind] - this_min) / this_step
-            # any that are outside the bin limits should be removed
-            self.bin_inds[self.coords_flat[:, ind]< self.bins_list[ind][0],  ind] = np.nan
-            self.bin_inds[self.coords_flat[:, ind]==self.bins_list[ind][-1], ind] = self.num_bins[ind]-1
-            self.bin_inds[self.coords_flat[:, ind]> self.bins_list[ind][-1], ind] = np.nan
+            edges = self.bins_list[ind]
+            coords = self.coords_flat[:, ind]
+            if self.fractional:
+                # Interpolate between actual centers, including a shorter final bin.
+                centers = self.bin_centers_list[ind]
+                self.bin_inds[:, ind] = np.interp(coords, centers, np.arange(len(centers))) + 0.5
+            else:
+                self.bin_inds[:, ind] = np.minimum(
+                    np.searchsorted(edges, coords, side="right") - 1, self.num_bins[ind] - 1)
+            outside = (~np.isfinite(coords)) | (coords < edges[0]) | (coords > edges[-1])
+            self.bin_inds[outside, ind] = np.nan
 
     def _calculate_bins(self):
         # For readibility, this is a non-vector way of binning the data
@@ -462,7 +481,7 @@ class NDRebin:
             # bins on the edge only go in one bin on that axis
             edge_mask = np.logical_not(
                 np.logical_or(valid_inds[:, ind]<0,
-                              valid_inds[:, ind]>self.num_bins[ind]-1)
+                              valid_inds[:, ind]>=self.num_bins[ind]-1)
                               )
             partial_weights[~edge_mask, ind] = 1.0
             # will be where the bin goes

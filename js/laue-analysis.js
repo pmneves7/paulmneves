@@ -637,7 +637,23 @@
       flipH: Boolean(state.transform.flipH) !== Boolean(inst.autoFlipH),
       flipV: Boolean(state.transform.flipV) !== Boolean(inst.autoFlipV)
     };
+    const previous = state.appliedImageTransform;
+    const changed = previous && previous.raw === state.rawData &&
+      (previous.t.rotate90 !== t.rotate90 || previous.t.flipH !== t.flipH || previous.t.flipV !== t.flipV);
+    let beam;
+    if (changed) {
+      const { width, height } = state.rawData;
+      const remap = p => LaueFormats.transformDisplayPoint(
+        LaueFormats.transformDisplayPoint(p, width, height, previous.t, true), width, height, t);
+      state.observedPeaks = state.observedPeaks.map(remap);
+      beam = remap(beamCenterPosition());
+    }
     state.transformedData = LaueFormats.applyDisplayTransform(state.rawData, t);
+    state.appliedImageTransform = { raw: state.rawData, t };
+    if (beam) {
+      state.displayData = state.transformedData;
+      setBeamCenterPosition(beam.x, beam.y);
+    }
     if (!state.rawIntensityRange) {
       state.rawIntensityRange = LaueFormats.intensityRange(state.transformedData.intensities);
     }
@@ -855,6 +871,8 @@
     const preserveSession = !!options.preserveSession;
     if (!preserveSession) {
       state.rawIntensityRange = null;
+      state.appliedImageTransform = null;
+      state.observedPeaks = [];
       state.transform = { rotate90: 0, flipH: false, flipV: false };
       state.instrument.beamX = null;
       state.instrument.beamY = null;
@@ -1549,6 +1567,7 @@
       setRefinementUndoAvailable(false);
     }
     if (obj.transform) state.transform = { ...obj.transform };
+    if (obj.transform || obj.observedPeaks) state.appliedImageTransform = null;
     if (obj.display) {
       state.display = { ...state.display, ...obj.display };
       ensureCurveEndpoints();
@@ -2155,8 +2174,11 @@
     ["laue-rotate-cw", "laue-flip-h", "laue-flip-v"].forEach((id) => {
       document.getElementById(id).addEventListener("click", () => {
         if (id === "laue-rotate-cw") state.transform.rotate90 = (state.transform.rotate90 + 1) % 4;
-        if (id === "laue-flip-h") state.transform.flipH = !state.transform.flipH;
-        if (id === "laue-flip-v") state.transform.flipV = !state.transform.flipV;
+        const rotated = (state.transform.rotate90 + (readInstrument().autoRotate90 || 0)) % 2;
+        if (id === "laue-flip-h" || id === "laue-flip-v") {
+          const key = (id === "laue-flip-h") !== Boolean(rotated) ? "flipH" : "flipV";
+          state.transform[key] = !state.transform[key];
+        }
         reprocessImage({ rescaleIntensity: false });
         persistConfig();
       });

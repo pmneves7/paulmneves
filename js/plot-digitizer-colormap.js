@@ -127,10 +127,22 @@
     const dec=(q)=>{const dx=q.x-c.x1.x,dy=q.y-c.x1.y;return {a:(dx*vy.y-dy*vy.x)/det,b:(-dx*vx.y+dy*vx.x)/det};};const d=dec(p),d1=dec(c.y1);
     const x=interp(x1,x2,d.a,els.logx.checked); let y;if(els.logy.checked){const a=Math.log(y1),b=Math.log(y2);y=Math.exp(a-d1.b*(b-a)+d.b*(b-a));}else y=y1-d1.b*(y2-y1)+d.b*(y2-y1);return{x,y};
   }
-  function ready(cm) { const a=["x1","x2","y1","y2"]; const anchor=colorbarAnchor(cm); if(![cm.cal.x1,cm.cal.x2,cm.cal.y1,cm.cal.y2].every(Boolean)||!validRect(cm.plot)||!validRect(cm.bar)||!a.every(k=>Number.isFinite(val(k)))||!anchor||anchor.v1===anchor.v2||anchor.t1===anchor.t2)return false; return val("x1")!==val("x2")&&val("y1")!==val("y2")&&(!els.logx.checked||val("x1")>0&&val("x2")>0)&&(!els.logy.checked||val("y1")>0&&val("y2")>0)&&(!els.log.checked||anchor.v1>0&&anchor.v2>0); }
+  function calibrationGeometryProblem(cm) {
+    const c = cm.cal;
+    if (![c.x1,c.x2,c.y1,c.y2].every(p => p && Number.isFinite(p.x) && Number.isFinite(p.y))) return "Set all four axis references.";
+    if (!els.transformed.checked) {
+      if (Math.abs(c.x2.x-c.x1.x)<1e-9) return "X₁ and X₂ need different horizontal positions.";
+      if (Math.abs(c.y2.y-c.y1.y)<1e-9) return "Y₁ and Y₂ need different vertical positions.";
+    } else {
+      const dx=c.x2.x-c.x1.x, dy=c.x2.y-c.x1.y, ex=c.y2.x-c.y1.x, ey=c.y2.y-c.y1.y;
+      if (Math.abs(dx*ey-dy*ex)<1e-9) return "The X and Y calibration directions are parallel.";
+    }
+    return "";
+  }
+  function ready(cm) { const a=["x1","x2","y1","y2"]; const anchor=colorbarAnchor(cm); if(![cm.cal.x1,cm.cal.x2,cm.cal.y1,cm.cal.y2].every(Boolean)||!validRect(cm.plot)||!validRect(cm.bar)||!a.every(k=>Number.isFinite(val(k)))||!anchor||anchor.v1===anchor.v2||anchor.t1===anchor.t2)return false; return !calibrationGeometryProblem(cm)&&val("x1")!==val("x2")&&val("y1")!==val("y2")&&(!els.logx.checked||val("x1")>0&&val("x2")>0)&&(!els.logy.checked||val("y1")>0&&val("y2")>0)&&(!els.log.checked||anchor.v1>0&&anchor.v2>0); }
   function invalidate(cm) { cm.dirty = true; }
   function run() {
-    const cm=initState(); if (!ready(cm)) { hooks.flashStatus("Set four axis references and values, then draw both rectangles."); return; }
+    const cm=initState(); if (!ready(cm)) { hooks.flashStatus(calibrationGeometryProblem(cm) || "Set four axis references and values, then draw both rectangles."); return; }
     const image=displayData(); const lut=profile(image,cm.bar); if (lut.length<2) return;
     const nx=Math.max(1,Math.min(2000,Math.round(val("nx")||200))), ny=Math.max(1,Math.min(2000,Math.round(val("ny")||200)));
     const tol=(val("tol")||20)/100, anchor=colorbarAnchor(cm); const log=els.log.checked, discrete=els.discrete.checked;
@@ -148,12 +160,12 @@
     cm.result={nx,ny,out,accepted,lut,anchor,log}; cm.dirty=false; renderPreview(); updateReadout(); hooks.refreshAll();
   }
   function csv(long) {
-    const cm=initState(), r=cm.result; if(!r) return ""; const rows=[];
+    const cm=initState(), r=cm.result; if(!r || cm.dirty || !ready(cm)) { hooks.flashStatus("Convert the colormap with valid calibration before exporting."); return ""; } const rows=[];
     if(long) { rows.push("x,y,I"); for(let iy=0;iy<r.ny;iy++)for(let ix=0;ix<r.nx;ix++){const p=dataXY({x:cm.plot.x+(ix+.5)*cm.plot.w/r.nx,y:cm.plot.y+(iy+.5)*cm.plot.h/r.ny},cm);const I=r.out[iy*r.nx+ix];rows.push(`${p.x},${p.y},${Number.isFinite(I)?I:"NaN"}`);} }
     else { const xs=[];for(let ix=0;ix<r.nx;ix++)xs.push(dataXY({x:cm.plot.x+(ix+.5)*cm.plot.w/r.nx,y:cm.plot.y},cm).x);rows.push("y\\x,"+xs.join(","));for(let iy=0;iy<r.ny;iy++){const y=dataXY({x:cm.plot.x,y:cm.plot.y+(iy+.5)*cm.plot.h/r.ny},cm).y;const a=[];for(let ix=0;ix<r.nx;ix++){const I=r.out[iy*r.nx+ix];a.push(Number.isFinite(I)?I:"NaN");}rows.push(y+","+a.join(","));} }
     return rows.join("\n");
   }
-  function download(text,name) { const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([text],{type:"text/csv"}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500); }
+  function download(text,name) { if (!text) return; const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([text],{type:"text/csv"}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500); }
   function hex(rgb) { return `#${rgb.map(v=>Math.round(v).toString(16).padStart(2,"0")).join("")}`; }
   function parseHex(s) { const m=/^#?([0-9a-f]{6})$/i.exec((s||"").trim()); return m?[parseInt(m[1].slice(0,2),16),parseInt(m[1].slice(2,4),16),parseInt(m[1].slice(4,6),16)]:null; }
   function renderNanList() { const cm=initState();els.nanList.innerHTML="";cm.nanColors.forEach((c,i)=>{const li=document.createElement("li");li.innerHTML=`<span class="digitizer-edit-color-swatch" style="background:${hex(c.rgb)}"></span><code>${hex(c.rgb)}</code>`;const b=document.createElement("button");b.type="button";b.className="tool-inline-button";b.textContent="remove";b.addEventListener("click",()=>{cm.nanColors.splice(i,1);invalidate(cm);renderNanList();updateReadout();});li.appendChild(b);els.nanList.appendChild(li);}); }
@@ -162,7 +174,7 @@
   function renderPreview() {
     const cm=initState(), r=cm.result;
     els.previewWrap.hidden=!r;
-    if (!r) return;
+    if (!r || cm.dirty || !ready(cm)) return;
     const plotW=Math.max(360,Math.min(760,r.nx*2)),plotH=Math.max(260,Math.min(560,r.ny*2));
     const left=72,top=28,bottom=56,barGap=32,barW=28,right=76;
     els.preview.width=left+plotW+barGap+barW+right;els.preview.height=top+plotH+bottom;
@@ -174,12 +186,10 @@
     ctx.fillStyle="#f3f3f3";ctx.fillRect(left,top,plotW,plotH);
     ctx.imageSmoothingEnabled=false;ctx.drawImage(grid,0,0,r.nx,r.ny,left,top,plotW,plotH);
     ctx.strokeStyle="#222";ctx.lineWidth=1.5;ctx.strokeRect(left,top,plotW,plotH);
-    const xA=dataXY({x:cm.plot.x,y:cm.plot.y+cm.plot.h/2},cm).x,xB=dataXY({x:cm.plot.x+cm.plot.w,y:cm.plot.y+cm.plot.h/2},cm).x;
-    const yA=dataXY({x:cm.plot.x+cm.plot.w/2,y:cm.plot.y},cm).y,yB=dataXY({x:cm.plot.x+cm.plot.w/2,y:cm.plot.y+cm.plot.h},cm).y;
     ctx.font="12px system-ui, sans-serif";ctx.fillStyle="#222";ctx.textAlign="center";ctx.textBaseline="top";
-    for(let n=0;n<=4;n++){const t=n/4,x=left+t*plotW;ctx.beginPath();ctx.moveTo(x,top+plotH);ctx.lineTo(x,top+plotH+5);ctx.stroke();ctx.fillText(formatTick(xA+t*(xB-xA)),x,top+plotH+8);}
+    for(let n=0;n<=4;n++){const t=n/4,x=left+t*plotW;ctx.beginPath();ctx.moveTo(x,top+plotH);ctx.lineTo(x,top+plotH+5);ctx.stroke();ctx.fillText(formatTick(dataXY({x:cm.plot.x+t*cm.plot.w,y:cm.plot.y+cm.plot.h/2},cm).x),x,top+plotH+8);}
     ctx.textAlign="right";ctx.textBaseline="middle";
-    for(let n=0;n<=4;n++){const t=n/4,y=top+t*plotH;ctx.beginPath();ctx.moveTo(left-5,y);ctx.lineTo(left,y);ctx.stroke();ctx.fillText(formatTick(yA+t*(yB-yA)),left-9,y);}
+    for(let n=0;n<=4;n++){const t=n/4,y=top+t*plotH;ctx.beginPath();ctx.moveTo(left-5,y);ctx.lineTo(left,y);ctx.stroke();ctx.fillText(formatTick(dataXY({x:cm.plot.x+cm.plot.w/2,y:cm.plot.y+t*cm.plot.h},cm).y),left-9,y);}
     ctx.textAlign="center";ctx.textBaseline="alphabetic";ctx.font="bold 13px system-ui, sans-serif";ctx.fillText("X",left+plotW/2,els.preview.height-12);
     ctx.save();ctx.translate(16,top+plotH/2);ctx.rotate(-Math.PI/2);ctx.fillText("Y",0,0);ctx.restore();
     const bx=left+plotW+barGap;for(let py=0;py<plotH;py++){const k=Math.round(py*Math.max(0,r.lut.length-1)/Math.max(1,plotH-1)),c=r.lut[k].rgb;ctx.fillStyle=`rgb(${c[0]}, ${c[1]}, ${c[2]})`;ctx.fillRect(bx,top+py,barW,1);}ctx.strokeStyle="#222";ctx.strokeRect(bx,top,barW,plotH);
@@ -252,7 +262,7 @@
         invalidate(cm);
         hooks.refreshAll();
       });
-      document.getElementById("cm-copy-long").addEventListener("click", () => navigator.clipboard?.writeText(csv(true)));
+      document.getElementById("cm-copy-long").addEventListener("click", () => { const text=csv(true); if(text) navigator.clipboard?.writeText(text); });
       document.getElementById("cm-download-long").addEventListener("click", () => download(csv(true), "digitized-xyi.csv"));
       document.getElementById("cm-download-matrix").addEventListener("click", () => download(csv(false), "digitized-matrix.csv"));
       document.addEventListener("keydown", keydown);

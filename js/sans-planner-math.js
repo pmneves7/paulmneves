@@ -71,9 +71,9 @@
 
   /** Radial distance r (m) on detector from |Q|. */
   function radiusFromQ(q, sampleDistanceM, lambdaAngstrom) {
-    const qPerp = qPerpFromQ(q, lambdaAngstrom);
-    if (qPerp == null) return null;
-    return radiusFromQPerp(qPerp, sampleDistanceM, lambdaAngstrom);
+    const theta = thetaFromQ(q, lambdaAngstrom);
+    if (theta == null || 2 * theta >= Math.PI / 2) return null;
+    return sampleDistanceM * Math.tan(2 * theta);
   }
 
   /** Longitudinal q_z (Å⁻¹) along the direct beam. */
@@ -123,45 +123,20 @@
       if (r > rStop && r > rMax) rMax = r;
     }
 
-    const edges = [
-      { y0: -halfH, y1: halfH, x: halfW },
-      { y0: -halfH, y1: halfH, x: -halfW },
-      { x0: -halfW, x1: halfW, y: halfH },
-      { x0: -halfW, x1: halfW, y: -halfH }
-    ];
-    for (const edge of edges) {
-      if (edge.x != null) {
-        for (let i = 0; i <= 32; i += 1) {
-          const t = i / 32;
-          const y = edge.y0 + t * (edge.y1 - edge.y0);
-          const dx = edge.x - bx;
-          const dy = y - by;
-          const r = Math.hypot(dx, dy);
-          if (r > rStop && r > rMax) rMax = r;
-        }
-      } else {
-        for (let i = 0; i <= 32; i += 1) {
-          const t = i / 32;
-          const x = edge.x0 + t * (edge.x1 - edge.x0);
-          const dx = x - bx;
-          const dy = edge.y - by;
-          const r = Math.hypot(dx, dy);
-          if (r > rStop && r > rMax) rMax = r;
-        }
-      }
-    }
     return rMax;
   }
 
   function minVisibleRadiusM(params) {
-    return params.beamstopRadiusMm / 1000;
+    const dx = Math.max(0, Math.abs(params.beamOffsetXMm) - params.detWidthMm / 2);
+    const dy = Math.max(0, Math.abs(params.beamOffsetYMm) - params.detHeightMm / 2);
+    return Math.max(params.beamstopRadiusMm, Math.hypot(dx, dy)) / 1000;
   }
 
   function visibleQRange(params) {
     const rMin = minVisibleRadiusM(params);
     const rMax = maxVisibleRadiusM(params);
-    const qMin = qPerpFromRadius(rMin, params.sampleDistanceM, params.lambdaAngstrom);
-    const qMax = qPerpFromRadius(rMax, params.sampleDistanceM, params.lambdaAngstrom);
+    const qMin = qFromRadius(rMin, params.sampleDistanceM, params.lambdaAngstrom);
+    const qMax = qFromRadius(rMax, params.sampleDistanceM, params.lambdaAngstrom);
     return { qMin, qMax, rMin, rMax };
   }
 
@@ -193,20 +168,20 @@
     let dbeta1;
     let dbeta2;
 
-    if (c2t === 0) {
-      return null;
+    if (c2t <= 1e-12) return null;
+    // Pedersen et al. (1990), eqs. 16–17. Choose the larger effective
+    // aperture independently in each direction; the overlap correction is
+    // dimensionless and remains invariant when all instrument lengths scale.
+    function angularWidth(c) {
+      if (r1 === 0 || r2 === 0) return 0;
+      const extent1 = r1 / (L + l / c);
+      const extent2 = r2 * c / l;
+      const large = Math.max(extent1, extent2);
+      const small = Math.min(extent1, extent2);
+      return (L + l / c) / L * (2 * large - 0.5 * small ** 2 / large);
     }
-
-    if (r1 === 0 || r2 === 0) {
-      dbeta1 = 0;
-      dbeta2 = 0;
-    } else if (r1 / (L + l) >= r2 / l) {
-      dbeta1 = (2 * r1) / L - 0.5 * (r2 ** 2 / r1) * c2t ** 4 / (L * l ** 2) * (L + l / c2t ** 2) ** 2;
-      dbeta2 = (2 * r1) / L - 0.5 * (r2 ** 2 / r1) * c2t ** 2 / (L * l ** 2) * (L + l / c2t) ** 2;
-    } else {
-      dbeta1 = 2 * r2 * (1 / L + c2t ** 2 / l) - 0.5 * (r1 ** 2 / r2 / L) / (c2t ** 2 * (L + l / c2t ** 2));
-      dbeta2 = 2 * r2 * (1 / L + c2t / l) - 0.5 * (r1 ** 2 / r2 * l) / L / (c2t * (L + l / c2t));
-    }
+    dbeta1 = angularWidth(c2t ** 2);
+    dbeta2 = angularWidth(c2t);
 
     const sigmaXI_coll = (k * Math.cos(theta) * dbeta1) / FWHM_TO_SIGMA;
     const sigmaYI_coll = (k * dbeta2) / FWHM_TO_SIGMA;
@@ -266,8 +241,8 @@
 
     const points = [];
     for (let i = 0; i <= nPoints; i += 1) {
-      const qPerp = qMin + (i / nPoints) * (qMax - qMin);
-      const qMag = qMagFromQPerp(qPerp, params.lambdaAngstrom);
+      const qMag = qMin + (i / nPoints) * (qMax - qMin);
+      const qPerp = qPerpFromQ(qMag, params.lambdaAngstrom);
       if (qMag == null) continue;
       const res = instrumentResolution(qMag, params);
       if (res) points.push({ ...res, qPerp, qMag });
@@ -281,12 +256,12 @@
 
     const points = [];
     for (let i = 0; i <= nPoints; i += 1) {
-      const qPerp = qMin + (i / nPoints) * (qMax - qMin);
-      const qMag = qMagFromQPerp(qPerp, params.lambdaAngstrom);
+      const qMag = qMin + (i / nPoints) * (qMax - qMin);
+      const qPerp = qPerpFromQ(qMag, params.lambdaAngstrom);
       points.push({
-        q: qPerp,
+        q: qMag,
         qMag,
-        twoThetaDeg: twoThetaDegFromQPerp(qPerp, params.lambdaAngstrom),
+        twoThetaDeg: twoThetaDegFromQ(qMag, params.lambdaAngstrom),
         qz: qMag != null ? qzFromQ(qMag, params.lambdaAngstrom) : null,
         qPerp,
         distanceAngstrom: qMag != null ? distanceFromQ(qMag) : null
