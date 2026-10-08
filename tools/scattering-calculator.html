@@ -61,6 +61,7 @@
                     <th class="sortable" data-sort-key="fImag" role="button" tabindex="0" title="Click to sort by F_imag">F_imag <span class="col-unit" data-col-unit="F"></span></th>
                     <th class="sortable" data-sort-key="fMagnitude" role="button" tabindex="0" title="Click to sort by |F|">|F| <span class="col-unit" data-col-unit="F"></span></th>
                     <th class="sortable" data-sort-key="intensity" role="button" tabindex="0" title="Click to sort by intensity">Intensity <span class="col-unit" data-col-unit="I"></span></th>
+                    <th class="sortable" data-sort-key="integratedYield" role="button" tabindex="0" title="Ideal complete-collection yield: angular-integrated for single crystals, full-ring rate for powder">Integrated est. <span class="col-unit" data-col-unit="integrated"></span></th>
                     <th class="sortable" data-sort-key="countRate" role="button" tabindex="0" title="Click to sort by estimated count rate">Rate est. (s⁻¹)</th>
                     <th class="sortable plane-column" data-sort-key="inPlane" role="button" tabindex="0" title="Click to sort by in-plane angle">In-plane (deg)</th>
                     <th class="sortable plane-column" data-sort-key="outOfPlane" role="button" tabindex="0" title="Click to sort by out-of-plane angle">Out-of-plane (deg)</th>
@@ -69,7 +70,7 @@
                 </thead>
                 <tbody id="peak-table">
                   <tr>
-                    <td colspan="13">No peaks calculated yet.</td>
+                    <td colspan="14">No peaks calculated yet.</td>
                   </tr>
                 </tbody>
               </table>
@@ -97,6 +98,7 @@
                     <th>F_imag <span class="col-unit">(fm)</span></th>
                     <th>|F| <span class="col-unit">(fm)</span></th>
                     <th>Intensity <span class="col-unit">(fm²)</span></th>
+                    <th>Integrated est. <span class="col-unit" data-col-unit="integrated"></span></th>
                     <th>Rate est. (s⁻¹)</th>
                     <th>Parent τ</th>
                     <th>Rel. nuclear max</th>
@@ -105,7 +107,7 @@
                 </thead>
                 <tbody id="magnetic-peak-table">
                   <tr>
-                    <td colspan="12">No magnetic estimate calculated yet.</td>
+                    <td colspan="13">No magnetic estimate calculated yet.</td>
                   </tr>
                 </tbody>
               </table>
@@ -292,22 +294,61 @@
             </div>
             <div class="tool-grid scattering-experiment-grid">
               <div class="tool-field">
-                <label for="sample-mass">Sample mass (mg)</label>
+                <label for="sample-mass">Illuminated sample mass (mg)</label>
                 <input type="number" id="sample-mass" step="any" min="0" placeholder="optional" />
               </div>
               <div class="tool-field">
-                <label for="incident-flux">Incident flux (cm⁻² s⁻¹)</label>
+                <label for="incident-flux-mode">Incident beam input</label>
+                <select id="incident-flux-mode">
+                  <option value="density">Flux per area (cm⁻² s⁻¹)</option>
+                  <option value="total">Total beam rate (s⁻¹)</option>
+                </select>
+              </div>
+              <div class="tool-field">
+                <label for="incident-flux" id="incident-flux-label">Incident flux (cm⁻² s⁻¹)</label>
                 <input type="number" id="incident-flux" step="any" min="0" placeholder="optional" />
+              </div>
+              <div class="tool-field" id="beam-area-field" hidden>
+                <label for="beam-area">Beam area at sample (cm²)</label>
+                <input type="number" id="beam-area" step="any" min="0" placeholder="required for total beam rate" />
+              </div>
+              <div class="tool-field">
+                <label for="detector-collection">Detector collection fraction (0–1)</label>
+                <input type="number" id="detector-collection" step="any" min="0" max="1" placeholder="optional; assume 1" />
+              </div>
+              <div class="tool-field">
+                <label for="detector-efficiency">Detector efficiency (0–1)</label>
+                <input type="number" id="detector-efficiency" step="any" min="0" max="1" placeholder="optional; assume 1" />
+              </div>
+              <div class="tool-field">
+                <label for="sample-transmission">Mean sample transmission (0–1)</label>
+                <input type="number" id="sample-transmission" step="any" min="0" max="1" value="1" />
+              </div>
+              <div class="tool-field" id="rocking-width-field">
+                <label for="rocking-width">Full rocking interval (deg)</label>
+                <input type="number" id="rocking-width" step="any" min="0" max="180" placeholder="required for single crystal" />
               </div>
             </div>
             <p class="tool-note">
-              Count-rate estimates use ideal coherent scattering from the loaded unit cell and do not include
-              absorption, sample shape, detector solid angle, efficiency, resolution, mosaicity, or extinction.
+              The integrated estimate needs only illuminated mass and flux per area, plus the loaded crystal
+              and wavelength. It assumes ideal complete collection: ∫R(ω)dω in s⁻¹ rad for a single crystal,
+              or a full-ring rate in s⁻¹ for randomly oriented powder. Mosaicity and beam divergence spread the
+              signal without changing this integral when the whole reflection is captured.
+              A total beam rate also requires its area at the sample; the beam is assumed uniform.
+              The rate column applies optional detector/transmission corrections (blank means 1).
+              For single crystals it additionally requires a full rocking interval to give the mean rate
+              over an equatorial ω scan; collection is the fraction of the Bragg beam captured.
+              For powder, collection is the fraction of the complete Debye ring captured.
+              These are kinematic estimates for a fully illuminated sample, using your mean transmission and
+              detector efficiency; they omit extinction and multiple scattering. X-rays assume unpolarized radiation.
+              The normalization follows the <a href="https://www.ill.eu/fileadmin/user_upload/ILL/1_About_ILL/Documentation/ILL_brochure/NeutronDataBooklet.pdf#page=112" target="_blank" rel="noopener">ILL Neutron Data Booklet, §2.9.4</a>.
             </p>
             <p class="tool-note">
-              Structure factors use room-temperature atomic scattering factors and neutron scattering lengths with
-              no Debye–Waller (thermal) factor and no anomalous dispersion — so X-ray F_imag is always 0. The
-              reported |F| and intensities are ideal-lattice estimates.
+              X-ray factors use tabulated neutral-atom Cromer–Mann coefficients (0 ≤ sinθ/λ ≤ 2 Å⁻¹),
+              with no anomalous dispersion or Debye–Waller factor. Neutrons use coherent scattering lengths.
+              Atomic phase factors can give a nonzero F_imag for either source. Missing data are flagged.
+              Powder rows sum |F|² over complete symmetry families and coincident d-spacings; F columns
+              and angles refer to the first listed HKL. Display filters do not change that sum.
             </p>
           </section>
 
@@ -401,14 +442,15 @@
 
   <script src="../js/site.js"></script>
   <script src="../js/cif-parser.js"></script>
-  <script src="../js/crystal-presets.js"></script>
+  <script src="../js/crystal-presets.js?v=20261008"></script>
   <script src="../js/space-groups-data.js"></script>
   <script src="../js/spacegroup-settings-data.js"></script>
   <script src="../js/spacegroup-engine.js"></script>
   <script src="../js/spacegroup-fields.js"></script>
-  <script src="../js/crystal-model.js"></script>
-  <script src="../js/scattering-extinctions.js"></script>
-  <script src="../js/scattering-factors.js"></script>
+  <script src="../js/crystal-model.js?v=20261008"></script>
+  <script src="../js/scattering-extinctions.js?v=20261008"></script>
+  <script src="../js/cromer-mann-data.js"></script>
+  <script src="../js/scattering-factors.js?v=20261008-3"></script>
   <script>
     const form = document.getElementById("scattering-form");
     const peakTable = document.getElementById("peak-table");
@@ -431,6 +473,12 @@
     const scatteringModelStatusEl = document.getElementById("scattering-model-status");
     const sampleMassEl = document.getElementById("sample-mass");
     const incidentFluxEl = document.getElementById("incident-flux");
+    const incidentFluxModeEl = document.getElementById("incident-flux-mode");
+    const beamAreaEl = document.getElementById("beam-area");
+    const detectorCollectionEl = document.getElementById("detector-collection");
+    const detectorEfficiencyEl = document.getElementById("detector-efficiency");
+    const sampleTransmissionEl = document.getElementById("sample-transmission");
+    const rockingWidthEl = document.getElementById("rocking-width");
     const magneticEnabledEl = document.getElementById("magnetic-enabled");
     const magneticSiteEl = document.getElementById("magnetic-site");
     const magneticMomentEl = document.getElementById("magnetic-moment");
@@ -606,6 +654,10 @@
     function updateAtomFromEditor(index, field, value) {
       const atom = crystalMeta.atoms[index];
       if (!atom) return;
+      if (["fractX", "fractY", "fractZ", "wyckoff"].includes(field)) {
+        delete atom.wyckoffPositions;
+        if (field !== "wyckoff") atom.wyckoff = "";
+      }
       if (["fractX", "fractY", "fractZ", "occupancy"].includes(field)) {
         atom[field] = numericAtomValue(value, atom[field]);
       } else if (field === "element") {
@@ -723,9 +775,22 @@
       const isXray = !sourceTypeEl || sourceTypeEl.value === "xray";
       const fUnit = isXray ? "(e)" : "(fm)";
       const iUnit = isXray ? "(e²)" : "(fm²)";
-      document.querySelectorAll(".col-unit").forEach((span) => {
-        span.textContent = span.dataset.colUnit === "I" ? iUnit : fUnit;
+      document.querySelectorAll(".col-unit[data-col-unit]").forEach((span) => {
+        span.textContent = span.dataset.colUnit === "integrated" ? (intensityMode === "powder" ? "(s⁻¹)" : "(s⁻¹ rad)") : span.dataset.colUnit === "I" ? iUnit : fUnit;
       });
+    }
+
+    function updateFluxControls() {
+      const total = incidentFluxModeEl.value === "total";
+      document.getElementById("beam-area-field").hidden = !total;
+      document.getElementById("incident-flux-label").textContent = total ? "Total incident beam rate (s⁻¹)" : "Incident flux (cm⁻² s⁻¹)";
+    }
+
+    function incidentFluxDensity() {
+      const flux = Number(incidentFluxEl.value);
+      if (incidentFluxModeEl.value !== "total") return flux;
+      const area = Number(beamAreaEl.value);
+      return Number.isFinite(area) && area > 0 ? flux / area : NaN;
     }
 
     function updateSourceControls(forcePreset) {
@@ -767,7 +832,7 @@
           chemicalFormula: "",
           atoms: presetAtoms || [],
           symmetryOperations: [],
-          spaceGroupSetting: "",
+          spaceGroupSetting: preset.spaceGroupSetting || "",
           atomSource: preset.name || "preset"
         });
         updateSpaceGroupSettingOptions();
@@ -775,7 +840,7 @@
         try {
           renderPeaks(calculatePeaks());
         } catch (error) {
-          peakTable.innerHTML = `<tr><td colspan="13">${error.message}</td></tr>`;
+          peakTable.innerHTML = `<tr><td colspan="14">${error.message}</td></tr>`;
           resultSummary.textContent = "Please fix the highlighted inputs and try again.";
         }
       });
@@ -784,10 +849,16 @@
     Object.values(latticeFieldMap).forEach((input) => {
       if (!input) return;
       input.addEventListener("input", () => {
+        if (input === latticeFieldMap.spaceGroup) invalidateSymmetryBasis();
         resetCrystalPresetSelect();
         if (input === latticeFieldMap.spaceGroup) updateSpaceGroupSettingOptions();
       });
     });
+
+    function invalidateSymmetryBasis() {
+      crystalMeta.atoms.forEach((atom) => { delete atom.wyckoffPositions; atom.wyckoff = ""; });
+      crystalMeta.symmetryOperations = [];
+    }
 
     if (window.SpaceGroupFields && typeof window.SpaceGroupFields.linkSpaceGroupFields === "function") {
       spaceGroupFieldsLink = window.SpaceGroupFields.linkSpaceGroupFields({
@@ -798,11 +869,11 @@
 
     function rhombohedralSettingForExtinctions(spaceGroup) {
       const raw = String(spaceGroup || "").toLowerCase();
-      if (/[:(]\s*r\s*\)?\s*$/.test(raw)) return "reverse";
+      if (/[:(]\s*r\s*\)?\s*$/.test(raw)) return "rhombohedral";
       if (/[:(]\s*h\s*\)?\s*$/.test(raw)) return "obverse";
       const setting = currentSpaceGroupSetting();
       if (!setting) return undefined;
-      return /(^|[-\s])p\s*3\*/i.test(setting) ? "reverse" : "obverse";
+      return /(^|[-\s])p\s*3\*/i.test(setting) ? "rhombohedral" : "obverse";
     }
 
     function getExtinctionContext(spaceGroup) {
@@ -975,16 +1046,27 @@
       return Number(value.toPrecision(digits)).toString();
     }
 
-    function estimateCountRate(intensity, sourceType, atoms) {
+    function estimateCountRate(intensity, sourceType, atoms, peak) {
       if (!window.ScatteringFactors || typeof window.ScatteringFactors.countRateFromIntensity !== "function") {
         return { rate: null, missingElements: [] };
       }
-      return window.ScatteringFactors.countRateFromIntensity(intensity, {
+      const options = {
         sourceType,
         atoms,
+        intensityMode,
+        cellVolumeAngstrom3: cellVolumeAngstrom3(parseNumber("a"), parseNumber("b"), parseNumber("c"), parseNumber("alpha"), parseNumber("beta"), parseNumber("gamma")),
+        wavelength: parseNumber("wavelength"),
+        twoTheta: peak.twoTheta,
+        collectionFraction: detectorCollectionEl.value,
+        detectorEfficiency: detectorEfficiencyEl.value,
+        transmission: sampleTransmissionEl.value,
+        rockingWidthDeg: rockingWidthEl.value,
         sampleMassMg: sampleMassEl ? sampleMassEl.value : "",
-        flux: incidentFluxEl ? incidentFluxEl.value : ""
-      });
+        flux: incidentFluxDensity()
+      };
+      const rate = window.ScatteringFactors.countRateFromIntensity(intensity, options);
+      const integrated = window.ScatteringFactors.integratedYieldFromIntensity(intensity, options);
+      return { ...rate, integratedYield: integrated.rate };
     }
 
     function parseNumber(id) {
@@ -1134,18 +1216,54 @@
       return String(Math.round(peak.gLength * 1e8));
     }
 
-    function assignPeakMultiplicities(peaks) {
-      const groups = new Map();
+    function peakOrbit(peak, basis, operations) {
+      return window.ScatteringFactors.reflectionOrbit([peak.h, peak.k, peak.l], operations)
+        .filter((hkl) => Math.abs(norm(reciprocalVector(hkl, basis)) - peak.gLength) < 1e-8);
+    }
+
+    function assignPeakMultiplicities(peaks, basis, operations) {
+      peaks.forEach((peak) => { peak.multiplicity = peakOrbit(peak, basis, operations).length; });
+    }
+
+    function preparePowderPeaks(peaks, basis, operations, atoms, options) {
+      const shells = new Map();
+      const families = new Set();
       peaks.forEach((peak) => {
-        const key = multiplicityKey(peak);
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(peak);
-      });
-      groups.forEach((group) => {
-        group.forEach((peak) => {
-          peak.multiplicity = group.length;
+        const orbit = peakOrbit(peak, basis, operations);
+        const familyKey = orbit.map((hkl) => hkl.join(",")).sort().join(";");
+        const shellKey = multiplicityKey(peak);
+        if (!shells.has(shellKey)) shells.set(shellKey, {
+          ...peak, multiplicity: 0, powderIntensitySum: atoms.length ? 0 : null,
+          powderNeutronIntensitySum: atoms.length ? 0 : null, powderFamilies: [], displayMembers: [],
+          missingElements: []
+        });
+        const shell = shells.get(shellKey);
+        shell.displayMembers.push(peak);
+        if (families.has(familyKey)) return;
+        families.add(familyKey);
+        shell.powderFamilies.push([peak.h, peak.k, peak.l]);
+        shell.multiplicity += orbit.length;
+        if (!atoms.length) return;
+        // Complete every orbit even when some members lie outside max-index.
+        // Coincident but inequivalent families contribute their own |F|².
+        orbit.forEach((hkl) => {
+          const factor = window.ScatteringFactors.structureFactor(...hkl, atoms, { ...options, s: peak.gLength / 2 });
+          const neutron = window.ScatteringFactors.structureFactor(...hkl, atoms, { sourceType: "neutron", s: peak.gLength / 2 });
+          shell.powderIntensitySum += factor.intensity;
+          shell.powderNeutronIntensitySum += neutron.intensity;
+          shell.missingElements.push(...factor.missingElements);
         });
       });
+      return [...shells.values()].map((shell) => {
+        const representative = shell.displayMembers.find((peak) => !Number.isFinite(peak.inPlane) || inPlanePasses(peak.inPlane));
+        if (!representative) return null;
+        const representativeOrbit = new Set(peakOrbit(representative, basis, operations).map((hkl) => hkl.join(",")));
+        const families = shell.powderFamilies.filter((hkl) => !representativeOrbit.has(hkl.join(",")));
+        return { ...representative, multiplicity: shell.multiplicity,
+          powderIntensitySum: shell.powderIntensitySum, powderNeutronIntensitySum: shell.powderNeutronIntensitySum,
+          powderFamilies: [[representative.h, representative.k, representative.l], ...families],
+          missingElements: [...new Set(shell.missingElements)] };
+      }).filter(Boolean);
     }
 
     function updatePeakIntensities(peaks, options) {
@@ -1153,12 +1271,14 @@
       peaks.forEach((peak) => {
         if (window.ScatteringFactors && peak.structureFactor) {
           peak.intensity = window.ScatteringFactors.intensityFromStructureFactor(peak.structureFactor, peak, options);
-          const rate = estimateCountRate(peak.intensity, options.sourceType, atomSites);
+          const rate = peak.missingElements.length ? { rate: null, missingElements: [] } : estimateCountRate(options.intensityMode === "powder" ? peak.powderIntensitySum : peak.structureFactor.intensity, options.sourceType, atomSites, peak);
           peak.countRate = rate.rate;
+          peak.integratedYield = rate.integratedYield;
           peak.countRateMissingElements = rate.missingElements || [];
         } else {
           peak.intensity = null;
           peak.countRate = null;
+          peak.integratedYield = null;
           peak.countRateMissingElements = [];
         }
       });
@@ -1210,7 +1330,7 @@
         if (!peak.neutronStructureFactor) return best;
         const intensity = window.ScatteringFactors.intensityFromStructureFactor(
           peak.neutronStructureFactor,
-          peak,
+          { ...peak, powderIntensitySum: peak.powderNeutronIntensitySum },
           { sourceType: "neutron", intensityMode }
         );
         return Math.max(best, Number.isFinite(intensity) ? intensity : 0);
@@ -1229,7 +1349,7 @@
       return hkl.map((value) => Math.round(value * 1e8)).join("|");
     }
 
-    function calculateMagneticPeaks(nuclearPeaks, inputs, basis) {
+    function calculateMagneticPeaks(nuclearPeaks, inputs, basis, overlapPeaks = nuclearPeaks) {
       if (!window.ScatteringFactors || !magneticPeakTable || !magneticSummary) return [];
       const magnetic = collectMagneticInputs();
       if (!magnetic.enabled) return [];
@@ -1237,7 +1357,7 @@
       const selectedAtoms = selectMagneticAtoms(allAtoms, magnetic.selector);
       if (!selectedAtoms.length || magnetic.moment <= 0) return [];
 
-      const overlapMap = nuclearOverlapMap(nuclearPeaks);
+      const overlapMap = nuclearOverlapMap(overlapPeaks);
       const nuclearMax = strongestNuclearNeutronIntensity(nuclearPeaks);
       const seen = new Set();
       const peaks = [];
@@ -1295,21 +1415,32 @@
         }
       }
 
-      // Group satellites by |Q| so powder intensities carry the same multiplicity
-      // weighting as the nuclear peaks; single-crystal mode leaves multiplicity at 1.
-      assignPeakMultiplicities(peaks);
-      peaks.forEach((peak) => {
+      let resultPeaks = peaks;
+      if (intensityMode === "powder") {
+        const shells = new Map();
+        peaks.forEach((peak) => {
+          const key = multiplicityKey(peak);
+          if (!shells.has(key)) shells.set(key, { ...peak, baseIntensity: 0, multiplicity: 0 });
+          const shell = shells.get(key);
+          shell.baseIntensity += peak.baseIntensity;
+          shell.multiplicity += 1;
+          shell.overlap = shell.overlap || peak.overlap;
+        });
+        resultPeaks = [...shells.values()];
+      }
+      resultPeaks.forEach((peak) => {
         const intensity = intensityMode === "powder"
-          ? peak.baseIntensity * Math.max(1, peak.multiplicity) * window.ScatteringFactors.powderCorrection(peak.twoTheta, "neutron")
+          ? peak.baseIntensity * window.ScatteringFactors.powderCorrection(peak.twoTheta, "neutron")
           : peak.baseIntensity;
         peak.intensity = intensity;
         peak.relativeToNuclearMax = nuclearMax > 0 ? intensity / nuclearMax : null;
-        const rate = estimateCountRate(intensity, "neutron", allAtoms);
+        const rate = estimateCountRate(peak.baseIntensity, "neutron", allAtoms, peak);
         peak.countRate = rate.rate;
+        peak.integratedYield = rate.integratedYield;
         peak.countRateMissingElements = rate.missingElements || [];
       });
 
-      return peaks.sort((a, b) => b.intensity - a.intensity || a.twoTheta - b.twoTheta).slice(0, 500);
+      return resultPeaks.sort((a, b) => b.intensity - a.intensity || a.twoTheta - b.twoTheta).slice(0, 500);
     }
 
     const AVOGADRO = 6.02214076e23;
@@ -1331,13 +1462,15 @@
       const atoms = expandedAtomSites();
       if (!atoms.length) return null;
       let molarMass = 0;
+      let missingMass = false;
       atoms.forEach((atom) => {
+        const occupancy = window.ScatteringFactors.occupancyValue(atom.occupancy);
+        if (occupancy === 0) return;
         const weight = weights[window.ScatteringFactors.sanitizeElement(atom.element)];
-        if (!weight) return;
-        const occupancy = atom.occupancy == null ? 1 : Number(atom.occupancy) || 1;
+        if (!weight) { missingMass = true; return; }
         molarMass += weight * occupancy;
       });
-      if (molarMass <= 0) return null;
+      if (missingMass || molarMass < 0) return null;
       return (molarMass / AVOGADRO) / (volumeAngstrom3 * 1e-24);
     }
 
@@ -1399,8 +1532,6 @@
               }) :
               null;
 
-            if (plane && !inPlanePasses(angles.inPlane)) continue;
-
             peaks.push({
               h,
               k,
@@ -1425,11 +1556,15 @@
         }
       }
 
-      assignPeakMultiplicities(peaks);
-      updatePeakIntensities(peaks, scatteringOptions);
-      const sortedPeaks = peaks.sort((a, b) => a.twoTheta - b.twoTheta || a.h - b.h || a.k - b.k || a.l - b.l);
+      const operations = window.ScatteringFactors.resolvedSymmetryOperations(inputs.spaceGroup, currentSpaceGroupSetting(), crystalMeta.symmetryOperations);
+      assignPeakMultiplicities(peaks, basis, operations);
+      const displayedPeaks = scatteringOptions.intensityMode === "powder"
+        ? preparePowderPeaks(peaks, basis, operations, atomSites, scatteringOptions)
+        : peaks.filter((peak) => !plane || inPlanePasses(peak.inPlane));
+      updatePeakIntensities(displayedPeaks, scatteringOptions);
+      const sortedPeaks = displayedPeaks.sort((a, b) => a.twoTheta - b.twoTheta || a.h - b.h || a.k - b.k || a.l - b.l);
       if (scatteringOptions.sourceType === "neutron") {
-        renderMagneticPeaks(calculateMagneticPeaks(sortedPeaks, inputs, basis));
+        renderMagneticPeaks(calculateMagneticPeaks(sortedPeaks, inputs, basis, peaks));
       }
       return sortedPeaks;
     }
@@ -1447,6 +1582,7 @@
       fImag: (peak) => peak.fImag,
       fMagnitude: (peak) => peak.fMagnitude,
       intensity: (peak) => peak.intensity,
+      integratedYield: (peak) => peak.integratedYield,
       countRate: (peak) => peak.countRate,
       inPlane: (peak) => peak.inPlane,
       outOfPlane: (peak) => peak.outOfPlane,
@@ -1463,6 +1599,7 @@
       fImag: "F_imag",
       fMagnitude: "|F|",
       intensity: "intensity",
+      integratedYield: "integrated yield",
       countRate: "estimated count rate",
       inPlane: "in-plane angle",
       outOfPlane: "out-of-plane angle",
@@ -1513,7 +1650,7 @@
       updateSortIndicators();
 
       if (!peaks.length) {
-        peakTable.innerHTML = "<tr><td colspan=\"13\">No allowed peaks found in this range.</td></tr>";
+        peakTable.innerHTML = "<tr><td colspan=\"14\">No allowed peaks found in this range.</td></tr>";
         resultSummary.textContent = "No peaks matched the current inputs and filters.";
         return;
       }
@@ -1522,7 +1659,7 @@
 
       peakTable.innerHTML = sorted.map((peak) => `
         <tr>
-          <td>(${peak.h} ${peak.k} ${peak.l})</td>
+          <td>${peak.powderFamilies ? peak.powderFamilies.map((hkl) => formatHKLTriplet(hkl)).join(" / ") : `(${peak.h} ${peak.k} ${peak.l})`}</td>
           <td>${format(peak.dSpacing)}</td>
           <td>${format(peak.twoTheta)}</td>
           <td>${format(peak.qLength)}</td>
@@ -1531,6 +1668,7 @@
           <td>${Number.isFinite(peak.fImag) ? format(peak.fImag, 5) : "—"}</td>
           <td>${Number.isFinite(peak.fMagnitude) ? format(peak.fMagnitude, 5) : "—"}</td>
           <td>${Number.isFinite(peak.intensity) ? format(peak.intensity, 5) : "—"}</td>
+          <td>${Number.isFinite(peak.integratedYield) ? format(peak.integratedYield, 5) : "—"}</td>
           <td>${Number.isFinite(peak.countRate) ? format(peak.countRate, 5) : "—"}</td>
           <td class="plane-column">${Number.isFinite(peak.inPlane) ? format(peak.inPlane) : "—"}</td>
           <td class="plane-column">${Number.isFinite(peak.outOfPlane) ? format(peak.outOfPlane) : "—"}</td>
@@ -1547,32 +1685,32 @@
           : "custom x-ray");
       const missingElements = [...new Set(peaks.flatMap((peak) => peak.missingElements || []))];
       const missingMassElements = [...new Set(peaks.flatMap((peak) => peak.countRateMissingElements || []))];
-      const missingNote = missingElements.length ? ` Missing neutron data for: ${missingElements.join(", ")}.` : "";
+      const missingNote = missingElements.length ? ` Missing ${options.sourceType === "neutron" ? "neutron lengths" : "X-ray coefficients or factors outside their fit range"} for: ${missingElements.join(", ")}.` : "";
       const massNote = missingMassElements.length ? ` Missing atomic masses for count-rate estimate: ${missingMassElements.join(", ")}.` : "";
-      resultSummary.textContent = `Showing ${peaks.length} allowed peaks with ${options.intensityMode === "powder" ? "powder" : "single-crystal"} ${sourceLabel} intensity, sorted by ${sortLabels[sortState.key]} (${directionLabel}). Click a column header to re-sort.${missingNote}${massNote}`;
+      resultSummary.textContent = `Showing ${peaks.length} allowed ${options.intensityMode === "powder" ? "powder shells (summed intensity; representative F)" : "peaks"} with ${sourceLabel} intensity, sorted by ${sortLabels[sortState.key]} (${directionLabel}). Click a column header to re-sort.${missingNote}${massNote}`;
     }
 
     function renderMagneticPeaks(peaks) {
       if (!magneticPeakTable || !magneticSummary) return;
       const magnetic = collectMagneticInputs();
       if (!magnetic.enabled) {
-        magneticPeakTable.innerHTML = "<tr><td colspan=\"12\">Enable the magnetic estimator to calculate neutron magnetic satellites.</td></tr>";
+        magneticPeakTable.innerHTML = "<tr><td colspan=\"13\">Enable the magnetic estimator to calculate neutron magnetic satellites.</td></tr>";
         magneticSummary.textContent = "Enable the magnetic estimator and load atom positions to estimate neutron magnetic satellites.";
         return;
       }
       if (!expandedAtomSites().length) {
-        magneticPeakTable.innerHTML = "<tr><td colspan=\"12\">Load atom positions before estimating magnetic peaks.</td></tr>";
+        magneticPeakTable.innerHTML = "<tr><td colspan=\"13\">Load atom positions before estimating magnetic peaks.</td></tr>";
         magneticSummary.textContent = "Magnetic estimates require atomic positions from a preset, CIF, or crystal-viewer config.";
         return;
       }
       const selectedAtoms = selectMagneticAtoms(expandedAtomSites(), magnetic.selector);
       if (!selectedAtoms.length) {
-        magneticPeakTable.innerHTML = "<tr><td colspan=\"12\">Choose an ordered site or element.</td></tr>";
+        magneticPeakTable.innerHTML = "<tr><td colspan=\"13\">Choose an ordered site or element.</td></tr>";
         magneticSummary.textContent = "No atoms match the selected magnetic site.";
         return;
       }
       if (!peaks.length) {
-        magneticPeakTable.innerHTML = "<tr><td colspan=\"12\">No magnetic satellites are accessible in the current HKL and wavelength range.</td></tr>";
+        magneticPeakTable.innerHTML = "<tr><td colspan=\"13\">No magnetic satellites are accessible in the current HKL and wavelength range.</td></tr>";
         magneticSummary.textContent = "No magnetic peaks matched the current propagation vector, max index, and wavelength.";
         return;
       }
@@ -1587,6 +1725,7 @@
           <td>${format(peak.fImag, 5)}</td>
           <td>${format(peak.fMagnitude, 5)}</td>
           <td>${format(peak.intensity, 5)}</td>
+          <td>${Number.isFinite(peak.integratedYield) ? format(peak.integratedYield, 5) : "—"}</td>
           <td>${Number.isFinite(peak.countRate) ? format(peak.countRate, 5) : "—"}</td>
           <td>${formatHKLTriplet(peak.parent)} ${peak.satellite}</td>
           <td>${Number.isFinite(peak.relativeToNuclearMax) ? format(peak.relativeToNuclearMax, 5) : "—"}</td>
@@ -1629,7 +1768,7 @@
         refreshExtinctionRulesFromInputs();
       } catch (error) {
         refreshExtinctionRulesFromInputs();
-        peakTable.innerHTML = `<tr><td colspan="13">${error.message}</td></tr>`;
+        peakTable.innerHTML = `<tr><td colspan="14">${error.message}</td></tr>`;
         resultSummary.textContent = "Please fix the highlighted inputs and try again.";
       }
     }
@@ -1658,6 +1797,8 @@
     document.querySelectorAll("[data-intensity-mode]").forEach((button) => {
       button.addEventListener("click", () => {
         intensityMode = button.dataset.intensityMode || "single";
+        document.getElementById("rocking-width-field").hidden = intensityMode === "powder";
+        updateColumnUnits();
         document.querySelectorAll("[data-intensity-mode]").forEach((candidate) => {
           candidate.classList.toggle("active", candidate === button);
         });
@@ -1675,12 +1816,19 @@
       magneticKlEl,
       magneticFormFactorEl,
       sampleMassEl,
-      incidentFluxEl
+      incidentFluxEl,
+      beamAreaEl,
+      detectorCollectionEl,
+      detectorEfficiencyEl,
+      sampleTransmissionEl,
+      rockingWidthEl
     ].forEach((input) => {
       if (!input) return;
       input.addEventListener("input", recalculateSafely);
       input.addEventListener("change", recalculateSafely);
     });
+
+    incidentFluxModeEl.addEventListener("change", () => { updateFluxControls(); recalculateSafely(); });
 
     form.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -1741,7 +1889,7 @@
       try {
         renderPeaks(calculatePeaks());
       } catch (error) {
-        peakTable.innerHTML = `<tr><td colspan="13">${error.message}</td></tr>`;
+        peakTable.innerHTML = `<tr><td colspan="14">${error.message}</td></tr>`;
         resultSummary.textContent = "Please fix the highlighted inputs and try again.";
       }
       saveState();
@@ -1809,7 +1957,7 @@
       try {
         renderPeaks(calculatePeaks());
       } catch (error) {
-        peakTable.innerHTML = `<tr><td colspan="13">${error.message}</td></tr>`;
+        peakTable.innerHTML = `<tr><td colspan="14">${error.message}</td></tr>`;
         resultSummary.textContent = "Please fix the highlighted inputs and try again.";
       }
     }
@@ -1901,11 +2049,14 @@
 
     if (spaceGroupSettingEl) {
       spaceGroupSettingEl.addEventListener("change", () => {
+        invalidateSymmetryBasis();
         crystalMeta.spaceGroupSetting = spaceGroupSettingEl.value || "";
+        renderAtomicBasisEditor();
+        updateMagneticSiteOptions();
         try {
           renderPeaks(calculatePeaks());
         } catch (error) {
-          peakTable.innerHTML = `<tr><td colspan="13">${error.message}</td></tr>`;
+          peakTable.innerHTML = `<tr><td colspan="14">${error.message}</td></tr>`;
           resultSummary.textContent = "Please fix the highlighted inputs and try again.";
         }
       });
@@ -2106,6 +2257,7 @@
         const state = {
           fields: collectFormFields(),
           intensityMode,
+          schemaVersion: 2,
           crystalMeta: {
             presetId: crystalMeta.presetId,
             structureModel: crystalMeta.structureModel,
@@ -2163,6 +2315,14 @@
         crystalMeta.symmetryOperations = Array.isArray(meta.symmetryOperations) ? meta.symmetryOperations : [];
         crystalMeta.spaceGroupSetting = meta.spaceGroupSetting || "";
         crystalMeta.atomSource = meta.atomSource || "";
+        // Refresh untouched presets saved before the corrected graphite basis
+        // and explicit diamond origin setting were introduced.
+        const preset = !state.schemaVersion && getCrystalPreset(crystalMeta.presetId);
+        if (preset) {
+          crystalMeta.atoms = atomsForCrystalPreset(preset).map(normalizeEditableAtom);
+          crystalMeta.spaceGroupSetting = preset.spaceGroupSetting || "";
+          if (state.fields) state.fields["spacegroup-setting"] = crystalMeta.spaceGroupSetting;
+        }
       }
 
       // Defer the dynamically populated selects until their options exist.
@@ -2182,6 +2342,8 @@
       }
 
       updateSourceControls(false);
+      updateFluxControls();
+      document.getElementById("rocking-width-field").hidden = intensityMode === "powder";
       updateMagneticSiteOptions();
       if (deferred["magnetic-site"] !== undefined && magneticSiteEl &&
           [...magneticSiteEl.options].some((option) => option.value === deferred["magnetic-site"])) {
@@ -2211,6 +2373,7 @@
     }
 
     updateSourceControls(true);
+    updateFluxControls();
     const loadedFromHash = importViewerStateFromHash();
     const restoredFromStorage = !loadedFromHash && restoreSavedState();
     if (!loadedFromHash && !restoredFromStorage) {

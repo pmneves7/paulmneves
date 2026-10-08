@@ -66,7 +66,7 @@
 
     let rhombohedralSetting = "obverse";
     if (/:r\b/i.test(trimmed) || /\(r\)/i.test(trimmed)) {
-      rhombohedralSetting = "reverse";
+      rhombohedralSetting = "rhombohedral";
     } else if (/:h\b/i.test(trimmed) || /\(h\)/i.test(trimmed)) {
       rhombohedralSetting = "obverse";
     }
@@ -93,7 +93,7 @@
   }
 
   function normalizeExtinctionOptions(options) {
-    if (options === "obverse" || options === "reverse") {
+    if (["obverse", "reverse", "rhombohedral"].includes(options)) {
       return { rhombohedralSetting: options };
     }
     if (options && typeof options === "object") {
@@ -182,6 +182,11 @@
           }
         };
       case "R":
+        if (rhombohedralSetting === "rhombohedral") return {
+          id: "centering-r-primitive",
+          label: "Primitive rhombohedral axes: no additional lattice absences",
+          test() { return true; }
+        };
         return rhombohedralSetting === "reverse"
           ? {
             id: "centering-r-reverse",
@@ -394,7 +399,7 @@
   function resolveExtinctionContext(spaceGroupInput, options) {
     const opts = normalizeExtinctionOptions(options);
     const context = parseSpaceGroupInput(spaceGroupInput);
-    if (opts.rhombohedralSetting === "obverse" || opts.rhombohedralSetting === "reverse") {
+    if (["obverse", "reverse", "rhombohedral"].includes(opts.rhombohedralSetting)) {
       context.rhombohedralSetting = opts.rhombohedralSetting;
     }
     context.applyScrewGlideRules = !!opts.applyScrewGlideRules;
@@ -419,7 +424,7 @@
   // the meaningful case is the rhombohedral obverse/reverse pair, where a twin
   // domain can fill in reflections that are absent in the chosen setting.
   function twinExtinctionAlternatives(context) {
-    if (!context || context.centering !== "R") return [];
+    if (!context || context.centering !== "R" || context.rhombohedralSetting === "rhombohedral") return [];
     const condition = {
       obverse: "−h + k + l = 3n",
       reverse: "h − k + l = 3n"

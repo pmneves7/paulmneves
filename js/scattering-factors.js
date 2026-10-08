@@ -34,7 +34,7 @@
   const CLASSICAL_ELECTRON_RADIUS_CM = 2.8179403262e-13;
 
   const NEUTRON_COHERENT_LENGTHS_FM = {
-    H: [-3.7390, 0], He: [3.26, 0], Li: [-1.90, 0], Be: [7.79, 0], B: [5.30, -0.213],
+    H: [-3.7390, 0], D: [6.671, 0], He: [3.26, 0], Li: [-1.90, 0], Be: [7.79, 0], B: [5.30, -0.213],
     C: [6.6460, 0], N: [9.36, 0], O: [5.803, 0], F: [5.654, 0], Ne: [4.566, 0],
     Na: [3.63, 0], Mg: [5.375, 0], Al: [3.449, 0], Si: [4.1491, 0], P: [5.13, 0],
     S: [2.847, 0], Cl: [9.5770, 0], Ar: [1.909, 0], K: [3.67, 0], Ca: [4.70, 0],
@@ -56,7 +56,7 @@
   };
 
   const ATOMIC_WEIGHTS = {
-    H: 1.008, He: 4.0026, Li: 6.94, Be: 9.0122, B: 10.81, C: 12.011, N: 14.007, O: 15.999,
+    H: 1.008, D: 2.0141, He: 4.0026, Li: 6.94, Be: 9.0122, B: 10.81, C: 12.011, N: 14.007, O: 15.999,
     F: 18.998, Ne: 20.180, Na: 22.990, Mg: 24.305, Al: 26.982, Si: 28.085, P: 30.974,
     S: 32.06, Cl: 35.45, Ar: 39.948, K: 39.098, Ca: 40.078, Sc: 44.956, Ti: 47.867,
     V: 50.942, Cr: 51.996, Mn: 54.938, Fe: 55.845, Co: 58.933, Ni: 58.693, Cu: 63.546,
@@ -72,10 +72,17 @@
   };
 
   function sanitizeElement(value) {
+    if (/^(?:2H|H2|D)(?:\d+)?$/i.test(String(value || "").trim())) return "D";
     const match = String(value || "X").trim().match(/[A-Za-z]{1,2}/);
     if (!match) return "X";
     const raw = match[0];
     return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+  }
+
+  function occupancyValue(value) {
+    if (value == null || value === "") return 1;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : 1;
   }
 
   function wrapFraction(value) {
@@ -91,7 +98,7 @@
       fractX: wrapFraction(atom.fractX),
       fractY: wrapFraction(atom.fractY),
       fractZ: wrapFraction(atom.fractZ),
-      occupancy: atom.occupancy == null ? 1 : Number(atom.occupancy) || 1,
+      occupancy: occupancyValue(atom.occupancy),
       wyckoff: atom.wyckoff || atom.wyckoffSymbol || "",
       wyckoffPositions: Array.isArray(atom.wyckoffPositions) ?
         atom.wyckoffPositions.map((position) => ({
@@ -163,51 +170,39 @@
 
   function expandAtomSites(crystal) {
     const atoms = (crystal.atoms || []).map(normalizeAtom);
-    if (!isP1SpaceGroup(crystal.spaceGroup) && atoms.some((atom) => Array.isArray(atom.wyckoffPositions) && atom.wyckoffPositions.length)) {
-      return atoms.flatMap((atom) => {
-        if (!Array.isArray(atom.wyckoffPositions) || !atom.wyckoffPositions.length) return [atom];
-        return atom.wyckoffPositions.map((position, index) => ({
-          ...atom,
-          label: `${atom.label}_${index + 1}`,
-          fractX: position.fractX,
-          fractY: position.fractY,
-          fractZ: position.fractZ,
-          sourceLabel: atom.label
-        }));
-      });
-    }
-
     const operations = resolvedSymmetryOperations(
       crystal.spaceGroup,
       crystal.spaceGroupSetting || "",
       crystal.symmetryOperations
     );
 
-    if (operations.length) {
+    return atoms.flatMap((atom) => {
+      // A stored orbit is usable only while it contains the editable site.
+      // Each independent site gets its own orbit, including coincident sites
+      // with separate occupancies (e.g. a disordered atomic basis).
+      const cached = !isP1SpaceGroup(crystal.spaceGroup) && atom.wyckoffPositions &&
+        atom.wyckoffPositions.some((position) => symmetryKey({ ...atom, ...position }) === symmetryKey(atom));
+      const positions = cached ? atom.wyckoffPositions : operations.length
+        ? operations.map((operation) => applySymmetryOperation(operation, atom)).filter(Boolean)
+        : [atom];
       const seen = new Set();
       const expanded = [];
-      atoms.forEach((atom) => {
-        operations.forEach((operation) => {
-          const coords = applySymmetryOperation(operation, atom);
-          if (!coords) return;
-          const expandedAtom = {
-            ...atom,
-            fractX: coords.fractX,
-            fractY: coords.fractY,
-            fractZ: coords.fractZ,
-            sourceLabel: atom.label
-          };
-          const key = symmetryKey(expandedAtom);
-          if (seen.has(key)) return;
-          seen.add(key);
-          expandedAtom.label = `${atom.label}_${expanded.length + 1}`;
-          expanded.push(expandedAtom);
-        });
+      positions.forEach((coords) => {
+        const expandedAtom = {
+          ...atom,
+          fractX: coords.fractX,
+          fractY: coords.fractY,
+          fractZ: coords.fractZ,
+          sourceLabel: atom.label
+        };
+        const key = symmetryKey(expandedAtom);
+        if (seen.has(key)) return;
+        seen.add(key);
+        expandedAtom.label = positions.length === 1 ? atom.label : `${atom.label}_${expanded.length + 1}`;
+        expanded.push(expandedAtom);
       });
-      return expanded.length > atoms.length ? expanded : atoms;
-    }
-
-    return atoms;
+      return expanded;
+    });
   }
 
   function neutronAtomicFactor(element) {
@@ -217,20 +212,18 @@
     return { re: value[0], im: value[1] || 0, missing: false, unit: "fm" };
   }
 
-  function xrayNeutralAtomApproximation(symbol, s) {
-    const z = ATOMIC_NUMBERS[symbol];
-    if (!z) return null;
-    const compactness = Math.max(1, Math.pow(z, 1 / 3));
-    const s2 = Math.max(0, Number(s) || 0) ** 2;
-    const broad = 0.22 * Math.exp(-1.2 * s2 / compactness);
-    const mid = 0.42 * Math.exp(-8.0 * s2 / compactness);
-    const tight = 0.36 * Math.exp(-35.0 * s2 / compactness);
-    return z * (broad + mid + tight);
+  function xrayNeutralAtomFactor(symbol, s) {
+    const coefficients = (global.CromerMannCoefficients || {})[symbol];
+    const q = Number(s == null ? 0 : s);
+    if (!coefficients || !Number.isFinite(q) || q < 0 || q > 2) return null;
+    let f0 = coefficients[8];
+    for (let i = 0; i < 8; i += 2) f0 += coefficients[i] * Math.exp(-coefficients[i + 1] * q * q);
+    return f0;
   }
 
   function xrayAtomicFactor(element, s) {
     const symbol = sanitizeElement(element);
-    const f0 = xrayNeutralAtomApproximation(symbol, s);
+    const f0 = xrayNeutralAtomFactor(symbol, s);
     if (f0 == null) return { re: 0, im: 0, missing: true, unit: "electrons" };
     return { re: f0, im: 0, missing: false, unit: "electrons" };
   }
@@ -246,9 +239,10 @@
     let imag = 0;
 
     atoms.forEach((atom) => {
+      const occupancy = occupancyValue(atom.occupancy);
+      if (occupancy === 0) return;
       const factor = atomicScatteringFactor(atom.element, options);
       if (factor.missing) missing.add(sanitizeElement(atom.element));
-      const occupancy = atom.occupancy == null ? 1 : Number(atom.occupancy) || 1;
       const phase = 2 * Math.PI * (
         h * Number(atom.fractX || 0) +
         k * Number(atom.fractY || 0) +
@@ -280,10 +274,41 @@
     return lorentz * (1 + cosTwoTheta * cosTwoTheta) / 2;
   }
 
+  function reflectionOrbit(hkl, operations) {
+    const members = new Map();
+    const add = (indices) => {
+      for (const sign of [1, -1]) {
+        const point = indices.map((value) => sign * value || 0);
+        members.set(point.join(","), point);
+      }
+    };
+    add(hkl);
+    (operations || []).forEach((operation) => {
+      const rows = String(operation).split(",");
+      if (rows.length !== 3) return;
+      const matrix = rows.map((row) => {
+        const coefficients = [0, 0, 0];
+        const source = row.replace(/\s+/g, "");
+        const terms = (/^[+-]/.test(source) ? source : `+${source}`).match(/[+-][^+-]+/g) || [];
+        terms.forEach((term) => {
+          const match = term.slice(1).match(/^(\d*(?:\.\d+)?)\*?([xyz])$/);
+          if (match) coefficients["xyz".indexOf(match[2])] += (term[0] === "-" ? -1 : 1) * (match[1] ? Number(match[1]) : 1);
+        });
+        return coefficients;
+      });
+      // Reciprocal indices transform by R^T. The full group contains inverses;
+      // translations do not affect the orbit. Include Friedel partners, but
+      // evaluate each separately so complex neutron lengths remain correct.
+      add([0, 1, 2].map((column) => matrix.reduce((sum, row, index) => sum + row[column] * hkl[index], 0)));
+    });
+    return [...members.values()];
+  }
+
   function intensityFromStructureFactor(factor, peak, options) {
     if (!factor) return null;
     if (options.intensityMode === "powder") {
-      return factor.intensity * Math.max(1, Number(peak.multiplicity) || 1) * powderCorrection(peak.twoTheta, options.sourceType);
+      const sum = peak.powderIntensitySum == null ? factor.intensity * Math.max(1, Number(peak.multiplicity) || 1) : peak.powderIntensitySum;
+      return sum * powderCorrection(peak.twoTheta, options.sourceType);
     }
     return factor.intensity;
   }
@@ -292,13 +317,14 @@
     if (!Array.isArray(atoms) || !atoms.length) return { massG: null, missingElements: [] };
     const missing = new Set();
     const molarMass = atoms.reduce((sum, atom) => {
+      const occupancy = occupancyValue(atom.occupancy);
+      if (occupancy === 0) return sum;
       const symbol = sanitizeElement(atom.element);
       const weight = ATOMIC_WEIGHTS[symbol];
       if (!weight) {
         missing.add(symbol);
         return sum;
       }
-      const occupancy = atom.occupancy == null ? 1 : Number(atom.occupancy) || 1;
       return sum + weight * occupancy;
     }, 0);
     return {
@@ -307,23 +333,53 @@
     };
   }
 
-  function countRateFromIntensity(intensity, options) {
+  function integratedYieldFromIntensity(intensity, options) {
     const flux = Number(options.flux);
     const sampleMassMg = Number(options.sampleMassMg);
     const unitCellMass = unitCellMassG(options.atoms || []);
-    if (!Number.isFinite(intensity) || intensity <= 0 || !Number.isFinite(flux) || flux <= 0 ||
-      !Number.isFinite(sampleMassMg) || sampleMassMg <= 0 || !unitCellMass.massG) {
+    const volume = Number(options.cellVolumeAngstrom3) * 1e-24;
+    const wavelength = Number(options.wavelength) * 1e-8;
+    const theta = Number(options.twoTheta) * Math.PI / 360;
+    const powder = options.intensityMode === "powder";
+    if (!Number.isFinite(intensity) || intensity < 0 || !Number.isFinite(flux) || flux <= 0 ||
+      !Number.isFinite(sampleMassMg) || sampleMassMg <= 0 || !Number.isFinite(volume) || !(volume > 0) || !Number.isFinite(wavelength) || !(wavelength > 0) ||
+      !(theta > 0 && theta < Math.PI / 2)) {
       return { rate: null, missingElements: unitCellMass.missingElements };
     }
+    if (unitCellMass.missingElements.length) return { rate: null, missingElements: unitCellMass.missingElements };
+    if (intensity === 0) return { rate: 0, missingElements: [] };
+    if (!unitCellMass.massG) return { rate: null, missingElements: [] };
     const sampleMassG = sampleMassMg / 1000;
     const unitCells = sampleMassG / unitCellMass.massG;
     const crossSectionCm2 = options.sourceType === "xray"
       ? intensity * CLASSICAL_ELECTRON_RADIUS_CM * CLASSICAL_ELECTRON_RADIUS_CM
       : intensity * FM2_TO_CM2;
     return {
-      rate: flux * unitCells * crossSectionCm2,
+      // ILL Neutron Data Booklet, §2.9.4 equations (3),(4): V*N^2*λ^3*|F|^2.
+      // N=1/Vcell, V=Ncells*Vcell. Powder is integrated over the complete
+      // Debye ring/peak; single crystal is integrated over an equatorial omega
+      // rocking angle, giving counts/s * rad. The supplied intensity is the uncorrected
+      // |F|² (or sum of |F|² for a powder shell), not the display LP intensity.
+      rate: flux * unitCells / volume * wavelength ** 3 * crossSectionCm2 *
+        (powder ? 1 / (4 * Math.sin(theta)) : 1 / Math.sin(2 * theta)) *
+        (options.sourceType === "xray" ? (1 + Math.cos(2 * theta) ** 2) / 2 : 1),
       missingElements: unitCellMass.missingElements
     };
+  }
+
+  function countRateFromIntensity(intensity, options) {
+    const integrated = integratedYieldFromIntensity(intensity, options);
+    if (integrated.rate == null) return integrated;
+    // Optional experimental corrections default to ideal complete collection.
+    const fractions = [options.collectionFraction, options.detectorEfficiency, options.transmission]
+      .map((value) => value == null || value === "" ? 1 : Number(value));
+    const powder = options.intensityMode === "powder";
+    const rockingWidth = Number(options.rockingWidthDeg) * Math.PI / 180;
+    if (fractions.some((value) => !Number.isFinite(value) || value < 0 || value > 1) ||
+      (!powder && !(rockingWidth > 0 && rockingWidth <= Math.PI))) {
+      return { rate: null, missingElements: integrated.missingElements };
+    }
+    return { ...integrated, rate: integrated.rate * fractions.reduce((product, value) => product * value, 1) / (powder ? 1 : rockingWidth) };
   }
 
   function magneticFormFactorApproximation(element, s) {
@@ -340,7 +396,7 @@
     let imag = 0;
 
     atoms.forEach((atom) => {
-      const occupancy = atom.occupancy == null ? 1 : Number(atom.occupancy) || 1;
+      const occupancy = occupancyValue(atom.occupancy);
       const formFactor = options.useFormFactor === false ? 1 : magneticFormFactorApproximation(atom.element, options.s);
       const amplitude = occupancy * moment * NEUTRON_MAGNETIC_SCATTERING_LENGTH_FM_PER_MUB * formFactor;
       const phase = 2 * Math.PI * (
@@ -371,9 +427,13 @@
     countRateFromIntensity,
     expandAtomSites,
     intensityFromStructureFactor,
+    integratedYieldFromIntensity,
     magneticFormFactorApproximation,
     magneticStructureFactor,
+    occupancyValue,
     powderCorrection,
+    reflectionOrbit,
+    resolvedSymmetryOperations,
     sanitizeElement,
     structureFactor
   };

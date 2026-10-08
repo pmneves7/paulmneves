@@ -16,6 +16,7 @@ const CRYSTAL_PRESET_GROUPS = [
         beta: 90,
         gamma: 90,
         spaceGroup: "Fd-3m",
+        spaceGroupSetting: "F 4d 2 3 -1d",
         structureModel: "diamond"
       },
       {
@@ -28,6 +29,7 @@ const CRYSTAL_PRESET_GROUPS = [
         beta: 90,
         gamma: 90,
         spaceGroup: "Fd-3m",
+        spaceGroupSetting: "F 4d 2 3 -1d",
         structureModel: "diamond"
       }
     ]
@@ -286,17 +288,23 @@ function atomsForCrystalPreset(preset) {
     ];
   }
   if (preset.id === "graphite") {
+    // AB stacking: Trucano & Chen, Nature 258, 136 (1975).
     return [
       crystalPresetWyckoffAtom(
         "C1",
         "C",
+        [0, 0, 0.25],
+        "2b",
+        crystalPresetDirectPositions([[0, 0, 0.25], [0, 0, 0.75]])
+      ),
+      crystalPresetWyckoffAtom(
+        "C2",
+        "C",
         [1 / 3, 2 / 3, 0.25],
-        "4f",
+        "2c",
         crystalPresetDirectPositions([
           [1 / 3, 2 / 3, 0.25],
-          [2 / 3, 1 / 3, 0.75],
-          [2 / 3, 1 / 3, 0.25],
-          [1 / 3, 2 / 3, 0.75]
+          [2 / 3, 1 / 3, 0.75]
         ])
       )
     ];

@@ -6,7 +6,7 @@ const vm = require("node:vm");
 const sandbox = { window: {} };
 vm.createContext(sandbox);
 
-["crystal-presets.js", "scattering-factors.js"].forEach((file) => {
+["crystal-presets.js", "cromer-mann-data.js", "scattering-factors.js"].forEach((file) => {
   const filePath = path.join(__dirname, file);
   vm.runInContext(fs.readFileSync(filePath, "utf8"), sandbox, { filename: filePath });
 });
@@ -52,7 +52,9 @@ const rate = factors.countRateFromIntensity(f111.intensity, {
   sourceType: "neutron",
   atoms: expanded,
   sampleMassMg: 10,
-  flux: 1e6
+  flux: 1e6,
+  cellVolumeAngstrom3: 5.431 ** 3, wavelength: 1.54, twoTheta: 28,
+  collectionFraction: 0.5, detectorEfficiency: 0.8, transmission: 1, rockingWidthDeg: 1
 });
 assert.ok(rate.rate > 0);
 assert.equal(rate.missingElements.length, 0);
@@ -61,6 +63,8 @@ const xrayRate = factors.countRateFromIntensity(f111.intensity, {
   sourceType: "xray",
   atoms: expanded,
   sampleMassMg: 10,
-  flux: 1e6
+  flux: 1e6,
+  cellVolumeAngstrom3: 5.431 ** 3, wavelength: 1.54, twoTheta: 28,
+  collectionFraction: 0.5, detectorEfficiency: 0.8, transmission: 1, rockingWidthDeg: 1
 });
 assert.ok(xrayRate.rate > rate.rate);

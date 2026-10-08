@@ -305,7 +305,7 @@
       fractX: Number(atom[2]) || 0,
       fractY: Number(atom[3]) || 0,
       fractZ: Number(atom[4]) || 0,
-      occupancy: atom[5] == null || atom[5] === "" ? 1 : Number(atom[5]) || 1,
+      occupancy: atom[5] == null || atom[5] === "" || !Number.isFinite(Number(atom[5])) ? 1 : Number(atom[5]),
       wyckoff: atom[6] || "",
       wyckoffPositions: Array.isArray(atom[7]) ?
         atom[7].map((point) => ({
@@ -606,7 +606,7 @@
       fractX: wrapFraction(Number(atom.fractX) || 0),
       fractY: wrapFraction(Number(atom.fractY) || 0),
       fractZ: wrapFraction(Number(atom.fractZ) || 0),
-      occupancy: atom.occupancy == null ? 1 : Number(atom.occupancy) || 1,
+      occupancy: atom.occupancy == null || atom.occupancy === "" || !Number.isFinite(Number(atom.occupancy)) ? 1 : Number(atom.occupancy),
       wyckoff: atom.wyckoff || "",
       wyckoffPositions: Array.isArray(atom.wyckoffPositions) ?
         atom.wyckoffPositions.map((position) => ({
