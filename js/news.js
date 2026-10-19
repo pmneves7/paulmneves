@@ -13,7 +13,7 @@ const NEWS_ITEMS = [
   },
   {
     date: "April 2026",
-    content: `<em>Cascade of Spin Moiré Superlattices with In-Plane Field in Triangular Lattice Semimetal EuAg<sub>4</sub>Sb<sub>2</sub></em> published in <a href="https://doi.org/10.1021/acsnano.5c18732"><em>ACS Nano</em></a> and featured on the <a href="https://pubs.acs.org/toc/ancac3/20/19">journal cover</a>.`,
+    content: `<a href="https://doi.org/10.1021/acsnano.5c18732"><em>Cascade of Spin Moiré Superlattices with In-Plane Field in Triangular Lattice Semimetal EuAg<sub>4</sub>Sb<sub>2</sub></em></a> published in <em>ACS Nano</em> and featured on the <a href="https://pubs.acs.org/toc/ancac3/20/19">journal cover</a>.`,
   },
   {
     date: "April 2026",
