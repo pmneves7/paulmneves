@@ -33,7 +33,7 @@ const NEWS_ITEMS = [
   },
   {
     date: "May 2024",
-    content: `Congratulations to Ryan McTigue on winning a <a href="https://physics.mit.edu/news/eleven-from-mit-awarded-2024-fulbright-fellowships/">Fulbright Fellowship</a>! It was a pleasure working with Ryan on crystal growth and measurement during his undergraduate studies at MIT.`,
+    content: `Congratulations to Ryan McTigue on winning a <a href="https://physics.mit.edu/news/eleven-from-mit-awarded-2024-fulbright-fellowships/">Fulbright Fellowship</a>! It was a pleasure working with Ryan on crystal growth and measurement during his undergraduate studies at MIT. Good luck at Princeton working with Leslie Schoop!`,
   },
   {
     date: "April 2024",
