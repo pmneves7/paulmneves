@@ -1,7 +1,7 @@
 const NEWS_ITEMS = [
   {
     date: "October 2026",
-    content: `Thank you to the Swiss Neutron Science Society for honoring me with the <a href="https://www.neutronscience.ch/young_scientist_prize/winners">2026 Young Scientist Award</a> for my thesis work, partly undertaken at the Swiss Spallation Neutron Source!`,
+    content: `Thank you to the Swiss Neutron Science Society for honoring me with the <a href="https://www.neutronscience.ch/young_scientist_prize/winners">2026 Young Scientist Award</a> for my thesis work, partly undertaken at the Swiss Spallation Neutron Source! See the <a href="https://lnkd.in/p/eEPYZUdf">LinkedIn announcement</a>.`,
   },
   {
     date: "June 2026",
