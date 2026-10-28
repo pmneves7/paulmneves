@@ -10,7 +10,7 @@
   <title>Laue analysis | Paul M. Neves</title>
   <link rel="canonical" href="https://paulmneves.com/tools/laue-analysis.html" />
   <link rel="icon" type="image/png" href="../media/favicon.png" />
-  <link rel="stylesheet" href="../css/site.css" />
+  <link rel="stylesheet" href="../css/site.css?v=20261028" />
 </head>
 <body class="laue-page">
   <header>
@@ -404,7 +404,7 @@
           <details class="tool-collapsible" id="laue-refinement-collapsible">
             <summary class="tool-collapsible-summary">6. Orientation refinement</summary>
             <div class="tool-collapsible-body">
-          <p class="tool-note">Local least-squares fit from the current approximate orientation. Add or auto-detect peaks (they index automatically), then refine sample/detector parameters.</p>
+          <p class="tool-note">Local fit from the current approximate orientation. Add or auto-detect well-separated spots and check their index labels first. Index assignments stay fixed during the fit. Start with sample angles; add detector parameters only when enough spots constrain them.</p>
           <div class="laue-check-row">
             <label><input type="checkbox" id="laue-refine-omega" checked /> Sample Ω</label>
             <label><input type="checkbox" id="laue-refine-chi" checked /> Sample χ</label>
@@ -415,17 +415,29 @@
             <label><input type="checkbox" id="laue-refine-det-omega" /> Detector Ω</label>
             <label><input type="checkbox" id="laue-refine-det-chi" /> Detector χ</label>
           </div>
+          <div class="tool-grid">
+            <div class="laue-check-row">
+              <label><input type="checkbox" id="laue-refine-robust" checked /> Reduce influence of outliers</label>
+            </div>
+            <div class="tool-field">
+              <label for="laue-refine-outlier-scale">Outlier tolerance (px)</label>
+              <input type="number" id="laue-refine-outlier-scale" min="0.01" step="any" value="2" />
+            </div>
+          </div>
+          <p class="tool-note">Residuals larger than the tolerance receive less weight. This helps with isolated bad matches; it does not replace correct indexing. Reported RMS is the 2D distance between observed and predicted spots.</p>
           <div class="laue-action-row">
             <button type="button" class="button primary" id="laue-refine-btn">Run refinement</button>
+            <button type="button" class="button secondary" id="laue-refine-cancel-btn" hidden>Cancel refinement</button>
             <button type="button" class="button secondary" id="laue-refine-undo-btn" disabled>Undo refinement</button>
           </div>
           <p class="tool-note" id="laue-refine-result" aria-live="polite"></p>
 
             <h3 class="laue-subheading">Ideal orientation calculator</h3>
             <p class="tool-note">
-              Enter the HKL you placed on the direct beam (lab +x) and a second reflection that should
-              lie in the plane perpendicular to the beam (not the detector x axis). Defaults 0 0 1 and
-              1 0 0 are for a cubic crystal after “Align to beam” on 0 0 1.
+              Enter the reciprocal direction (HKL) placed along the direct beam (lab +x), and a nonparallel peak
+              that should lie in the same horizontal scattering plane as the beam (lab x–y, with vertical component z = 0).
+              The two HKLs need not be perpendicular. Either horizontal side is accepted; the smaller correction is reported.
+              These lab axes are independent of detector tilt and image flips.
             </p>
             <div class="tool-grid">
               <div class="tool-field">
@@ -433,7 +445,7 @@
                 <input type="text" id="laue-target-beam-hkl" value="0 0 1" placeholder="h k l" />
               </div>
               <div class="tool-field">
-                <label for="laue-target-horiz-hkl">Horizontal-plane direction (h k l)</label>
+                <label for="laue-target-horiz-hkl">Peak in horizontal scattering plane (h k l)</label>
                 <input type="text" id="laue-target-horiz-hkl" value="1 0 0" placeholder="h k l" />
               </div>
             </div>
@@ -515,8 +527,8 @@
   <script src="../js/spacegroup-engine.js"></script>
   <script src="../js/spacegroup-fields.js"></script>
   <script src="../js/scattering-extinctions.js"></script>
-  <script src="../js/laue-math.js"></script>
+  <script src="../js/laue-math.js?v=20261028-3"></script>
   <script src="../js/laue-formats.js?v=20261008-2"></script>
-  <script src="../js/laue-analysis.js?v=20261008-2"></script>
+  <script src="../js/laue-analysis.js?v=20261028-3"></script>
 </body>
 </html>

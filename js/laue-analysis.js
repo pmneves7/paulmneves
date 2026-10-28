@@ -1105,7 +1105,7 @@
 
   let spaceGroupFieldsLink = null;
 
-  function updatePredictions() {
+  function updatePredictions(options) {
     if (spaceGroupFieldsLink) spaceGroupFieldsLink.sync();
     if (!state.displayData) return;
     syncBlankDetectorShape();
@@ -1147,7 +1147,7 @@
     } catch (err) {
       setStatus(err.message);
     }
-    rematchObservedPeaksIfAny();
+    if (options?.rematch !== false) rematchObservedPeaksIfAny();
     redraw();
   }
 
@@ -1533,6 +1533,11 @@
       instrument: readInstrument(),
       transform: state.transform,
       display: readDisplaySettings(),
+      refinement: readRefinementSettings(),
+      idealOrientation: {
+        beam: document.getElementById("laue-target-beam-hkl").value,
+        horizontal: document.getElementById("laue-target-horiz-hkl").value
+      },
       corrections: readCorrections(),
       overlay: readOverlaySettings(),
       view: state.view,
@@ -1544,6 +1549,18 @@
 
   function loadConfigFromObject(obj) {
     if (!obj) return;
+    if (obj.refinement) {
+      const ids = ["omega", "chi", "phi", "distance", "offset-x", "offset-y", "det-omega", "det-chi"];
+      REFINE_PARAM_KEYS.forEach((key, i) => {
+        if (obj.refinement.flags?.[key] != null) document.getElementById(`laue-refine-${ids[i]}`).checked = !!obj.refinement.flags[key];
+      });
+      if (obj.refinement.robust != null) document.getElementById("laue-refine-robust").checked = !!obj.refinement.robust;
+      if (Number.isFinite(obj.refinement.outlierScalePx) && obj.refinement.outlierScalePx > 0) document.getElementById("laue-refine-outlier-scale").value = obj.refinement.outlierScalePx;
+    }
+    if (obj.idealOrientation) {
+      if (typeof obj.idealOrientation.beam === "string") document.getElementById("laue-target-beam-hkl").value = obj.idealOrientation.beam;
+      if (typeof obj.idealOrientation.horizontal === "string") document.getElementById("laue-target-horiz-hkl").value = obj.idealOrientation.horizontal;
+    }
     if (obj.crystal) {
       for (const [key, val] of Object.entries(obj.crystal)) {
         if (key === "presetId" || key === "structureModel" || key === "chemicalFormula") continue;
@@ -1666,7 +1683,7 @@
 
   function minMatchedPeaksForRefinement(flags) {
     const nParams = countRefinementParameters(flags);
-    return nParams > 0 ? Math.ceil(nParams / 2) : 0;
+    return nParams > 0 ? Math.floor(nParams / 2) + 1 : 0;
   }
 
   function matchPeaksStatusMessage() {
@@ -1712,80 +1729,91 @@
     return new Promise((resolve) => requestAnimationFrame(resolve));
   }
 
+  function readRefinementSettings() {
+    const ids = ["omega", "chi", "phi", "distance", "offset-x", "offset-y", "det-omega", "det-chi"];
+    const flags = Object.fromEntries(REFINE_PARAM_KEYS.map((key, i) =>
+      [key, !!document.getElementById(`laue-refine-${ids[i]}`)?.checked]));
+    return { flags, robust: document.getElementById("laue-refine-robust")?.checked !== false,
+      outlierScalePx: Number(document.getElementById("laue-refine-outlier-scale")?.value ?? 2) };
+  }
+
+  function refinementFingerprint() {
+    return JSON.stringify({ crystal: readCrystal(), instrument: readInstrument(), transform: state.transform,
+      settings: readRefinementSettings(), peaks: state.observedPeaks.map(p => [p.x,p.y,p.matchedH,p.matchedK,p.matchedL]) });
+  }
+
   async function runRefinement() {
-    if (!state.displayData) return;
+    if (!state.displayData || state.refinementRun) return;
     const refineBtn = document.getElementById("laue-refine-btn");
-    const flags = {
-      sampleOmega: document.getElementById("laue-refine-omega").checked,
-      sampleChi: document.getElementById("laue-refine-chi").checked,
-      samplePhi: document.getElementById("laue-refine-phi").checked,
-      detDistance: document.getElementById("laue-refine-distance").checked,
-      detOffsetX: document.getElementById("laue-refine-offset-x").checked,
-      detOffsetY: document.getElementById("laue-refine-offset-y").checked,
-      detOmega: document.getElementById("laue-refine-det-omega").checked,
-      detChi: document.getElementById("laue-refine-det-chi").checked
-    };
+    const cancelBtn = document.getElementById("laue-refine-cancel-btn");
+    const settings = readRefinementSettings();
+    const flags = settings.flags;
+    if (settings.robust && !(Number.isFinite(settings.outlierScalePx) && settings.outlierScalePx > 0)) {
+      refineResult.textContent = "Outlier tolerance must be greater than zero.";
+      return;
+    }
     matchPeaks();
     const matchMsg = matchPeaksStatusMessage();
     const matchedCount = countMatchedPeaks(state.observedPeaks);
     const selectedParamCount = countRefinementParameters(flags);
     const minMatched = minMatchedPeaksForRefinement(flags);
-    if (!selectedParamCount) {
-      refineResult.textContent = `${matchMsg} Select at least one parameter to refine.`;
-      return;
-    }
-    if (matchedCount < minMatched) {
-      refineResult.textContent = `${matchMsg} Need at least ${minMatched} matched peak${minMatched === 1 ? "" : "s"} for ${selectedParamCount} selected parameter${selectedParamCount === 1 ? "" : "s"}.`;
+    if (!selectedParamCount || matchedCount < minMatched) {
+      refineResult.textContent = !selectedParamCount ? "Select at least one parameter to refine."
+        : `${matchMsg} Need at least ${minMatched} matched spots for ${selectedParamCount} selected parameters.`;
       return;
     }
     const before = snapshotRefinementInstrument();
     const crystal = readCrystal();
-    const allowed = allowedPredicateForCrystal(crystal);
+    const config = buildConfig(readInstrument());
+    const imageSize = { width: state.displayData.width, height: state.displayData.height };
+    const observations = state.observedPeaks.map(p => ({ ...p }));
+    const fingerprint = refinementFingerprint();
+    const image = state.rawData || state.displayData;
+    const run = { cancelled: false, contextChanged: false };
+    const shouldCancel = () => {
+      run.contextChanged = image !== (state.rawData || state.displayData) || fingerprint !== refinementFingerprint();
+      return run.cancelled || run.contextChanged;
+    };
+    state.refinementRun = run;
     if (refineBtn) refineBtn.disabled = true;
-    refineResult.textContent = `${matchMsg} Refining… starting from current fit.`;
-    await nextPaint();
-    let result;
+    if (cancelBtn) cancelBtn.hidden = false;
+    refineResult.textContent = `${matchMsg} Refining fixed index assignments…`;
     try {
-      result = await LaueMath.refineOrientation(
-        crystal,
-        buildConfig(readInstrument()),
-        { width: state.displayData.width, height: state.displayData.height },
-        state.observedPeaks,
-        flags,
-        allowed,
-        30,
-        {
-          onProgress: (progress) => {
-            const rmsText = progress.rms != null ? progress.rms.toFixed(2) : "—";
-            const bestText = progress.bestRms != null ? progress.bestRms.toFixed(2) : rmsText;
-            refineResult.textContent = (
-              `${matchMsg} Refining… iteration ${progress.iteration}/${progress.maxIterations}, ` +
-              `RMS ${rmsText} px, best ${bestText} px.`
-            );
-          },
-          yieldToBrowser: nextPaint
-        }
-      );
-    } finally {
-      if (refineBtn) refineBtn.disabled = false;
-    }
-    if (result.rms != null) {
+      const result = await LaueMath.refineOrientation(crystal, config, imageSize, observations, flags,
+        allowedPredicateForCrystal(crystal), 100, {
+          ...settings, shouldCancel, yieldToBrowser: nextPaint,
+          onProgress: progress => {
+            refineResult.textContent = `${matchMsg} Iteration ${progress.iteration}/${progress.maxIterations}: RMS spot distance ${progress.rms.toFixed(3)} px.`;
+          }
+        });
+      if (shouldCancel() || result.status === "cancelled") {
+        refineResult.textContent = run.contextChanged
+          ? "Refinement cancelled because the image, peaks or settings changed. Current edits were kept."
+          : "Refinement cancelled; parameters were not changed.";
+        return;
+      }
       if (!result.improved) {
-        refineResult.textContent = result.initialRms != null
-          ? `Refinement rejected (unstable). RMS stayed at ${result.initialRms.toFixed(2)} px — use Undo if needed.`
-          : "Refinement did not improve the fit.";
+        refineResult.textContent = `${matchMsg} ${result.message || "No improvement; parameters were not changed."}`;
         return;
       }
       state.refinementUndo = before;
       setRefinementUndoAvailable(true);
       writeInstrumentToForm(result.config);
-      updatePredictions();
+      updatePredictions({ rematch: false });
       persistConfig();
-      const beforeTxt = result.initialRms != null ? ` (was ${result.initialRms.toFixed(2)} px)` : "";
-      refineResult.textContent = `${matchMsg} RMS pixel residual: ${result.rms.toFixed(2)} px${beforeTxt}`;
-      return;
+      const fit = settings.robust
+        ? `Inlier RMS spot distance: ${result.inlierRms.toFixed(3)} px (${result.inliers} spots within ${3 * settings.outlierScalePx} px; ${result.outliers} farther away). `
+        : "";
+      const excluded = result.excluded ? ` ${result.excluded} invalid or invisible assignments excluded.` : "";
+      const coupled = result.coupled ? " Selected parameters are strongly coupled; try fewer detector parameters." : "";
+      refineResult.textContent = `${fit}All ${result.used} fitted spots: RMS ${result.rms.toFixed(3)} px (was ${result.initialRms.toFixed(3)} px). ${result.message}${excluded}${coupled}`;
+    } catch (error) {
+      refineResult.textContent = `Refinement failed: ${error.message || String(error)}. Parameters were not changed.`;
+    } finally {
+      if (refineBtn) refineBtn.disabled = false;
+      if (cancelBtn) cancelBtn.hidden = true;
+      state.refinementRun = null;
     }
-    refineResult.textContent = `${matchMsg} Assign index matches to observed peaks first (add or auto-detect peaks).`;
   }
 
   function undoRefinement() {
@@ -1804,23 +1832,26 @@
     const beamHKL = parseHKL(document.getElementById("laue-target-beam-hkl").value);
     const horizHKL = parseHKL(document.getElementById("laue-target-horiz-hkl").value);
     if (!beamHKL || !horizHKL) {
-      idealResult.textContent = "Enter valid HKL triples.";
+      idealResult.textContent = "Enter valid, nonzero HKL triples.";
       return;
     }
-    const inst = readInstrument();
-    const dev = LaueMath.idealOrientationDeviation(
-      readCrystal(),
-      { omega: inst.sampleOmega, chi: inst.sampleChi, phi: inst.samplePhi },
-      beamHKL,
-      horizHKL,
-      { omega: inst.sampleSignOmega, chi: inst.sampleSignChi, phi: inst.sampleSignPhi }
-    );
-    idealResult.innerHTML = `
-      Direct-beam angular deviation: ${dev.beamMisalignmentDeg.toFixed(3)}°<br>
-      Rotate about vertical axis: ${dev.verticalAxisRotationDeg.toFixed(3)}°<br>
-      Rotate about horizontal axis: ${dev.horizontalAxisRotationDeg.toFixed(3)}°<br>
-      Rotate about beam normal: ${dev.beamNormalRotationDeg.toFixed(3)}°<br>
-      Horizontal HKL out-of-plane residual: ${dev.horizontalMisalignmentDeg.toFixed(3)}°`;
+    try {
+      const inst = readInstrument();
+      const dev = LaueMath.idealOrientationDeviation(readCrystal(),
+        { omega: inst.sampleOmega, chi: inst.sampleChi, phi: inst.samplePhi }, beamHKL, horizHKL,
+        { omega: inst.sampleSignOmega, chi: inst.sampleSignChi, phi: inst.sampleSignPhi });
+      idealResult.innerHTML = `
+        Direct-beam angular deviation: ${dev.beamMisalignmentDeg.toFixed(3)}°<br>
+        HKL direction tilt out of the horizontal scattering plane: ${dev.horizontalMisalignmentDeg.toFixed(3)}°<br>
+        Apply these rotations in order about the fixed lab axes (right-hand rule):<br>
+        1. Vertical +z: ${dev.verticalAxisRotationDeg.toFixed(3)}°<br>
+        2. Horizontal +y: ${dev.horizontalAxisRotationDeg.toFixed(3)}°<br>
+        3. Beam +x: ${dev.beamNormalRotationDeg.toFixed(3)}°<br>
+        The second HKL is placed in the horizontal lab x–y scattering plane, on the side requiring the smaller correction.
+        These are lab-frame rotations, not increments to the sample Euler-angle controls.`;
+    } catch (error) {
+      idealResult.textContent = error.message || String(error);
+    }
   }
 
   function parseHKL(text) {
@@ -2390,6 +2421,11 @@
 
     document.getElementById("laue-auto-detect-btn").addEventListener("click", runAutoDetect);
     document.getElementById("laue-refine-btn").addEventListener("click", runRefinement);
+    document.getElementById("laue-refine-cancel-btn").addEventListener("click", () => {
+      if (state.refinementRun) state.refinementRun.cancelled = true;
+    });
+    document.querySelectorAll("#laue-refinement-section input, #laue-refinement-section select")
+      .forEach(el => el.addEventListener("change", persistConfig));
     document.getElementById("laue-refine-undo-btn").addEventListener("click", undoRefinement);
     document.getElementById("laue-ideal-btn").addEventListener("click", runIdealOrientation);
 

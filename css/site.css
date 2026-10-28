@@ -2641,6 +2641,10 @@ body.laue-page.laue-nav-hidden .laue-viewer-panel {
   margin-top: 1rem;
 }
 
+#laue-refine-cancel-btn[hidden] {
+  display: none;
+}
+
 .laue-action-row + #laue-refine-result {
   margin-top: 0.85rem;
 }

@@ -112,6 +112,10 @@
 
   function directLatticeVectors(params) {
     const { a, b, c, alpha, beta, gamma } = params;
+    if (![a,b,c].every(v => Number.isFinite(v) && v > 0) ||
+      ![alpha,beta,gamma].every(v => Number.isFinite(v) && v > 0 && v < 180)) {
+      throw new Error("Cell lengths must be positive and angles must lie between 0 and 180°.");
+    }
     const alphaRad = degToRad(alpha);
     const betaRad = degToRad(beta);
     const gammaRad = degToRad(gamma);
@@ -493,317 +497,315 @@
     cfg.beamY = imageSize.height / 2 + (cfg.detOffsetY || 0);
   }
 
-  function refinementParamMeta(key, cfg) {
-    const dist = Math.abs(cfg.detDistance) || 150;
-    switch (key) {
-      case "sampleOmega":
-      case "sampleChi":
-      case "samplePhi":
-        return { eps: 0.05, stepMax: 2, min: -360, max: 360 };
-      case "detDistance":
-        return {
-          eps: Math.max(0.5, dist * 0.005),
-          stepMax: Math.max(5, dist * 0.1),
-          min: Math.max(5, dist * 0.25),
-          max: Math.min(5000, dist * 4)
-        };
-      case "detOffsetX":
-      case "detOffsetY":
-        return { eps: 0.25, stepMax: 8, min: -5000, max: 5000 };
-      case "detOmega":
-        return { eps: 0.05, stepMax: 1, min: -360, max: 360 };
-      case "detChi":
-        return { eps: 0.05, stepMax: 1, min: -90, max: 90 };
-      default:
-        return { eps: 0.05, stepMax: 1, min: -1e6, max: 1e6 };
-    }
-  }
-
-  function clampRefinementConfig(cfg, paramKeys, imageSize) {
-    syncBeamFromOffsets(cfg, imageSize);
-    for (const key of paramKeys) {
-      const meta = refinementParamMeta(key, cfg);
-      cfg[key] = clamp(cfg[key], meta.min, meta.max);
-    }
-    syncBeamFromOffsets(cfg, imageSize);
-    return cfg;
-  }
-
-  const MISSING_REFLECTION_PENALTY_PX = 1000;
-
-  function matchResidualStats(params, cfg, imageSize, obs, isAllowed) {
-    const penaltySq = MISSING_REFLECTION_PENALTY_PX * MISSING_REFLECTION_PENALTY_PX;
-    let sumSq = 0;
-    let count = 0;
-    let missing = 0;
-
-    for (const obsPeak of obs) {
-      const pred = projectHKL(params, [obsPeak.matchedH, obsPeak.matchedK, obsPeak.matchedL], cfg, imageSize);
-      if (!pred) {
-        missing += 1;
-        sumSq += penaltySq;
-        count += 2;
-        continue;
-      }
-      const rx = pred.x - obsPeak.x;
-      const ry = pred.y - obsPeak.y;
-      sumSq += rx * rx + ry * ry;
-      count += 2;
-    }
-
-    if (!count) return { rms: null, missing: obs.length };
-    return { rms: Math.sqrt(sumSq / count), missing };
-  }
-
-  function matchResidualRms(params, cfg, imageSize, obs, isAllowed) {
-    return matchResidualStats(params, cfg, imageSize, obs, isAllowed).rms;
-  }
-
   function copyConfig(cfg) {
     return { ...cfg, sampleSigns: cfg.sampleSigns ? { ...cfg.sampleSigns } : undefined };
   }
 
-  /**
-   * Least-squares refinement with scaled steps, bounds, line search, and LM damping.
-   */
+  function refinementSteps(flags, cfg) {
+    const steps = [];
+    if (flags.sampleOmega && flags.sampleChi && flags.samplePhi) {
+      // Refine a local rotation, then convert back to display Euler angles. The
+      // tangent coordinates remain independent at Euler gimbal lock.
+      for (const axis of [[1, 0, 0], [0, 1, 0], [0, 0, 1]]) steps.push({ kind: "sample", axis, scale: 2 });
+    } else {
+      for (const key of ["sampleOmega", "sampleChi", "samplePhi"]) {
+        if (flags[key]) steps.push({ key, scale: 2 });
+      }
+    }
+    if (flags.detDistance) steps.push({ key: "detDistance", scale: Math.max(1, cfg.detDistance * 0.1) });
+    for (const key of ["detOffsetX", "detOffsetY"]) if (flags[key]) steps.push({ key, scale: 8 });
+    if (flags.detOmega && flags.detChi) {
+      // Detector azimuth alone is undefined at zero tilt. Two tangent rotations
+      // of its normal avoid the polar-coordinate singularity there.
+      const basis = detectorBasis(detectorNormal(cfg.detOmega, cfg.detChi, cfg.laueMode));
+      steps.push({ kind: "detector", axis: basis.u, scale: 2 }, { kind: "detector", axis: basis.v, scale: 2 });
+    } else {
+      for (const key of ["detOmega", "detChi"]) if (flags[key]) steps.push({ key, scale: 2 });
+    }
+    return steps;
+  }
+
+  function applyRefinementStep(cfg, steps, delta, imageSize) {
+    const out = copyConfig(cfg);
+    let sampleRotation = [0, 0, 0];
+    let detectorRotation = [0, 0, 0];
+    steps.forEach((step, i) => {
+      const value = delta[i] * step.scale;
+      if (step.kind === "sample") sampleRotation = add(sampleRotation, scale(step.axis, value));
+      else if (step.kind === "detector") detectorRotation = add(detectorRotation, scale(step.axis, value));
+      else out[step.key] += value;
+    });
+    if (norm(sampleRotation) > 0) {
+      const rotated = mat3Mul(rotAxis(sampleRotation, degToRad(norm(sampleRotation))),
+        uMatrix(cfg.sampleOmega, cfg.sampleChi, cfg.samplePhi, cfg.sampleSigns));
+      const angles = sampleEulerFromUMatrix(rotated, cfg.sampleSigns);
+      out.sampleOmega = wrapAngleNear(angles.omega, cfg.sampleOmega);
+      out.sampleChi = wrapAngleNear(angles.chi, cfg.sampleChi);
+      out.samplePhi = wrapAngleNear(angles.phi, cfg.samplePhi);
+    }
+    if (norm(detectorRotation) > 0) {
+      const normal = mat3Vec(rotAxis(detectorRotation, degToRad(norm(detectorRotation))),
+        detectorNormal(cfg.detOmega, cfg.detChi, cfg.laueMode));
+      const angles = detectorAnglesFromNormal(normal, cfg.laueMode);
+      out.detOmega = wrapAngleNear(angles.detOmega, cfg.detOmega);
+      out.detChi = angles.detChi;
+    }
+    syncBeamFromOffsets(out, imageSize);
+    return out;
+  }
+
+  function refinementRank(jacobian, nParams) {
+    // Column-pivoted Gram–Schmidt on normalized columns: rank is independent
+    // of the different degree/mm/pixel units used by the controls.
+    const columns = Array.from({ length: nParams }, (_, j) => jacobian.map(row => row[j]));
+    const length = v => Math.sqrt(v.reduce((sum, x) => sum + x*x, 0));
+    for (const column of columns) {
+      const n = length(column);
+      if (n > 0) for (let i = 0; i < column.length; i++) column[i] /= n;
+    }
+    let rank = 0;
+    let smallest = 1;
+    for (let j = 0; j < nParams; j++) {
+      let pivot = j;
+      for (let k = j + 1; k < nParams; k++) if (length(columns[k]) > length(columns[pivot])) pivot = k;
+      [columns[j], columns[pivot]] = [columns[pivot], columns[j]];
+      const n = length(columns[j]);
+      if (n < 1e-6) break;
+      smallest = Math.min(smallest, n);
+      rank++;
+      for (let i = 0; i < columns[j].length; i++) columns[j][i] /= n;
+      for (let k = j + 1; k < nParams; k++) {
+        // Reorthogonalize to distinguish small true directions from roundoff.
+        for (let pass = 0; pass < 2; pass++) {
+          let projection = 0;
+          for (let i = 0; i < columns[j].length; i++) projection += columns[j][i] * columns[k][i];
+          for (let i = 0; i < columns[j].length; i++) columns[k][i] -= projection * columns[j][i];
+        }
+      }
+    }
+    return { rank, coupled: smallest < 1e-3 };
+  }
+
+  /** Local, robust spot refinement. Index assignments stay fixed during a fit. */
   async function refineOrientation(params, config, imageSize, observedPeaks, refineFlags, isAllowed, maxIter, options) {
     const opts = options || {};
     const flags = refineFlags || { sampleOmega: true, sampleChi: true, samplePhi: true };
-    const paramKeys = [
-      "sampleOmega", "sampleChi", "samplePhi",
-      "detDistance", "detOffsetX", "detOffsetY",
-      "detOmega", "detChi"
-    ].filter((key) => flags[key]);
-
-    if (!paramKeys.length || !observedPeaks.length) {
-      return { config: { ...config }, rms: null, iterations: 0, improved: false };
+    const cfg0 = copyConfig(config);
+    const limit = Number.isFinite(maxIter) ? Math.max(1, Math.floor(maxIter)) : 80;
+    const robust = opts.robust !== false;
+    const lossScale = Number.isFinite(opts.outlierScalePx) && opts.outlierScalePx > 0 ? opts.outlierScalePx : 2;
+    const result = { config: cfg0, rms: null, initialRms: null, iterations: 0, improved: false, converged: false,
+      status: "invalid_input", message: "Check the crystal, detector dimensions, distance and angles.", excluded: 0 };
+    if (!imageSize || ![imageSize.width, imageSize.height, config.detWidth, config.detHeight, config.detDistance]
+      .every(v => Number.isFinite(v) && v > 0) ||
+      ![config.sampleOmega, config.sampleChi, config.samplePhi, config.detOmega, config.detChi,
+        config.detOffsetX ?? 0, config.detOffsetY ?? 0].every(Number.isFinite)) return result;
+    cfg0.detOffsetX = config.detOffsetX ?? 0;
+    cfg0.detOffsetY = config.detOffsetY ?? 0;
+    syncBeamFromOffsets(cfg0, imageSize);
+    let basis;
+    try { basis = bMatrix(params); } catch (error) { result.message = error.message; return result; }
+    const initialSteps = refinementSteps(flags, cfg0);
+    const nParams = initialSteps.length;
+    if (!nParams) return { ...result, status: "no_parameters", message: "Select at least one parameter to refine." };
+    const observations = [];
+    const directions = new Set();
+    for (const peak of observedPeaks || []) {
+      const hkl = [peak.matchedH, peak.matchedK, peak.matchedL];
+      if (![peak.x, peak.y, ...hkl].every(Number.isFinite) || !hkl.every(Number.isInteger) || hkl.every(v => v === 0) ||
+        (isAllowed && !isAllowed(...hkl))) { result.excluded++; continue; }
+      const g = mat3Vec(basis, hkl);
+      const direction = normalize(g).map(v => Math.round(v * 1e9)).join(",");
+      if (directions.has(direction)) { result.excluded++; continue; }
+      directions.add(direction);
+      observations.push({ ...peak, g });
     }
+    const initialU = uMatrix(cfg0.sampleOmega, cfg0.sampleChi, cfg0.samplePhi, cfg0.sampleSigns);
+    const active = observations.filter(peak => {
+      const visible = projectReflection(mat3Vec(initialU, peak.g), cfg0, imageSize);
+      if (!visible) result.excluded++;
+      return visible;
+    });
+    const minPeaks = Math.floor(nParams / 2) + 1;
+    result.used = active.length;
+    if (active.length < minPeaks) return { ...result, status: "insufficient_matches",
+      message: `Need at least ${minPeaks} valid matched spots for ${nParams} selected parameters.` };
 
-    const cfg0 = clampRefinementConfig(copyConfig(config), paramKeys, imageSize);
-    const obs = observedPeaks.filter((p) => p.matchedH !== undefined);
-    if (!obs.length) {
-      return { config: cfg0, rms: null, iterations: 0, improved: false };
-    }
-
-    const initialStats = matchResidualStats(params, cfg0, imageSize, obs, isAllowed);
-    const initialRms = initialStats.rms;
-    const initialMissing = initialStats.missing;
-    if (initialRms == null) {
-      return { config: cfg0, rms: null, iterations: 0, improved: false };
-    }
-
-    let cfg = copyConfig(cfg0);
-    let bestCfg = copyConfig(cfg0);
-    let bestRms = initialRms;
-    let bestMissing = initialMissing;
-    let rms = initialRms;
-    let lambda = 0.01;
-    let iterations = 0;
-
-    for (let iter = 0; iter < (maxIter || 40); iter += 1) {
-      iterations = iter + 1;
-      syncBeamFromOffsets(cfg, imageSize);
-
+    function evaluate(cfg) {
+      if (!(cfg.detDistance > 0) || !Number.isFinite(cfg.detDistance)) return null;
+      const rotation = uMatrix(cfg.sampleOmega, cfg.sampleChi, cfg.samplePhi, cfg.sampleSigns);
+      const geometry = projectionGeometry(cfg, imageSize);
       const residuals = [];
-      const jacobian = [];
-
-      for (const obsPeak of obs) {
-        const hkl = [obsPeak.matchedH, obsPeak.matchedK, obsPeak.matchedL];
-        const pred = projectHKL(params, hkl, cfg, imageSize);
-        if (!pred) continue;
-        residuals.push(pred.x - obsPeak.x, pred.y - obsPeak.y);
-
-        const rowX = [];
-        const rowY = [];
-        for (const pk of paramKeys) {
-          const meta = refinementParamMeta(pk, cfg);
-          const saved = cfg[pk];
-          const h = meta.eps;
-
-          cfg[pk] = saved + h;
-          syncBeamFromOffsets(cfg, imageSize);
-          const pp = projectHKL(params, hkl, cfg, imageSize);
-          cfg[pk] = saved - h;
-          syncBeamFromOffsets(cfg, imageSize);
-          const pm = projectHKL(params, hkl, cfg, imageSize);
-          cfg[pk] = saved;
-          syncBeamFromOffsets(cfg, imageSize);
-
-          if (pp && pm) {
-            rowX.push((pp.x - pm.x) / (2 * h));
-            rowY.push((pp.y - pm.y) / (2 * h));
-          } else if (pp) {
-            rowX.push((pp.x - pred.x) / h);
-            rowY.push((pp.y - pred.y) / h);
-          } else {
-            rowX.push(0);
-            rowY.push(0);
-          }
-        }
-        jacobian.push(rowX, rowY);
+      const weights = [];
+      const distances = [];
+      let cost = 0;
+      for (const peak of active) {
+        const pred = projectReflectionWithGeometry(mat3Vec(rotation, peak.g), cfg, imageSize, geometry);
+        // Never improve the score by dropping a reflection from the detector.
+        if (!pred || !Number.isFinite(pred.x) || !Number.isFinite(pred.y)) return null;
+        const dx = pred.x - peak.x, dy = pred.y - peak.y;
+        const distance = Math.hypot(dx, dy);
+        residuals.push(dx, dy);
+        distances.push(distance);
+        // Huber loss on each 2D spot distance; x/y receive the same weight.
+        const weight = robust && distance > lossScale ? lossScale / distance : 1;
+        weights.push(weight, weight);
+        cost += robust && distance > lossScale ? 2 * lossScale * distance - lossScale ** 2 : distance ** 2;
       }
-
-      if (residuals.length < paramKeys.length) break;
-
-      const iterStats = matchResidualStats(params, cfg, imageSize, obs, isAllowed);
-      rms = iterStats.rms;
-      if (typeof opts.onProgress === "function") {
-        opts.onProgress({
-          iteration: iterations,
-          maxIterations: maxIter || 40,
-          rms,
-          bestRms,
-          missing: iterStats.missing,
-          matched: obs.length
-        });
-      }
-      if (typeof opts.yieldToBrowser === "function") {
-        await opts.yieldToBrowser();
-      }
-
-      const nParams = paramKeys.length;
-      const nRes = residuals.length;
-      const jtj = Array.from({ length: nParams }, () => Array(nParams).fill(0));
-      const jtr = Array(nParams).fill(0);
-
-      for (let i = 0; i < nRes; i += 1) {
-        for (let a = 0; a < nParams; a += 1) {
-          jtr[a] += jacobian[i][a] * residuals[i];
-          for (let b = 0; b < nParams; b += 1) {
-            jtj[a][b] += jacobian[i][a] * jacobian[i][b];
-          }
+      return { residuals, weights, distances, cost,
+        rms: Math.sqrt(distances.reduce((sum, d) => sum + d * d, 0) / active.length) };
+    }
+    function jacobianAt(cfg, steps, current) {
+      const jacobian = current.residuals.map(() => []);
+      for (let j = 0; j < nParams; j++) {
+        const step = Array(nParams).fill(0);
+        const h = 1e-4;
+        step[j] = h;
+        const plus = evaluate(applyRefinementStep(cfg, steps, step, imageSize));
+        step[j] = -h;
+        const minus = evaluate(applyRefinementStep(cfg, steps, step, imageSize));
+        for (let i = 0; i < jacobian.length; i++) {
+          jacobian[i][j] = plus && minus ? (plus.residuals[i] - minus.residuals[i]) / (2 * h)
+            : plus ? (plus.residuals[i] - current.residuals[i]) / h
+              : minus ? (current.residuals[i] - minus.residuals[i]) / h : 0;
         }
       }
-
-      for (let d = 0; d < nParams; d += 1) {
-        const diag = Math.max(jtj[d][d], 1e-8);
-        jtj[d][d] = diag * (1 + lambda);
+      return jacobian;
+    }
+    let cfg = copyConfig(cfg0);
+    let current = evaluate(cfg);
+    if (!current) return result;
+    const initialCost = current.cost;
+    result.initialRms = current.rms;
+    result.status = "max_iterations";
+    let lambda = 1e-3;
+    let rankInfo;
+    for (let iteration = 0; iteration < limit; iteration++) {
+      result.iterations = iteration + 1;
+      if (opts.shouldCancel?.()) return { ...result, status: "cancelled", message: "Refinement cancelled; parameters were not changed." };
+      opts.onProgress?.({ iteration: iteration + 1, maxIterations: limit, rms: current.rms,
+        bestRms: current.rms, matched: active.length, missing: 0 });
+      if (opts.yieldToBrowser) await opts.yieldToBrowser();
+      if (opts.shouldCancel?.()) return { ...result, status: "cancelled", message: "Refinement cancelled; parameters were not changed." };
+      const steps = refinementSteps(flags, cfg);
+      const jacobian = jacobianAt(cfg, steps, current);
+      rankInfo = refinementRank(jacobian, nParams);
+      if (rankInfo.rank < nParams) {
+        let message = `Only ${rankInfo.rank} of ${nParams} parameter directions are constrained. Add well-separated spots or select fewer parameters.`;
+        if (flags.detOmega && !flags.detChi && Math.abs(Math.sin(degToRad(cfg.detChi))) < 1e-8) {
+          message = "Detector Ω is undefined at zero tilt. Select Detector χ as well, or keep Detector Ω fixed.";
+        }
+        return { ...result, status: "underconstrained", rank: rankInfo.rank, message };
       }
-
-      const delta = solveSymmetric(jtj, jtr.map((v) => -v));
-      if (!delta) break;
-
+      if (current.cost < 1e-16) { result.status = "converged"; break; }
+      const normal = Array.from({ length: nParams }, () => Array(nParams).fill(0));
+      const gradient = Array(nParams).fill(0);
+      for (let i = 0; i < jacobian.length; i++) for (let j = 0; j < nParams; j++) {
+        gradient[j] += current.weights[i] * jacobian[i][j] * current.residuals[i];
+        for (let k = 0; k < nParams; k++) normal[j][k] += current.weights[i] * jacobian[i][j] * jacobian[i][k];
+      }
+      const scales = normal.map((row, i) => Math.sqrt(Math.max(row[i], 1e-24)));
+      const system = normal.map((row, i) => row.map((v, j) => v / (scales[i] * scales[j]) + (i === j ? lambda : 0)));
+      const rhs = gradient.map((v, i) => -v / scales[i]);
+      if (Math.max(...rhs.map(Math.abs)) < 1e-8) { result.status = "converged"; break; }
+      const solution = solveSymmetric(system, rhs);
+      if (!solution) { result.status = "no_progress"; break; }
+      const delta = solution.map((v, i) => v / scales[i]);
+      // Limit the whole vector, preserving its descent direction.
+      const trustScale = 1 / Math.max(1, ...delta.map(Math.abs));
       let accepted = false;
-      for (let ls = 0; ls < 10; ls += 1) {
-        const scale = Math.pow(0.5, ls);
-        const trial = copyConfig(cfg);
-        for (let i = 0; i < nParams; i += 1) {
-          const key = paramKeys[i];
-          const meta = refinementParamMeta(key, trial);
-          const step = clamp(delta[i] * scale, -meta.stepMax, meta.stepMax);
-          trial[key] += step;
-        }
-        clampRefinementConfig(trial, paramKeys, imageSize);
-        const trialStats = matchResidualStats(params, trial, imageSize, obs, isAllowed);
-        if (trialStats.rms != null
-          && trialStats.missing <= iterStats.missing
-          && trialStats.rms < rms) {
-          cfg = trial;
-          rms = trialStats.rms;
-          accepted = true;
-          lambda = Math.max(lambda * 0.3, 1e-4);
-          if (rms < bestRms || (Math.abs(rms - bestRms) < 1e-6 && trialStats.missing < bestMissing)) {
-            bestRms = rms;
-            bestMissing = trialStats.missing;
-            bestCfg = copyConfig(cfg);
-          }
+      for (let line = 0; line < 12; line++) {
+        const factor = trustScale * 2 ** -line;
+        const trial = applyRefinementStep(cfg, steps, delta.map(v => v * factor), imageSize);
+        const next = evaluate(trial);
+        if (next && next.cost < current.cost) {
+          const reduction = current.cost - next.cost;
+          cfg = trial; current = next; accepted = true;
+          lambda = Math.max(1e-9, lambda * .3);
+          if (reduction < 1e-10 * Math.max(1, current.cost) || Math.max(...delta.map(v => Math.abs(v * factor))) < 1e-7) result.status = "converged";
           break;
         }
       }
-
+      if (result.status === "converged") break;
       if (!accepted) {
-        lambda = Math.min(lambda * 5, 1e3);
-        if (lambda > 100) break;
-        continue;
+        lambda *= 10;
+        if (lambda > 1e8) { result.status = "no_progress"; break; }
       }
-
-      let maxStep = 0;
-      for (let i = 0; i < nParams; i += 1) {
-        maxStep = Math.max(maxStep, Math.abs(delta[i]));
-      }
-      if (maxStep < 1e-4) break;
     }
-
-    const improved = bestRms < initialRms - 1e-6 && bestMissing <= initialMissing;
-    const stable = Number.isFinite(bestRms) && bestRms < initialRms * 5 && bestRms < 500;
-    return {
-      config: stable ? bestCfg : cfg0,
-      rms: stable ? bestRms : initialRms,
-      initialRms,
-      iterations,
-      improved: improved && stable
+    const inliers = current.distances.map(d => !robust || d <= 3 * lossScale);
+    const inlierCount = inliers.filter(Boolean).length;
+    const finalJacobian = jacobianAt(cfg, refinementSteps(flags, cfg), current);
+    const inlierJacobian = finalJacobian.filter((_, i) => inliers[Math.floor(i / 2)]);
+    if (inlierCount < minPeaks || refinementRank(inlierJacobian, nParams).rank < nParams) return {
+      ...result, status: "underconstrained", message: "Too few independent inlier spots support this fit. Add spots or refine fewer parameters." };
+    const improved = current.cost < initialCost - Math.max(1e-12, initialCost * 1e-10);
+    const messages = {
+      converged: improved ? "Fit converged." : "Already converged; parameters were not changed.",
+      max_iterations: "Iteration limit reached; the best fit is available but may need another run.",
+      no_progress: "No further improvement; check the indexing and selected parameters."
     };
+    return { ...result, config: improved ? cfg : cfg0, rms: current.rms, improved,
+      converged: result.status === "converged", message: messages[result.status],
+      inliers: inlierCount, outliers: active.length - inlierCount,
+      inlierRms: Math.sqrt(current.distances.reduce((sum, d, i) => sum + (inliers[i] ? d * d : 0), 0) / inlierCount),
+      coupled: rankInfo?.coupled || refinementRank(finalJacobian, nParams).coupled };
   }
 
   function solveSymmetric(a, b) {
     const n = b.length;
-    const m = a.map((row) => row.slice());
-    const x = b.slice();
-    for (let i = 0; i < n; i += 1) {
-      let pivot = m[i][i];
-      if (Math.abs(pivot) < 1e-12) return null;
-      for (let j = i; j < n; j += 1) m[i][j] /= pivot;
-      x[i] /= pivot;
-      for (let k = 0; k < n; k += 1) {
+    const m = a.map((row, i) => [...row, b[i]]);
+    for (let i = 0; i < n; i++) {
+      let pivot = i;
+      for (let j = i + 1; j < n; j++) if (Math.abs(m[j][i]) > Math.abs(m[pivot][i])) pivot = j;
+      if (!Number.isFinite(m[pivot][i]) || Math.abs(m[pivot][i]) < 1e-14) return null;
+      [m[i], m[pivot]] = [m[pivot], m[i]];
+      const divisor = m[i][i];
+      for (let j = i; j <= n; j++) m[i][j] /= divisor;
+      for (let k = 0; k < n; k++) {
         if (k === i) continue;
         const factor = m[k][i];
-        for (let j = i; j < n; j += 1) m[k][j] -= factor * m[i][j];
-        x[k] -= factor * x[i];
+        for (let j = i; j <= n; j++) m[k][j] -= factor * m[i][j];
       }
     }
-    return x;
+    return m.map(row => row[n]);
   }
 
-  /**
-   * Compare how close two reciprocal directions are to the lab-frame targets used in
-   * projection: direct beam along +x; “horizontal” = plane perpendicular to the beam.
-   */
+  /** Align the first reciprocal direction to +x and the second to the horizontal xy scattering plane. */
   function idealOrientationDeviation(params, currentAngles, targetBeamHKL, targetHorizHKL, signs) {
-    const ub = ubMatrix(params, currentAngles.omega, currentAngles.chi, currentAngles.phi, signs);
-    const beamVec = normalize(reciprocalVector(targetBeamHKL, ub));
-    const horizVec = normalize(reciprocalVector(targetHorizHKL, ub));
-    const beamDir = [1, 0, 0];
-    const refHorizInPlane = normalize([0, 1, 0]);
-
-    const beamDot = dot(beamVec, beamDir);
-    const beamMisalignmentDeg = radToDeg(Math.acos(clamp(beamDot, -1, 1)));
-
-    const horizOutOfPlane = Math.abs(dot(horizVec, beamDir));
-    const horizontalMisalignmentDeg = radToDeg(Math.asin(clamp(horizOutOfPlane, 0, 1)));
-
-    const horizProj = subtract(horizVec, scale(beamDir, dot(horizVec, beamDir)));
-    const horizNorm = norm(horizProj);
-    let inPlaneAzimuthDeg = 0;
-    if (horizNorm > 1e-10) {
-      const refProj = subtract(refHorizInPlane, scale(beamDir, dot(refHorizInPlane, beamDir)));
-      const refNorm = norm(refProj);
-      if (refNorm > 1e-10) {
-        inPlaneAzimuthDeg = radToDeg(Math.acos(clamp(
-          Math.abs(dot(normalize(horizProj), normalize(refProj))),
-          0,
-          1
-        )));
-      }
+    if (![...targetBeamHKL, ...targetHorizHKL, currentAngles.omega, currentAngles.chi, currentAngles.phi].every(Number.isFinite)) {
+      throw new Error("Enter finite angles and HKL triples.");
     }
-
-    const idealHoriz = horizNorm > 1e-10
-      ? normalize(horizProj)
-      : refHorizInPlane;
-    const idealNormal = normalize(cross(beamVec, idealHoriz));
-    const currentBasis = matrixFromColumns(beamVec, idealHoriz, idealNormal);
-    const targetBasis = matrixFromColumns(beamDir, refHorizInPlane, [0, 0, 1]);
-    const correction = mat3Mul(targetBasis, transpose3(currentBasis));
+    const ub = ubMatrix(params, currentAngles.omega, currentAngles.chi, currentAngles.phi, signs);
+    const beam = reciprocalVector(targetBeamHKL, ub), horizontal = reciprocalVector(targetHorizHKL, ub);
+    if (norm(beam) < 1e-12 || norm(horizontal) < 1e-12) throw new Error("An HKL direction cannot be 0 0 0.");
+    const beamVec = normalize(beam), horizVec = normalize(horizontal);
+    const intrinsicDot = clamp(dot(beamVec, horizVec), -1, 1);
+    if (norm(cross(beamVec, horizVec)) < 1e-8) throw new Error("The two HKL directions must not be parallel; a parallel direction cannot define the scattering plane.");
+    // Build an orthonormal CURRENT frame. The second HKL need not be
+    // perpendicular to the first: its beam-parallel component is preserved.
+    const currentHorizontal = normalize(subtract(horizVec, scale(beamVec, intrinsicDot)));
+    const currentNormal = normalize(cross(beamVec, currentHorizontal));
+    const currentBasis = matrixFromColumns(beamVec, currentHorizontal, currentNormal);
+    const positive = transpose3(currentBasis);
+    // Either side of the horizontal plane is ideal. Choose the proper rotation
+    // with the greater trace (smaller rotation angle), avoiding a needless 180°.
+    const side = positive[1][1] + positive[2][2] >= 0 ? 1 : -1;
+    const correction = positive.map((row, i) => row.map(v => v * (i === 0 ? 1 : side)));
     const rotations = decomposeBeamAlignmentRotation(correction);
-
+    const beamDot = clamp(beamVec[0], -1, 1);
+    const trace = correction[0][0] + correction[1][1] + correction[2][2];
     return {
-      beamMisalignmentDeg,
-      horizontalMisalignmentDeg,
-      inPlaneAzimuthDeg,
+      beamMisalignmentDeg: radToDeg(Math.atan2(Math.hypot(beamVec[1], beamVec[2]), beamDot)),
+      horizontalMisalignmentDeg: radToDeg(Math.asin(clamp(Math.abs(horizVec[2]), 0, 1))),
+      inPlaneAzimuthDeg: Math.hypot(horizVec[0], horizVec[1]) > 1e-10 ? radToDeg(Math.atan2(horizVec[1], horizVec[0])) : null,
       verticalAxisRotationDeg: rotations.vertical,
       horizontalAxisRotationDeg: rotations.horizontal,
       beamNormalRotationDeg: rotations.beamNormal,
+      totalCorrectionDeg: radToDeg(Math.acos(clamp((trace - 1) / 2, -1, 1))),
+      correctionMatrix: correction,
+      horizontalSide: side,
       currentBeamDot: beamDot,
-      currentHorizOutOfPlane: horizOutOfPlane
+      currentHorizOutOfPlane: Math.abs(horizVec[2])
     };
   }
 
@@ -1065,39 +1067,96 @@
   }
 
   function matchObservedToPredicted(observed, predicted, maxDistPx) {
-    const maxDistSq = maxDistPx * maxDistPx;
-    const used = new Set();
-
-    const matched = observed.map((obs) => {
+    const matched = observed.map(obs => {
       const clean = { ...obs };
-      delete clean.matchedH;
-      delete clean.matchedK;
-      delete clean.matchedL;
-      delete clean.matchDist;
+      for (const key of ["matchedH", "matchedK", "matchedL", "matchDist"]) delete clean[key];
       return clean;
     });
-
-    for (const obs of matched) {
-      let best = null;
-      let bestDist = maxDistSq;
-      for (let i = 0; i < predicted.length; i += 1) {
-        if (used.has(i)) continue;
-        const dx = obs.x - predicted[i].x;
-        const dy = obs.y - predicted[i].y;
-        const dSq = dx * dx + dy * dy;
-        if (dSq < bestDist) {
-          bestDist = dSq;
-          best = { index: i, peak: predicted[i] };
+    if (!(Number.isFinite(maxDistPx) && maxDistPx > 0)) return matched;
+    // Harmonic reflections land on the same spot in a polychromatic pattern.
+    // They must share one assignment slot, rather than consuming several peaks.
+    const spots = [];
+    const coincident = new Map();
+    const bucket = (x, y, size) => `${Math.floor(x / size)},${Math.floor(y / size)}`;
+    const representatives = predicted.filter(p => [p.x, p.y, p.h, p.k, p.l].every(Number.isFinite))
+      .slice().sort((a, b) => (a.h*a.h+a.k*a.k+a.l*a.l) - (b.h*b.h+b.k*b.k+b.l*b.l) || a.h-b.h || a.k-b.k || a.l-b.l);
+    for (const peak of representatives) {
+      const x = Math.floor(peak.x / 1e-4), y = Math.floor(peak.y / 1e-4);
+      let duplicate = false;
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+        for (const i of coincident.get(`${x+dx},${y+dy}`) || []) {
+          if (Math.hypot(peak.x-spots[i].x, peak.y-spots[i].y) < 1e-5) duplicate = true;
         }
       }
-      if (best) {
-        used.add(best.index);
-        obs.matchedH = best.peak.h;
-        obs.matchedK = best.peak.k;
-        obs.matchedL = best.peak.l;
-        obs.matchDist = Math.sqrt(bestDist);
+      if (duplicate) continue;
+      const key = `${x},${y}`;
+      if (!coincident.has(key)) coincident.set(key, []);
+      coincident.get(key).push(spots.length);
+      spots.push(peak);
+    }
+    const grid = new Map();
+    spots.forEach((p, i) => {
+      const key = bucket(p.x, p.y, maxDistPx);
+      if (!grid.has(key)) grid.set(key, []);
+      grid.get(key).push(i);
+    });
+    const candidates = matched.map(obs => {
+      if (![obs.x, obs.y].every(Number.isFinite)) return [];
+      const x = Math.floor(obs.x / maxDistPx), y = Math.floor(obs.y / maxDistPx);
+      const edges = [];
+      for (let dx=-1; dx<=1; dx++) for (let dy=-1; dy<=1; dy++) {
+        for (const i of grid.get(`${x+dx},${y+dy}`) || []) {
+          const cost = (obs.x-spots[i].x)**2 + (obs.y-spots[i].y)**2;
+          if (cost <= maxDistPx**2) edges.push({ spot: i, cost });
+        }
+      }
+      return edges;
+    });
+    // Sparse minimum-cost maximum matching. Reversible edges allow an earlier
+    // assignment to move when that makes room for another observed spot.
+    const activeSpots = [...new Set(candidates.flatMap(edges => edges.map(e => e.spot)))];
+    const spotNode = new Map(activeSpots.map((i, j) => [i, matched.length + j + 1]));
+    const sink = matched.length + activeSpots.length + 1;
+    const graph = Array.from({ length: sink + 1 }, () => []);
+    function edge(from, to, cost, assignment) {
+      const forward = { to, cost, capacity: 1, reverse: graph[to].length, assignment };
+      graph[from].push(forward);
+      graph[to].push({ to: from, cost: -cost, capacity: 0, reverse: graph[from].length - 1 });
+    }
+    const order = matched.map((_, i) => i).sort((a,b) => matched[a].x-matched[b].x || matched[a].y-matched[b].y || a-b);
+    for (const i of order) {
+      edge(0, i+1, 0);
+      for (const candidate of candidates[i]) edge(i+1, spotNode.get(candidate.spot), candidate.cost, candidate.spot);
+    }
+    for (const node of spotNode.values()) edge(node, sink, 0);
+    while (true) {
+      const distance = Array(graph.length).fill(Infinity);
+      const previous = Array(graph.length);
+      const queued = Array(graph.length).fill(false);
+      const queue = [0]; distance[0] = 0; queued[0] = true;
+      for (let head=0; head<queue.length; head++) {
+        const from = queue[head]; queued[from] = false;
+        graph[from].forEach((e, index) => {
+          if (e.capacity && distance[from] + e.cost < distance[e.to] - 1e-12) {
+            distance[e.to] = distance[from] + e.cost;
+            previous[e.to] = { from, index };
+            if (!queued[e.to]) { queue.push(e.to); queued[e.to] = true; }
+          }
+        });
+      }
+      if (!Number.isFinite(distance[sink])) break;
+      for (let node=sink; node!==0;) {
+        const { from, index } = previous[node], e = graph[from][index];
+        e.capacity = 0; graph[node][e.reverse].capacity = 1; node = from;
       }
     }
+    matched.forEach((obs, i) => {
+      const e = graph[i+1].find(e => e.assignment != null && e.capacity === 0);
+      if (!e) return;
+      const peak = spots[e.assignment];
+      obs.matchedH = peak.h; obs.matchedK = peak.k; obs.matchedL = peak.l;
+      obs.matchDist = Math.hypot(obs.x-peak.x, obs.y-peak.y);
+    });
     return matched;
   }
 
