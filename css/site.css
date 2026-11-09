@@ -2905,11 +2905,13 @@ body.laue-page.laue-nav-hidden .laue-viewer-panel {
   cursor: grabbing;
 }
 
-.laue-canvas-viewport.laue-move-peak-mode canvas {
+.laue-canvas-viewport.laue-move-peak-mode canvas,
+.laue-canvas-viewport.laue-move-rotation-center-mode canvas {
   cursor: grab;
 }
 
-.laue-canvas-viewport.laue-move-peak-mode.laue-dragging canvas {
+.laue-canvas-viewport.laue-move-peak-mode.laue-dragging canvas,
+.laue-canvas-viewport.laue-move-rotation-center-mode.laue-dragging canvas {
   cursor: grabbing;
 }
 

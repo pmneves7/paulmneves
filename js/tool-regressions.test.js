@@ -149,11 +149,29 @@ test('Laue peak coordinates follow every pixel rotation and mirror on a nonsquar
   const text=source('js/laue-analysis.js');
   const central=text.slice(text.indexOf('  function updateTransformedDataFromRaw()'),text.indexOf('  function reprocessImage('));
   const state={rawData:data,transform:{rotate90:0,flipH:false,flipV:false},instrument:{beamX:1,beamY:1},
-    observedPeaks:[{id:5,x:2,y:0}],displayData:data};
+    observedPeaks:[{id:5,x:2,y:0}],rotationCenter:{x:2,y:0},displayData:data};
   const s={state,LaueFormats:F,readInstrument:()=>({}),beamCenterPosition:()=>({x:2,y:0}),setBeamCenterPosition:(x,y)=>{s.beam={x,y}}};
   vm.createContext(s);vm.runInContext(central,s);s.updateTransformedDataFromRaw();state.transform.rotate90=1;s.updateTransformedDataFromRaw();
   assert.equal(state.observedPeaks[0].x,1);assert.equal(state.observedPeaks[0].y,2);assert.equal(state.observedPeaks[0].id,5);
+  assert.equal(state.rotationCenter.x,1);assert.equal(state.rotationCenter.y,2);
   assert.deepEqual(s.beam,{x:1,y:2});s.updateTransformedDataFromRaw();assert.equal(state.observedPeaks[0].x,1);
+});
+
+test('Laue image loading normalizes the beam against the incoming image size', () => {
+  const text=source('js/laue-analysis.js');
+  const section=(start,end)=>text.slice(text.indexOf('  function '+start),text.indexOf('  function '+end));
+  const elements=new Map(),el=id=>{if(!elements.has(id))elements.set(id,{value:0});return elements.get(id);};
+  const s={state:{displayData:{width:1024,height:1024},transformedData:{width:256,height:128},
+    instrument:{beamX:128,beamY:64,detOffsetX:7,detOffsetY:-3}},document:{getElementById:el},
+    num:()=>0,readCorrections:()=>({}),LaueFormats:{applyCorrections:(data,c,x,y)=>{s.beam={x,y};return data;}},
+    renderDisplayOnly(){},applyViewTransform(){},updatePredictions(){},restoreRawIntensityRange(){}};
+  vm.createContext(s);
+  vm.runInContext(section('imageBeamReference()', 'defaultCurvePoints()')+
+    section('refreshCorrectedDisplay(', 'onBeamCenterChanged('),s);
+  s.refreshCorrectedDisplay(false);
+  assert.deepEqual(s.beam,{x:135,y:61});
+  assert.equal(s.state.instrument.detOffsetX,7);assert.equal(s.state.instrument.detOffsetY,-3);
+  assert.equal(s.state.instrument.beamX,128);assert.equal(s.state.instrument.beamY,64);
 });
 
 test('colormap rejects degenerate calibration, exports only current results and draws logarithmic ticks', () => {

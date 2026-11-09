@@ -101,6 +101,7 @@
     predictedPeaks: [],
     observedPeaks: [],
     mode: "pan-orientation",
+    rotationCenter: null, // null follows the beam center; otherwise fixed image coordinates
     view: { zoom: 1, fitScale: 1, centerX: null, centerY: null, tx: 0, ty: 0, totalScale: 1 },
     drag: null,
     curveDrag: null,
@@ -366,6 +367,48 @@
     document.getElementById("laue-det-offset-y").value = state.instrument.detOffsetY;
   }
 
+  function rotationCenterPosition() {
+    return state.rotationCenter || beamCenterPosition();
+  }
+
+  function placeRotationCenter(pos) {
+    const point = {
+      x: Math.max(0, Math.min(state.displayData.width, pos.x)),
+      y: Math.max(0, Math.min(state.displayData.height, pos.y))
+    };
+    const hitR = screenPxToCanvas(12);
+    const overlay = state.overlay;
+    const beam = beamCenterPosition();
+    let nearest = null;
+    let distance = hitR;
+    const candidates = [
+      ...(overlay.showBeamCenter ? [{ ...beam, beam: true }] : []),
+      ...(overlay.showPredictedPeaks ? state.predictedPeaks.filter(p => p.onImage) : []),
+      ...(overlay.showObservedPeaks ? state.observedPeaks : [])
+    ];
+    for (const p of candidates) {
+      const d = Math.hypot(p.x - point.x, p.y - point.y);
+      if (d < distance) {
+        nearest = p;
+        distance = d;
+      }
+    }
+    state.rotationCenter = nearest?.beam ? null : { x: nearest?.x ?? point.x, y: nearest?.y ?? point.y };
+    const target = nearest?.beam ? "beam center"
+      : nearest?.h != null ? `peak (${nearest.h}, ${nearest.k}, ${nearest.l})`
+      : nearest ? "observed peak" : `(${point.x.toFixed(1)}, ${point.y.toFixed(1)}) px`;
+    setStatus(`Rotation center: ${target}. Select Rotate pattern to rotate about this point.`);
+    redrawOverlays();
+  }
+
+  function resetRotationCenter() {
+    endDrag();
+    state.rotationCenter = null;
+    redrawOverlays();
+    setStatus("Rotation center reset to the beam center.");
+    persistConfig();
+  }
+
   /** Fold legacy beamX/beamY stored away from image center into detector offsets. */
   function normalizeBeamStorage() {
     if (!state.displayData) return;
@@ -550,6 +593,9 @@
       state.instrument.beamX = state.transformedData.width / 2;
       state.instrument.beamY = state.transformedData.height / 2;
     }
+    // Normalize against the incoming image, which may differ from the blank
+    // detector or previous image still held in displayData.
+    state.displayData = state.transformedData;
     normalizeBeamStorage();
     const corrections = readCorrections();
     const beam = beamCenterPosition();
@@ -646,6 +692,7 @@
       const remap = p => LaueFormats.transformDisplayPoint(
         LaueFormats.transformDisplayPoint(p, width, height, previous.t, true), width, height, t);
       state.observedPeaks = state.observedPeaks.map(remap);
+      if (state.rotationCenter) state.rotationCenter = remap(state.rotationCenter);
       beam = remap(beamCenterPosition());
     }
     state.transformedData = LaueFormats.applyDisplayTransform(state.rawData, t);
@@ -873,6 +920,7 @@
       state.rawIntensityRange = null;
       state.appliedImageTransform = null;
       state.observedPeaks = [];
+      state.rotationCenter = null;
       state.transform = { rotate90: 0, flipH: false, flipV: false };
       state.instrument.beamX = null;
       state.instrument.beamY = null;
@@ -1323,6 +1371,30 @@
       }
     }
 
+    if (state.rotationCenter || state.mode === "rotate-pattern" || state.mode === "move-rotation-center") {
+      const center = rotationCenterPosition();
+      const pos = imageToViewport(center.x, center.y);
+      overlayCtx.globalAlpha = 1;
+      overlayCtx.lineWidth = 2;
+      overlayCtx.strokeStyle = "#162f3a";
+      overlayCtx.fillStyle = "#00d5ff";
+      overlayCtx.beginPath();
+      overlayCtx.arc(pos.x, pos.y, 6, 0, Math.PI * 2);
+      overlayCtx.fill();
+      overlayCtx.stroke();
+      overlayCtx.strokeStyle = "#ffffff";
+      overlayCtx.beginPath();
+      overlayCtx.arc(pos.x, pos.y, 9, 0, Math.PI * 2);
+      overlayCtx.stroke();
+      if (state.mode === "move-rotation-center") {
+        overlayCtx.font = "12px sans-serif";
+        overlayCtx.fillStyle = "rgba(0, 0, 0, 0.75)";
+        overlayCtx.fillRect(pos.x + 13, pos.y - 22, 96, 19);
+        overlayCtx.fillStyle = "#ffffff";
+        overlayCtx.fillText("Rotation center", pos.x + 17, pos.y - 8);
+      }
+    }
+
     overlayCtx.globalAlpha = 1;
   }
 
@@ -1541,6 +1613,7 @@
       corrections: readCorrections(),
       overlay: readOverlaySettings(),
       view: state.view,
+      rotationCenter: state.rotationCenter,
       observedPeaks: state.observedPeaks.map(({ x, y, matchedH, matchedK, matchedL }) => ({
         x, y, matchedH, matchedK, matchedL
       }))
@@ -1601,6 +1674,9 @@
     }
     if (obj.observedPeaks) state.observedPeaks = obj.observedPeaks.map((p, i) => ({ ...p, id: i }));
     if (obj.view) state.view = { ...state.view, ...obj.view };
+    state.rotationCenter = obj.rotationCenter &&
+      Number.isFinite(obj.rotationCenter.x) && Number.isFinite(obj.rotationCenter.y)
+      ? { x: obj.rotationCenter.x, y: obj.rotationCenter.y } : null;
     document.getElementById("laue-colormap").value = state.display.colormap || "gray";
     document.getElementById("laue-vmin").value = state.display.vmin ?? 0;
     document.getElementById("laue-vmax").value = state.display.vmax ?? "";
@@ -1959,9 +2035,21 @@
     if (event.button !== 0) return;
 
     const pos = clientToImage(event);
-    const beam = beamCenterPosition();
-    const beamX = beam.x;
-    const beamY = beam.y;
+
+    // Center placement must take precedence over the beam's own drag handles.
+    if (state.mode === "move-rotation-center") {
+      state.drag = { type: "move-rotation-center" };
+      placeRotationCenter(pos);
+      if (canvasViewport) canvasViewport.classList.add("laue-dragging");
+      return;
+    }
+
+    if (state.mode === "rotate-pattern") {
+      const center = rotationCenterPosition();
+      if (Math.hypot(pos.x - center.x, pos.y - center.y) < screenPxToCanvas(12)) return;
+      state.drag = { type: "rotate-pattern", cx: center.x, cy: center.y, startAngle: Math.atan2(pos.y - center.y, pos.x - center.x) };
+      return;
+    }
 
     const beamDrag = beamHandleHit(pos);
     if (beamDrag) {
@@ -2020,10 +2108,6 @@
       };
       return;
     }
-
-    if (state.mode === "rotate-pattern") {
-      state.drag = { type: "rotate-pattern", cx: beamX, cy: beamY, startAngle: Math.atan2(pos.y - beamY, pos.x - beamX) };
-    }
   }
 
   function onCanvasMouseMove(event) {
@@ -2047,7 +2131,9 @@
     if (!state.drag) return;
     const pos = clientToImage(event);
 
-    if (state.drag.type === "beam-center") {
+    if (state.drag.type === "move-rotation-center") {
+      placeRotationCenter(pos);
+    } else if (state.drag.type === "beam-center") {
       setBeamCenterPosition(pos.x - (state.drag.dx || 0), pos.y - (state.drag.dy || 0));
       onBeamCenterChanged({ deferRadialNormalize: true });
     } else if (state.drag.type === "beam-radius") {
@@ -2089,6 +2175,7 @@
       document.getElementById("laue-sample-phi").value = angles.phi;
       updatePredictions();
     } else if (state.drag.type === "rotate-pattern") {
+      if (Math.hypot(pos.x - state.drag.cx, pos.y - state.drag.cy) < screenPxToCanvas(12)) return;
       const angle = Math.atan2(pos.y - state.drag.cy, pos.x - state.drag.cx);
       const delta = Math.atan2(
         Math.sin(angle - state.drag.startAngle),
@@ -2096,10 +2183,14 @@
       ) * 180 / Math.PI;
       state.drag.startAngle = angle;
       const inst = readInstrument();
-      const angles = LaueMath.rotateSampleOrientationAboutBeam(
+      const rotate = state.rotationCenter ? LaueMath.rotateSampleOrientationAboutPoint : LaueMath.rotateSampleOrientationAboutBeam;
+      const angles = rotate(
         { omega: inst.sampleOmega, chi: inst.sampleChi, phi: inst.samplePhi },
         { omega: inst.sampleSignOmega, chi: inst.sampleSignChi, phi: inst.sampleSignPhi },
-        -delta
+        -delta,
+        { x: state.drag.cx, y: state.drag.cy },
+        buildConfig(inst),
+        { width: state.displayData.width, height: state.displayData.height }
       );
       document.getElementById("laue-sample-omega").value = angles.omega;
       document.getElementById("laue-sample-chi").value = angles.chi;
@@ -2129,7 +2220,7 @@
     if (state.drag) {
       const wasMovePeak = state.drag.type === "move-peak";
       const wasBeamCenter = state.drag.type === "beam-center";
-      if (wasMovePeak || state.drag.type === "pan-view") {
+      if (wasMovePeak || state.drag.type === "pan-view" || state.drag.type === "move-rotation-center") {
         clearObservedPeakSelection();
         if (canvasViewport) canvasViewport.classList.remove("laue-dragging");
       }
@@ -2153,7 +2244,7 @@
   }
 
   function setMode(mode) {
-    if (state.drag?.type === "move-peak" || state.drag?.type === "pan-view") {
+    if (state.drag?.type === "move-peak" || state.drag?.type === "pan-view" || state.drag?.type === "move-rotation-center") {
       clearObservedPeakSelection();
       if (canvasViewport) canvasViewport.classList.remove("laue-dragging");
     }
@@ -2161,18 +2252,22 @@
     state.mode = mode;
     modeButtons.forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.mode === mode);
+      btn.setAttribute("aria-pressed", String(btn.dataset.mode === mode));
     });
     if (canvasViewport) {
       canvasViewport.classList.toggle("laue-zoom-area-mode", mode === "zoom-area");
       canvasViewport.classList.toggle("laue-pan-view-mode", mode === "pan-view");
       canvasViewport.classList.toggle("laue-move-peak-mode", mode === "move-peak");
+      canvasViewport.classList.toggle("laue-move-rotation-center-mode", mode === "move-rotation-center");
     }
+    redrawOverlays();
     setStatus({
       view: "View mode — scroll wheel to zoom; right-click resets zoom",
       "zoom-area": "Drag a rectangle to zoom; right-click resets zoom",
       "pan-view": "Drag to pan the image view",
       "pan-orientation": "Drag to pan orientation; drag beam-center handles directly when needed",
-      "rotate-pattern": "Drag to rotate sample orientation about the direct beam",
+      "rotate-pattern": "Drag around the cyan dot to rotate the pattern. Use Move rotation center to choose a different pivot.",
+      "move-rotation-center": "Drag the cyan dot or click anywhere to place the rotation center. It snaps to visible peaks and the beam center.",
       "add-peak": "Click to add observed peak",
       "move-peak": "Click and drag detected peaks to reposition them",
       "remove-peak": "Click to remove nearest observed peak"
@@ -2270,6 +2365,7 @@
     });
 
     document.getElementById("laue-zoom-reset").addEventListener("click", () => resetViewToFit());
+    document.getElementById("laue-rotation-center-reset").addEventListener("click", resetRotationCenter);
 
     if (canvasViewport) {
       canvasViewport.addEventListener("wheel", (e) => {
@@ -2357,7 +2453,8 @@
       endDrag();
     });
     window.addEventListener("mousemove", (e) => {
-      if (state.drag && state.drag.type === "zoom-rect") {
+      if (state.drag && (state.drag.type === "zoom-rect" ||
+        (state.drag.type === "move-rotation-center" && e.target !== canvas))) {
         onCanvasMouseMove(e);
       }
     });

@@ -259,15 +259,39 @@
   }
 
   function rotateSampleOrientationAboutBeam(startAngles, signs, deltaDeg) {
+    return rotateSampleOrientationAboutAxis(startAngles, signs, deltaDeg, [1, 0, 0]);
+  }
+
+  function rotateSampleOrientationAboutAxis(startAngles, signs, deltaDeg, axis) {
     const hint = { ...startAngles };
     const m = uMatrix(startAngles.omega, startAngles.chi, startAngles.phi, signs);
-    const mNew = mat3Mul(rotAxis([1, 0, 0], degToRad(deltaDeg)), m);
+    const mNew = mat3Mul(rotAxis(axis, degToRad(deltaDeg)), m);
     const raw = sampleEulerFromUMatrix(mNew, signs);
     return {
       omega: wrapAngleNear(raw.omega, hint.omega),
       chi: wrapAngleNear(raw.chi, hint.chi),
       phi: wrapAngleNear(raw.phi, hint.phi)
     };
+  }
+
+  /**
+   * Rotate about the scattering vector at an image point. A reflection at that
+   * point keeps its lab-frame G vector, wavelength and detector position fixed.
+   * Negate G so the axis approaches +x at the backscatter beam center, matching
+   * the existing beam rotation convention. This also supports unsnapped points.
+   */
+  function rotateSampleOrientationAboutPoint(startAngles, signs, deltaDeg, point, config, imageSize) {
+    const cfg = { ...config };
+    syncBeamFromOffsets(cfg, imageSize);
+    const geom = projectionGeometry(cfg, imageSize);
+    const hit = add(geom.planePoint, add(
+      scale(geom.basis.u, (point.x - geom.beamX) / geom.pxPerMmX),
+      scale(geom.basis.v, (point.y - geom.beamY) / geom.pxPerMmY)
+    ));
+    const axis = subtract([1, 0, 0], normalize(hit));
+    // The forward direct beam has zero momentum transfer and no unique G axis.
+    return rotateSampleOrientationAboutAxis(startAngles, signs, deltaDeg,
+      norm(axis) < 1e-10 ? [1, 0, 0] : normalize(axis));
   }
 
   function ubMatrix(params, sampleOmega, sampleChi, samplePhi, signs) {
@@ -1177,6 +1201,7 @@
     sampleEulerFromUMatrix,
     panSampleOrientationTrackPoint,
     rotateSampleOrientationAboutBeam,
+    rotateSampleOrientationAboutPoint,
     ubMatrix,
     reciprocalVector,
     enumerateHKL,
