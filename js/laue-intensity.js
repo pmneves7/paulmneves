@@ -117,7 +117,7 @@
     };
   }
 
-  function calculateSpots(peaks, model, wavelengthMin, wavelengthMax) {
+  function calculateSpots(peaks, model, wavelengthMin, wavelengthMax, spectrum) {
     if (!Number.isFinite(wavelengthMin) || !Number.isFinite(wavelengthMax) ||
         !(wavelengthMin > 0 && wavelengthMax > wavelengthMin)) {
       throw new Error("Wavelength limits must satisfy 0 < minimum < maximum.");
@@ -126,6 +126,9 @@
     const missing = new Set();
     for (const peak of peaks) {
       if (peak.lambda < wavelengthMin || peak.lambda > wavelengthMax) continue;
+      const spectralDensity = spectrum ? spectrum.density(peak.lambda) : 1;
+      if (!Number.isFinite(spectralDensity) || spectralDensity < 0) throw new Error("Incident spectral flux must be finite and nonnegative.");
+      if (spectralDensity === 0) continue;
       const key = directionKey(peak);
       let spot = groups.get(key);
       if (!spot) {
@@ -133,9 +136,11 @@
         groups.set(key, spot);
       }
       const result = model.reflectionIntensity(peak);
-      spot.reflections.push({ ...peak, intensity: result.intensity });
+      const intensity = result.intensity == null ? null : result.intensity * spectralDensity;
+      if (intensity != null && !Number.isFinite(intensity)) throw new Error("Intensity is outside the numeric range.");
+      spot.reflections.push({ ...peak, intensity });
       if (result.intensity == null) spot.available = false;
-      else spot.intensity += result.intensity;
+      else spot.intensity += intensity;
       for (const element of result.missingElements) missing.add(element);
     }
     const spots = [...groups.values()];
@@ -157,5 +162,16 @@
     return { spots, maxIntensity, missingElements: [...missing].sort(), unavailableSpots: spots.filter(spot => spot.onImage && !spot.available).length };
   }
 
-  global.LaueIntensity = { createModel, calculateSpots, allowedPredicate };
+  function markerRadius(relativeIntensity, minimumRadius, maximumRadius) {
+    if (![relativeIntensity, minimumRadius, maximumRadius].every(Number.isFinite) || relativeIntensity < 0 ||
+        minimumRadius < 0 || maximumRadius <= 0 || minimumRadius > maximumRadius) {
+      throw new Error("Peak radii must satisfy 0 ≤ minimum ≤ maximum, with a positive maximum.");
+    }
+    // A constant AREA offset keeps weak peaks visible while the area above
+    // that offset remains proportional to I/Imax. Adding a radius instead
+    // would introduce a sqrt(I) cross-term into the displayed area.
+    return Math.sqrt(minimumRadius ** 2 + (maximumRadius ** 2 - minimumRadius ** 2) * Math.min(1, relativeIntensity));
+  }
+
+  global.LaueIntensity = { createModel, calculateSpots, allowedPredicate, markerRadius };
 })(typeof window !== "undefined" ? window : globalThis);

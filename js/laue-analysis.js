@@ -71,7 +71,9 @@
     crystal: { a: 5.43, b: 5.43, c: 5.43, alpha: 90, beta: 90, gamma: 90, spaceGroup: "Fd-3m" },
     crystalMeta: { presetId: "si-diamond", structureModel: "diamond", chemicalFormula: "" },
     crystalStructure: { atoms: [], symmetryOperations: [], spaceGroupSetting: "", assumedP1: false },
-    expectedIntensity: { enabled: false, sourceType: "xray", wavelengthMin: 0.5, wavelengthMax: 4 },
+    expectedIntensity: { enabled: false, sourceType: "xray", wavelengthMin: 0.5, wavelengthMax: 4,
+      minimumPeakRadius: 1, xraySpectrum: "cu-lines", tubeVoltageKv: 40, cuLineWidthEv: 3,
+      neutronSpectrum: "thermal", neutronTemperatureK: 300 },
     intensitySpots: [],
     instrument: {
       detDistance: 150,
@@ -1174,7 +1176,13 @@
       enabled: document.getElementById("laue-show-expected-intensity").checked,
       sourceType: source === "neutron" ? "neutron" : "xray",
       wavelengthMin: Number(document.getElementById("laue-wavelength-min").value),
-      wavelengthMax: Number(document.getElementById("laue-wavelength-max").value)
+      wavelengthMax: Number(document.getElementById("laue-wavelength-max").value),
+      minimumPeakRadius: Number(document.getElementById("laue-minimum-peak-radius").value),
+      xraySpectrum: document.getElementById("laue-xray-spectrum").value,
+      tubeVoltageKv: Number(document.getElementById("laue-tube-voltage").value),
+      cuLineWidthEv: Number(document.getElementById("laue-cu-line-width").value),
+      neutronSpectrum: document.getElementById("laue-neutron-spectrum").value,
+      neutronTemperatureK: Number(document.getElementById("laue-neutron-temperature").value)
     };
     return state.expectedIntensity;
   }
@@ -1185,6 +1193,12 @@
     document.getElementById("laue-intensity-source").value = settings.sourceType;
     document.getElementById("laue-wavelength-min").value = settings.wavelengthMin;
     document.getElementById("laue-wavelength-max").value = settings.wavelengthMax;
+    document.getElementById("laue-minimum-peak-radius").value = settings.minimumPeakRadius;
+    document.getElementById("laue-xray-spectrum").value = settings.xraySpectrum;
+    document.getElementById("laue-tube-voltage").value = settings.tubeVoltageKv;
+    document.getElementById("laue-cu-line-width").value = settings.cuLineWidthEv;
+    document.getElementById("laue-neutron-spectrum").value = settings.neutronSpectrum;
+    document.getElementById("laue-neutron-temperature").value = settings.neutronTemperatureK;
   }
 
   function updateExpectedIntensities() {
@@ -1193,9 +1207,16 @@
     const checkbox = document.getElementById("laue-show-expected-intensity");
     checkbox.disabled = !hasAtoms;
     if (!hasAtoms) checkbox.checked = settings.enabled = false;
-    for (const id of ["laue-intensity-source", "laue-wavelength-min", "laue-wavelength-max"]) {
+    for (const id of ["laue-intensity-source", "laue-wavelength-min", "laue-wavelength-max", "laue-minimum-peak-radius",
+      "laue-xray-spectrum", "laue-tube-voltage", "laue-cu-line-width", "laue-neutron-spectrum", "laue-neutron-temperature"]) {
       document.getElementById(id).disabled = !hasAtoms || !settings.enabled;
     }
+    document.getElementById("laue-xray-spectrum-fields").hidden = settings.sourceType !== "xray";
+    document.getElementById("laue-neutron-spectrum-fields").hidden = settings.sourceType !== "neutron";
+    document.getElementById("laue-tube-voltage-field").hidden = settings.xraySpectrum === "flat";
+    document.getElementById("laue-cu-line-width-field").hidden = settings.xraySpectrum !== "cu-lines";
+    document.getElementById("laue-neutron-temperature-field").hidden = settings.neutronSpectrum !== "maxwell";
+    document.getElementById("laue-spectrum-status").textContent = "";
     document.getElementById("laue-pred-radius-label").textContent = settings.enabled ? "Maximum dot radius (px)" : "Radius (px)";
     const note = document.getElementById("laue-expected-intensity-status");
     state.intensitySpots = [];
@@ -1208,15 +1229,19 @@
       return;
     }
     try {
+      const maximumRadius = readOverlaySettings().predRadius;
+      LaueIntensity.markerRadius(1, settings.minimumPeakRadius, maximumRadius);
+      const spectrum = LaueSpectrum.create(settings);
+      document.getElementById("laue-spectrum-status").textContent = spectrum.description;
       const crystal = readCrystal();
       const key = JSON.stringify([crystal, settings.sourceType]);
       if (intensityModelCache?.key !== key) intensityModelCache = { key, model: LaueIntensity.createModel(crystal, settings.sourceType) };
-      const result = LaueIntensity.calculateSpots(state.predictedPeaks, intensityModelCache.model, settings.wavelengthMin, settings.wavelengthMax);
+      const result = LaueIntensity.calculateSpots(state.predictedPeaks, intensityModelCache.model, settings.wavelengthMin, settings.wavelengthMax, spectrum);
       state.intensitySpots = result.spots;
       const visible = result.spots.filter(spot => spot.onImage && spot.available && spot.intensity > 0).length;
       const missing = result.unavailableSpots ? ` ${result.unavailableSpots} visible spots unavailable: missing scattering factors for ${result.missingElements.join(", ")} at the required Q.` : "";
       const symmetry = crystal.assumedP1 ? " No CIF symmetry was specified; the listed atom sites are assumed to form a complete P1 cell." : "";
-      note.textContent = `${visible} visible spots in ${settings.wavelengthMin}–${settings.wavelengthMax} Å. Dot area is proportional to relative integrated intensity; the strongest visible spot has the maximum radius. Harmonics are summed within the current Q and HKL limits.${missing}${symmetry}`;
+      note.textContent = `${visible} visible spots in ${settings.wavelengthMin}–${settings.wavelengthMax} Å. Dot area above the ${settings.minimumPeakRadius} px radius baseline is proportional to relative integrated intensity; the strongest visible spot has the maximum radius. Zero-intensity peaks stay hidden. Harmonics are weighted by incident flux before summing within the current Q and HKL limits.${missing}${symmetry}`;
     } catch (error) {
       note.textContent = `Expected intensity unavailable: ${error.message}`;
     }
@@ -1421,8 +1446,14 @@
         if (!p.onImage) continue;
         if (intensity && (!p.available || !(p.relativeIntensity > 0))) continue;
         const pos = imageToViewport(p.x, p.y);
+        let radius = overlay.predRadius;
+        if (intensity) {
+          try {
+            radius = LaueIntensity.markerRadius(p.relativeIntensity, state.expectedIntensity.minimumPeakRadius, overlay.predRadius);
+          } catch (_) { continue; } // A transient invalid radius edit is reported by the controls.
+        }
         overlayCtx.beginPath();
-        overlayCtx.arc(pos.x, pos.y, overlay.predRadius * (intensity ? Math.sqrt(p.relativeIntensity) : 1), 0, Math.PI * 2);
+        overlayCtx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
         if (intensity) {
           setOverlayFill(overlayCtx, overlay.predColor, predA);
           overlayCtx.fill();
@@ -1736,7 +1767,9 @@
         chemicalFormula: obj.crystal.chemicalFormula
       });
     }
-    state.expectedIntensity = { enabled: false, sourceType: "xray", wavelengthMin: 0.5, wavelengthMax: 4, ...obj.expectedIntensity };
+    state.expectedIntensity = { enabled: false, sourceType: "xray", wavelengthMin: 0.5, wavelengthMax: 4,
+      minimumPeakRadius: 1, xraySpectrum: "cu-lines", tubeVoltageKv: 40, cuLineWidthEv: 3,
+      neutronSpectrum: "thermal", neutronTemperatureK: 300, ...obj.expectedIntensity };
     if (state.expectedIntensity.sourceType !== "neutron") state.expectedIntensity.sourceType = "xray";
     writeIntensitySettings();
     if (obj.instrument) {

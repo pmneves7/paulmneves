@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const context = {}; context.window = context;
 for (const file of ['space-groups-data.js', 'spacegroup-settings-data.js', 'spacegroup-engine.js',
-  'cromer-mann-data.js', 'scattering-factors.js', 'cif-parser.js', 'laue-math.js', 'laue-intensity.js']) {
+  'cromer-mann-data.js', 'scattering-factors.js', 'cif-parser.js', 'laue-math.js', 'laue-spectrum.js', 'laue-intensity.js']) {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, file), 'utf8'), context);
 }
 const I = context.LaueIntensity, F = context.ScatteringFactors;
@@ -168,6 +168,8 @@ function uiFixture() {
   };
   for(const [id,value] of Object.entries({a:5,b:5,c:5,alpha:90,beta:90,gamma:90,spacegroup:'P1'}))el('laue-'+id).value=String(value);
   el('laue-intensity-source').value='neutron';el('laue-wavelength-min').value='.5';el('laue-wavelength-max').value='4';
+  el('laue-minimum-peak-radius').value='0';el('laue-xray-spectrum').value='flat';el('laue-neutron-spectrum').value='flat';
+  el('laue-tube-voltage').value='40';el('laue-cu-line-width').value='3';el('laue-neutron-temperature').value='300';
   const s={...context,document:{getElementById:el},spaceGroupFieldsLink:null,intensityModelCache:null,
     state:{crystalStructure:{atoms:[],symmetryOperations:[],spaceGroupSetting:'',assumedP1:false},crystalMeta:{},
       expectedIntensity:{},predictedPeaks:[peak(),peak(-1,1)],intensitySpots:[],instrument:{beamRadius:30},observedPeaks:[],view:{},mode:'',displayData:{width:500,height:500},display:{},corrections:{}},
@@ -239,4 +241,43 @@ test('GUI prediction predicate keeps primitive rhombohedral reflections before c
   const unfiltered=context.LaueMath.computePredictedPeaks(crystal,{...config},{width:1024,height:1024});
   const filtered=context.LaueMath.computePredictedPeaks(crystal,{...config},{width:1024,height:1024},s.allowedPredicateForCrystal(crystal));
   assert.equal(filtered.length,unfiltered.length);
+});
+
+test('each harmonic receives incident flux before the spot sum and no-flux reflections stay hidden',()=>{
+  const m=model(), p=peak(), harmonic=peak(2,1);
+  const spectrum={density:lambda=>lambda===1?4:1};
+  const spot=I.calculateSpots([p,harmonic],m,.5,4,spectrum).spots[0];
+  close(spot.intensity,m.reflectionIntensity(p).intensity+m.reflectionIntensity(harmonic).intensity*4);
+  const cu=context.LaueSpectrum.create({sourceType:'xray',xraySpectrum:'cu-continuum',tubeVoltageKv:10});
+  const filtered=I.calculateSpots([p,harmonic],m,.5,4,cu);
+  assert.equal(filtered.spots.length,1);assert.equal(filtered.spots[0].reflections.length,1);assert.equal(filtered.spots[0].h,1);
+  for(const bad of [-1,NaN,Infinity]) assert.throws(()=>I.calculateSpots([p],m,.5,4,{density:()=>bad}),/spectral flux/);
+});
+
+test('radius baseline adds constant area, preserves strongest radius and does not turn extinct spots into dots',()=>{
+  close(I.markerRadius(0,1,8),1);close(I.markerRadius(1,1,8),8);
+  close((I.markerRadius(1/16,1,8)**2-1)/(I.markerRadius(1,1,8)**2-1),1/16);
+  close(I.markerRadius(.25,0,8),4);
+  for(const radii of [[-1,8],[9,8],[1,0],[NaN,8]]) assert.throws(()=>I.markerRadius(.5,...radii),/Peak radii/);
+  const {s,el}=uiFixture();s.applyCifData({...cell,atoms:[carbon]});
+  el('laue-show-expected-intensity').checked=true;el('laue-minimum-peak-radius').value='1';s.updateExpectedIntensities();s.redrawOverlays();
+  close((s.draws[1].r**2-1)/(s.draws[0].r**2-1),1/16);assert.ok(s.draws[1].r>1);
+  s.state.intensitySpots[0].relativeIntensity=0;s.draws=[];s.redrawOverlays();assert.equal(s.draws.length,1);
+  el('laue-minimum-peak-radius').value='9';s.updateExpectedIntensities();assert.equal(s.state.intensitySpots.length,0);
+  assert.match(el('laue-expected-intensity-status').textContent,/Peak radii/);
+});
+
+test('spectrum settings and minimum radius persist, and older configs default to one pixel',()=>{
+  const {s,el}=uiFixture();s.applyCifData({...cell,atoms:[carbon]});
+  el('laue-show-expected-intensity').checked=true;el('laue-minimum-peak-radius').value='1.5';
+  el('laue-neutron-spectrum').value='maxwell';el('laue-neutron-temperature').value='45';
+  el('laue-xray-spectrum').value='cu-lines';el('laue-tube-voltage').value='35';el('laue-cu-line-width').value='5';
+  s.updateExpectedIntensities();const saved=JSON.parse(JSON.stringify(s.saveConfigToObject()));
+  const restored=uiFixture();restored.s.loadConfigFromObject(saved);
+  assert.equal(restored.el('laue-minimum-peak-radius').value,1.5);
+  assert.equal(restored.el('laue-neutron-temperature').value,45);assert.equal(restored.el('laue-tube-voltage').value,35);
+  assert.equal(restored.el('laue-xray-spectrum').value,'cu-lines');
+  assert.equal(restored.el('laue-xray-spectrum-fields').hidden,true);
+  assert.equal(restored.el('laue-neutron-temperature-field').hidden,false);
+  restored.s.loadConfigFromObject({crystal:cell});assert.equal(restored.el('laue-minimum-peak-radius').value,1);
 });
