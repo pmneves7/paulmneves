@@ -536,7 +536,9 @@
         </section>
 
         <div class="tool-results" aria-live="polite">
-          <h3>Predicted reflections</h3>
+          <details class="tool-collapsible" id="laue-predicted-reflections">
+            <summary class="tool-collapsible-summary">Predicted reflections</summary>
+            <div class="tool-collapsible-body">
           <div class="tool-table-wrap">
             <table class="tool-table laue-peaks-table">
               <thead>
@@ -550,6 +552,8 @@
               <tbody id="laue-peaks-tbody"></tbody>
             </table>
           </div>
+            </div>
+          </details>
         </div>
       </div>
 
