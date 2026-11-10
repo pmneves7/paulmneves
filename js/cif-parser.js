@@ -131,26 +131,35 @@
       }
     }
 
-    return { headers, rows, nextIndex: i };
+    return { headers, rows, incompleteRow: headers.length > 0 && values.length % headers.length !== 0, nextIndex: i };
   }
 
-  function parseAtomSiteLoop(loop) {
+  function parseAtomSiteLoop(loop, incompleteSites) {
+    const hasAnyFractionalCoords = loop.headers.some(header => /^_atom_site_fract_[xyz]$/.test(header));
     const hasFractionalCoords =
       loop.headers.includes("_atom_site_fract_x") &&
       loop.headers.includes("_atom_site_fract_y") &&
       loop.headers.includes("_atom_site_fract_z");
-    if (!hasFractionalCoords) return [];
+    if (!hasFractionalCoords) {
+      if (hasAnyFractionalCoords) incompleteSites.push("Atom loop missing fractional coordinate columns");
+      return [];
+    }
+    if (loop.incompleteRow) incompleteSites.push("Incomplete atom loop row");
 
     return loop.rows
       .map((row, index) => {
         const x = parseCifNumber(row._atom_site_fract_x);
         const y = parseCifNumber(row._atom_site_fract_y);
         const z = parseCifNumber(row._atom_site_fract_z);
-        if (x == null || y == null || z == null) return null;
+        if (x == null || y == null || z == null) {
+          incompleteSites.push(stripCifString(row._atom_site_label || `Atom${index + 1}`));
+          return null;
+        }
 
         const type = stripCifString(row._atom_site_type_symbol || "");
         const label = stripCifString(row._atom_site_label || `Atom${index + 1}`);
         const occupancy = parseCifNumber(row._atom_site_occupancy);
+        if (row._atom_site_occupancy != null && (occupancy == null || occupancy < 0 || occupancy > 1)) incompleteSites.push(label);
         const multiplicity = parseCifNumber(row._atom_site_symmetry_multiplicity);
         const wyckoff = stripCifString(row._atom_site_wyckoff_symbol || "");
         const element = type || (label.match(/[A-Z][a-z]?/) || ["X"])[0];
@@ -229,11 +238,15 @@
       if (/^loop_$/i.test(trimmed)) {
         const loop = parseLoop(lines, i);
         i = loop.nextIndex;
-        const atoms = parseAtomSiteLoop(loop);
+        const incompleteSites = [];
+        const atoms = parseAtomSiteLoop(loop, incompleteSites);
+        if (incompleteSites.length) result.incompleteAtomSites = (result.incompleteAtomSites || []).concat(incompleteSites);
         if (atoms.length) {
           result.atoms = (result.atoms || []).concat(atoms);
         }
         const symmetryOperations = parseSymmetryOperationLoop(loop);
+        const symmetryKey = loop.headers.find(header => header === "_space_group_symop_operation_xyz" || header === "_symmetry_equiv_pos_as_xyz");
+        if (symmetryKey && (loop.incompleteRow || loop.rows.some(row => !stripCifString(row[symmetryKey] || "")))) result.incompleteSymmetryOperations = true;
         if (symmetryOperations.length) {
           result.symmetryOperations = (result.symmetryOperations || []).concat(symmetryOperations);
         }
@@ -284,6 +297,10 @@
             result.spaceGroupNameRaw = stripCifString(value);
             result.spaceGroupName = normalizeSpaceGroupName(value);
           }
+          break;
+        case "_space_group_name_hall":
+        case "_symmetry_space_group_name_hall":
+          result.spaceGroupHallSymbol = stripCifString(value);
           break;
         case "_symmetry_int_tables_number":
         case "_space_group_it_number":

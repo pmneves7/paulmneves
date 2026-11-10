@@ -329,7 +329,7 @@
                 <input type="number" id="laue-pred-linewidth" step="1" min="1" max="20" value="2" />
               </div>
               <div class="tool-field">
-                <label for="laue-pred-radius">Radius (px)</label>
+                <label for="laue-pred-radius" id="laue-pred-radius-label">Radius (px)</label>
                 <input type="number" id="laue-pred-radius" step="1" min="2" max="80" value="5" />
               </div>
               <div class="tool-field">
@@ -342,6 +342,29 @@
               <label><input type="checkbox" id="laue-show-predicted-labels" checked /> Show index labels</label>
               <label><input type="checkbox" id="laue-show-beam-center" checked /> Show beam center</label>
             </div>
+            <h3 class="laue-subheading">Expected Laue intensity</h3>
+            <div class="laue-check-row">
+              <label><input type="checkbox" id="laue-show-expected-intensity" disabled aria-describedby="laue-expected-intensity-status" /> Size solid predicted dots by intensity (CIF required)</label>
+            </div>
+            <div class="tool-grid">
+              <div class="tool-field">
+                <label for="laue-intensity-source">Radiation</label>
+                <select id="laue-intensity-source" disabled>
+                  <option value="xray">X-ray (unpolarized)</option>
+                  <option value="neutron">Neutron (nuclear)</option>
+                </select>
+              </div>
+              <div class="tool-field">
+                <label for="laue-wavelength-min">Minimum wavelength (Å)</label>
+                <input type="number" id="laue-wavelength-min" min="0" step="any" value="0.5" disabled />
+              </div>
+              <div class="tool-field">
+                <label for="laue-wavelength-max">Maximum wavelength (Å)</label>
+                <input type="number" id="laue-wavelength-max" min="0" step="any" value="4" disabled />
+              </div>
+            </div>
+            <p class="tool-note" id="laue-expected-intensity-status" role="status" aria-live="polite">Load a CIF with fractional atom positions to enable expected intensities.</p>
+            <p class="tool-note">Relative integrated intensities assume flat incident particle flux per Å over this band and uniform detector efficiency. Includes atom occupancies, crystal symmetry, the Laue wavelength factor and X-ray polarization. Omits absorption, extinction, thermal motion, anomalous X-ray and magnetic neutron scattering. These are relative spot strengths, not count rates.</p>
           </div>
             </div>
           </details>
@@ -522,15 +545,18 @@
   </footer>
 
   <script src="../js/site.js"></script>
-  <script src="../js/cif-parser.js?v=20261008-2"></script>
+  <script src="../js/cif-parser.js?v=20261110"></script>
   <script src="../js/crystal-presets.js"></script>
   <script src="../js/space-groups-data.js"></script>
   <script src="../js/spacegroup-settings-data.js"></script>
   <script src="../js/spacegroup-engine.js"></script>
   <script src="../js/spacegroup-fields.js"></script>
   <script src="../js/scattering-extinctions.js"></script>
+  <script src="../js/cromer-mann-data.js"></script>
+  <script src="../js/scattering-factors.js?v=20261008-3"></script>
+  <script src="../js/laue-intensity.js?v=20261110"></script>
   <script src="../js/laue-math.js?v=20261109"></script>
   <script src="../js/laue-formats.js?v=20261008-2"></script>
-  <script src="../js/laue-analysis.js?v=20261109"></script>
+  <script src="../js/laue-analysis.js?v=20261110"></script>
 </body>
 </html>

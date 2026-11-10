@@ -70,6 +70,9 @@
     },
     crystal: { a: 5.43, b: 5.43, c: 5.43, alpha: 90, beta: 90, gamma: 90, spaceGroup: "Fd-3m" },
     crystalMeta: { presetId: "si-diamond", structureModel: "diamond", chemicalFormula: "" },
+    crystalStructure: { atoms: [], symmetryOperations: [], spaceGroupSetting: "", assumedP1: false },
+    expectedIntensity: { enabled: false, sourceType: "xray", wavelengthMin: 0.5, wavelengthMax: 4 },
+    intensitySpots: [],
     instrument: {
       detDistance: 150,
       detWidth: 256,
@@ -111,6 +114,7 @@
 
   let imagePersistTimer = null;
   let reprocessTimer = null;
+  let intensityModelCache = null;
   /** Long side of the blank stand-in; follows the last cleared image so pixel offsets keep their meaning. */
   let blankLongSidePx = BLANK_DETECTOR_LONG_SIDE_PX;
 
@@ -141,7 +145,8 @@
       spaceGroup: document.getElementById("laue-spacegroup").value.trim(),
       presetId: state.crystalMeta.presetId || "",
       structureModel: state.crystalMeta.structureModel || "",
-      chemicalFormula: state.crystalMeta.chemicalFormula || ""
+      chemicalFormula: state.crystalMeta.chemicalFormula || "",
+      ...state.crystalStructure
     };
   }
 
@@ -153,8 +158,13 @@
     };
   }
 
-  function clearCrystalPresetMeta() {
+  function clearCrystalPresetMeta(resetSymmetry) {
     setCrystalMeta({ chemicalFormula: state.crystalMeta.chemicalFormula });
+    if (resetSymmetry) {
+      state.crystalStructure.symmetryOperations = [];
+      state.crystalStructure.spaceGroupSetting = "";
+      state.crystalStructure.assumedP1 = false;
+    }
     const presetSelect = document.getElementById("crystal-preset");
     if (presetSelect) presetSelect.value = "";
   }
@@ -263,6 +273,11 @@
   }
 
   function allowedPredicateForCrystal(crystal) {
+    if (crystal.atoms?.length && window.LaueIntensity) {
+      try {
+        return LaueIntensity.allowedPredicate(crystal);
+      } catch (_) { /* intensity status reports unresolved CIF symmetry */ }
+    }
     let ctx = null;
     if (window.resolveExtinctionContext) {
       try {
@@ -1153,6 +1168,60 @@
 
   let spaceGroupFieldsLink = null;
 
+  function readIntensitySettings() {
+    const source = document.getElementById("laue-intensity-source").value;
+    state.expectedIntensity = {
+      enabled: document.getElementById("laue-show-expected-intensity").checked,
+      sourceType: source === "neutron" ? "neutron" : "xray",
+      wavelengthMin: Number(document.getElementById("laue-wavelength-min").value),
+      wavelengthMax: Number(document.getElementById("laue-wavelength-max").value)
+    };
+    return state.expectedIntensity;
+  }
+
+  function writeIntensitySettings() {
+    const settings = state.expectedIntensity;
+    document.getElementById("laue-show-expected-intensity").checked = !!settings.enabled;
+    document.getElementById("laue-intensity-source").value = settings.sourceType;
+    document.getElementById("laue-wavelength-min").value = settings.wavelengthMin;
+    document.getElementById("laue-wavelength-max").value = settings.wavelengthMax;
+  }
+
+  function updateExpectedIntensities() {
+    const settings = readIntensitySettings();
+    const hasAtoms = state.crystalStructure.atoms.length > 0;
+    const checkbox = document.getElementById("laue-show-expected-intensity");
+    checkbox.disabled = !hasAtoms;
+    if (!hasAtoms) checkbox.checked = settings.enabled = false;
+    for (const id of ["laue-intensity-source", "laue-wavelength-min", "laue-wavelength-max"]) {
+      document.getElementById(id).disabled = !hasAtoms || !settings.enabled;
+    }
+    document.getElementById("laue-pred-radius-label").textContent = settings.enabled ? "Maximum dot radius (px)" : "Radius (px)";
+    const note = document.getElementById("laue-expected-intensity-status");
+    state.intensitySpots = [];
+    if (!hasAtoms) {
+      note.textContent = "Load a CIF with fractional atom positions to enable expected intensities.";
+      return;
+    }
+    if (!settings.enabled) {
+      note.textContent = `${state.crystalStructure.atoms.length} CIF atom sites loaded. Check the box to size solid dots by expected intensity.`;
+      return;
+    }
+    try {
+      const crystal = readCrystal();
+      const key = JSON.stringify([crystal, settings.sourceType]);
+      if (intensityModelCache?.key !== key) intensityModelCache = { key, model: LaueIntensity.createModel(crystal, settings.sourceType) };
+      const result = LaueIntensity.calculateSpots(state.predictedPeaks, intensityModelCache.model, settings.wavelengthMin, settings.wavelengthMax);
+      state.intensitySpots = result.spots;
+      const visible = result.spots.filter(spot => spot.onImage && spot.available && spot.intensity > 0).length;
+      const missing = result.unavailableSpots ? ` ${result.unavailableSpots} visible spots unavailable: missing scattering factors for ${result.missingElements.join(", ")} at the required Q.` : "";
+      const symmetry = crystal.assumedP1 ? " No CIF symmetry was specified; the listed atom sites are assumed to form a complete P1 cell." : "";
+      note.textContent = `${visible} visible spots in ${settings.wavelengthMin}–${settings.wavelengthMax} Å. Dot area is proportional to relative integrated intensity; the strongest visible spot has the maximum radius. Harmonics are summed within the current Q and HKL limits.${missing}${symmetry}`;
+    } catch (error) {
+      note.textContent = `Expected intensity unavailable: ${error.message}`;
+    }
+  }
+
   function updatePredictions(options) {
     if (spaceGroupFieldsLink) spaceGroupFieldsLink.sync();
     if (!state.displayData) return;
@@ -1170,6 +1239,7 @@
         imageSize,
         allowed
       );
+      updateExpectedIntensities();
       renderPeaksTable();
       const onImage = state.predictedPeaks.filter((p) => p.onImage).length;
       const total = state.predictedPeaks.length;
@@ -1193,6 +1263,8 @@
         setStatus(`${total} predicted peaks on image.${scaleHint}`);
       }
     } catch (err) {
+      state.predictedPeaks = [];
+      state.intensitySpots = [];
       setStatus(err.message);
     }
     if (options?.rematch !== false) rematchObservedPeaksIfAny();
@@ -1344,12 +1416,17 @@
       const predA = overlay.predAlpha ?? 0.8;
       setOverlayStroke(overlayCtx, overlay.predColor, predA);
       overlayCtx.lineWidth = overlay.predLineWidth ?? 2;
-      for (const p of state.predictedPeaks) {
+      const intensity = state.expectedIntensity.enabled;
+      for (const p of intensity ? state.intensitySpots : state.predictedPeaks) {
         if (!p.onImage) continue;
+        if (intensity && (!p.available || !(p.relativeIntensity > 0))) continue;
         const pos = imageToViewport(p.x, p.y);
         overlayCtx.beginPath();
-        overlayCtx.arc(pos.x, pos.y, overlay.predRadius, 0, Math.PI * 2);
-        overlayCtx.stroke();
+        overlayCtx.arc(pos.x, pos.y, overlay.predRadius * (intensity ? Math.sqrt(p.relativeIntensity) : 1), 0, Math.PI * 2);
+        if (intensity) {
+          setOverlayFill(overlayCtx, overlay.predColor, predA);
+          overlayCtx.fill();
+        } else overlayCtx.stroke();
         if (overlay.showPredictedLabels) {
           drawPeakIndexLabel(overlayCtx, pos, p.h, p.k, p.l, predA);
         }
@@ -1602,6 +1679,7 @@
     return {
       crystal: readCrystal(),
       crystalMeta: { ...state.crystalMeta },
+      expectedIntensity: readIntensitySettings(),
       instrument: readInstrument(),
       transform: state.transform,
       display: readDisplaySettings(),
@@ -1635,6 +1713,14 @@
       if (typeof obj.idealOrientation.horizontal === "string") document.getElementById("laue-target-horiz-hkl").value = obj.idealOrientation.horizontal;
     }
     if (obj.crystal) {
+      state.crystalStructure = {
+        atoms: Array.isArray(obj.crystal.atoms) ? obj.crystal.atoms : [],
+        symmetryOperations: Array.isArray(obj.crystal.symmetryOperations) ? obj.crystal.symmetryOperations : [],
+        spaceGroupSetting: obj.crystal.spaceGroupSetting || "",
+        assumedP1: !!obj.crystal.assumedP1,
+        incompleteAtomSites: obj.crystal.incompleteAtomSites || [],
+        incompleteSymmetryOperations: !!obj.crystal.incompleteSymmetryOperations
+      };
       for (const [key, val] of Object.entries(obj.crystal)) {
         if (key === "presetId" || key === "structureModel" || key === "chemicalFormula") continue;
         const el = document.getElementById(`laue-${key === "spaceGroup" ? "spacegroup" : key}`);
@@ -1650,6 +1736,9 @@
         chemicalFormula: obj.crystal.chemicalFormula
       });
     }
+    state.expectedIntensity = { enabled: false, sourceType: "xray", wavelengthMin: 0.5, wavelengthMax: 4, ...obj.expectedIntensity };
+    if (state.expectedIntensity.sourceType !== "neutron") state.expectedIntensity.sourceType = "xray";
+    writeIntensitySettings();
     if (obj.instrument) {
       writeInstrumentToForm(migrateInstrumentConfig(obj.instrument));
       normalizeBeamStorage();
@@ -1937,6 +2026,11 @@
   }
 
   function applyCifData(data) {
+    // Validate before replacing anything: incomplete CIFs must not inherit the
+    // previous crystal's cell or silicon extinction metadata.
+    LaueMath.reciprocalBasis(data);
+    if (data.incompleteAtomSites?.length) throw new Error("CIF atom positions or occupancies are incomplete. Load a CIF with a complete atomic basis.");
+    if (data.incompleteSymmetryOperations) throw new Error("CIF symmetry operations are incomplete. Load a complete symmetry loop.");
     if (data.a != null) document.getElementById("laue-a").value = data.a;
     if (data.b != null) document.getElementById("laue-b").value = data.b;
     if (data.c != null) document.getElementById("laue-c").value = data.c;
@@ -1946,7 +2040,13 @@
     if (data.spaceGroupName) document.getElementById("laue-spacegroup").value = data.spaceGroupName;
     else if (Number.isInteger(data.spaceGroupNumber)) {
       document.getElementById("laue-spacegroup").value = String(data.spaceGroupNumber);
-    }
+    } else document.getElementById("laue-spacegroup").value = data.spaceGroupHallSymbol || "P1";
+    state.crystalStructure = {
+      atoms: data.atoms || [],
+      symmetryOperations: data.symmetryOperations || [],
+      spaceGroupSetting: data.spaceGroupHallSymbol || "",
+      assumedP1: !data.spaceGroupName && !data.spaceGroupNumber && !data.spaceGroupHallSymbol && !data.symmetryOperations?.length
+    };
     setCrystalMeta({
       presetId: "",
       structureModel: "",
@@ -2476,7 +2576,7 @@
       .forEach((el) => {
         if (el.id === "laue-spacegroup-number") return; // handled by the symbol/number link
         el.addEventListener("input", () => {
-          if (el.closest("#laue-crystal-form")) clearCrystalPresetMeta();
+          if (el.closest("#laue-crystal-form")) clearCrystalPresetMeta(el.id === "laue-spacegroup");
           if (el.id === "laue-det-offset-x" || el.id === "laue-det-offset-y") onBeamCenterChanged();
           else if (el.id === "laue-match-radius") {
             rematchObservedPeaksIfAny();
@@ -2487,7 +2587,7 @@
           persistConfig();
         });
         el.addEventListener("change", () => {
-          if (el.closest("#laue-crystal-form")) clearCrystalPresetMeta();
+          if (el.closest("#laue-crystal-form")) clearCrystalPresetMeta(el.id === "laue-spacegroup");
           if (el.id === "laue-auto-flip-h" || el.id === "laue-auto-flip-v" || el.id === "laue-auto-rotate") {
             reprocessImage({ rescaleIntensity: false });
           } else if (el.id === "laue-det-offset-x" || el.id === "laue-det-offset-y") {
@@ -2570,6 +2670,7 @@
       presetSelect.addEventListener("change", () => {
         const preset = getCrystalPreset(presetSelect.value);
         if (!preset) return;
+        state.crystalStructure = { atoms: [], symmetryOperations: [], spaceGroupSetting: "", assumedP1: false };
         applyCrystalPresetToFields(preset, {
           a: document.getElementById("laue-a"),
           b: document.getElementById("laue-b"),
