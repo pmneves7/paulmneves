@@ -162,16 +162,16 @@
     return { spots, maxIntensity, missingElements: [...missing].sort(), unavailableSpots: spots.filter(spot => spot.onImage && !spot.available).length };
   }
 
-  function markerRadius(relativeIntensity, minimumRadius, maximumRadius) {
-    if (![relativeIntensity, minimumRadius, maximumRadius].every(Number.isFinite) || relativeIntensity < 0 ||
-        minimumRadius < 0 || maximumRadius <= 0 || minimumRadius > maximumRadius) {
-      throw new Error("Peak radii must satisfy 0 ≤ minimum ≤ maximum, with a positive maximum.");
+  function markerOpacity(relativeIntensity, minimumOpacity, maximumOpacity) {
+    if (![relativeIntensity, minimumOpacity, maximumOpacity].every(Number.isFinite) || relativeIntensity < 0 ||
+        minimumOpacity < 0 || maximumOpacity > 1 || minimumOpacity > maximumOpacity) {
+      throw new Error("Peak opacities must satisfy 0% ≤ minimum ≤ maximum ≤ 100%.");
     }
-    // A constant AREA offset keeps weak peaks visible while the area above
-    // that offset remains proportional to I/Imax. Adding a radius instead
-    // would introduce a sqrt(I) cross-term into the displayed area.
-    return Math.sqrt(minimumRadius ** 2 + (maximumRadius ** 2 - minimumRadius ** 2) * Math.min(1, relativeIntensity));
+    // Fixed-radius markers encode relative intensity linearly in opacity.
+    // The floor keeps weak nonzero reflections visible. Exact-zero reflections
+    // are filtered before rendering so the floor cannot create extinct peaks.
+    return minimumOpacity + (maximumOpacity - minimumOpacity) * Math.min(1, relativeIntensity);
   }
 
-  global.LaueIntensity = { createModel, calculateSpots, allowedPredicate, markerRadius };
+  global.LaueIntensity = { createModel, calculateSpots, allowedPredicate, markerOpacity };
 })(typeof window !== "undefined" ? window : globalThis);

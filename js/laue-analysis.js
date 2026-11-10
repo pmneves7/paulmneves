@@ -72,7 +72,7 @@
     crystalMeta: { presetId: "si-diamond", structureModel: "diamond", chemicalFormula: "" },
     crystalStructure: { atoms: [], symmetryOperations: [], spaceGroupSetting: "", assumedP1: false },
     expectedIntensity: { enabled: false, sourceType: "xray", wavelengthMin: 0.5, wavelengthMax: 4,
-      minimumPeakRadius: 1, xraySpectrum: "cu-lines", tubeVoltageKv: 40, cuLineWidthEv: 3,
+      minimumPeakOpacity: 0.1, xraySpectrum: "cu-lines", tubeVoltageKv: 40, cuLineWidthEv: 3,
       neutronSpectrum: "thermal", neutronTemperatureK: 300 },
     intensitySpots: [],
     instrument: {
@@ -1187,7 +1187,7 @@
       sourceType: source === "neutron" ? "neutron" : "xray",
       wavelengthMin: Number(document.getElementById("laue-wavelength-min").value),
       wavelengthMax: Number(document.getElementById("laue-wavelength-max").value),
-      minimumPeakRadius: Number(document.getElementById("laue-minimum-peak-radius").value),
+      minimumPeakOpacity: Number(document.getElementById("laue-minimum-peak-opacity").value) / 100,
       xraySpectrum: document.getElementById("laue-xray-spectrum").value,
       tubeVoltageKv: Number(document.getElementById("laue-tube-voltage").value),
       cuLineWidthEv: Number(document.getElementById("laue-cu-line-width").value),
@@ -1203,7 +1203,7 @@
     document.getElementById("laue-intensity-source").value = settings.sourceType;
     document.getElementById("laue-wavelength-min").value = settings.wavelengthMin;
     document.getElementById("laue-wavelength-max").value = settings.wavelengthMax;
-    document.getElementById("laue-minimum-peak-radius").value = settings.minimumPeakRadius;
+    document.getElementById("laue-minimum-peak-opacity").value = Number((settings.minimumPeakOpacity * 100).toFixed(6));
     document.getElementById("laue-xray-spectrum").value = settings.xraySpectrum;
     document.getElementById("laue-tube-voltage").value = settings.tubeVoltageKv;
     document.getElementById("laue-cu-line-width").value = settings.cuLineWidthEv;
@@ -1217,7 +1217,7 @@
     const checkbox = document.getElementById("laue-show-expected-intensity");
     checkbox.disabled = !hasAtoms;
     if (!hasAtoms) checkbox.checked = settings.enabled = false;
-    for (const id of ["laue-intensity-source", "laue-wavelength-min", "laue-wavelength-max", "laue-minimum-peak-radius",
+    for (const id of ["laue-intensity-source", "laue-wavelength-min", "laue-wavelength-max", "laue-minimum-peak-opacity",
       "laue-xray-spectrum", "laue-tube-voltage", "laue-cu-line-width", "laue-neutron-spectrum", "laue-neutron-temperature"]) {
       document.getElementById(id).disabled = !hasAtoms || !settings.enabled;
     }
@@ -1226,7 +1226,7 @@
     document.getElementById("laue-tube-voltage-field").hidden = settings.xraySpectrum === "flat";
     document.getElementById("laue-cu-line-width-field").hidden = settings.xraySpectrum !== "cu-lines";
     document.getElementById("laue-neutron-temperature-field").hidden = settings.neutronSpectrum !== "maxwell";
-    document.getElementById("laue-pred-radius-label").textContent = settings.enabled ? "Maximum dot radius (px)" : "Radius (px)";
+    document.getElementById("laue-pred-alpha-label").textContent = settings.enabled ? "Max opacity (%)" : "Opacity (%)";
     const note = document.getElementById("laue-expected-intensity-status");
     state.intensitySpots = [];
     if (!hasAtoms) {
@@ -1238,8 +1238,7 @@
       return;
     }
     try {
-      const maximumRadius = readOverlaySettings().predRadius;
-      LaueIntensity.markerRadius(1, settings.minimumPeakRadius, maximumRadius);
+      LaueIntensity.markerOpacity(1, settings.minimumPeakOpacity, readOverlaySettings().predAlpha);
       const spectrum = LaueSpectrum.create(settings);
       const crystal = readCrystal();
       const key = JSON.stringify([crystal, settings.sourceType]);
@@ -1471,20 +1470,21 @@
         if (!p.onImage) continue;
         if (intensity && (!p.available || !(p.relativeIntensity > 0))) continue;
         const pos = imageToViewport(p.x, p.y);
-        let radius = overlay.predRadius;
+        let alpha = predA;
         if (intensity) {
           try {
-            radius = LaueIntensity.markerRadius(p.relativeIntensity, state.expectedIntensity.minimumPeakRadius, overlay.predRadius);
-          } catch (_) { continue; } // A transient invalid radius edit is reported by the controls.
+            alpha = LaueIntensity.markerOpacity(p.relativeIntensity, state.expectedIntensity.minimumPeakOpacity, predA);
+          } catch (_) { continue; } // A transient invalid opacity edit is reported by the controls.
         }
+        if (alpha <= 0) continue;
         overlayCtx.beginPath();
-        overlayCtx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+        overlayCtx.arc(pos.x, pos.y, overlay.predRadius, 0, Math.PI * 2);
         if (intensity) {
-          setOverlayFill(overlayCtx, overlay.predColor, predA);
+          setOverlayFill(overlayCtx, overlay.predColor, alpha);
           overlayCtx.fill();
         } else overlayCtx.stroke();
         if (overlay.showPredictedLabels) {
-          drawPeakIndexLabel(overlayCtx, pos, p.h, p.k, p.l, predA);
+          drawPeakIndexLabel(overlayCtx, pos, p.h, p.k, p.l, alpha);
         }
       }
     }
@@ -1793,8 +1793,11 @@
         chemicalFormula: obj.crystal.chemicalFormula
       });
     }
+    // Radius-based legacy configs retain their shared radius and maximum
+    // opacity; the obsolete minimum radius no longer affects rendering.
+    const legacyMaxOpacity = obj.overlay?.predAlpha ?? state.overlay?.predAlpha ?? .8;
     state.expectedIntensity = { enabled: false, sourceType: "xray", wavelengthMin: 0.5, wavelengthMax: 4,
-      minimumPeakRadius: 1, xraySpectrum: "cu-lines", tubeVoltageKv: 40, cuLineWidthEv: 3,
+      minimumPeakOpacity: Math.max(0, Math.min(.1, legacyMaxOpacity)), xraySpectrum: "cu-lines", tubeVoltageKv: 40, cuLineWidthEv: 3,
       neutronSpectrum: "thermal", neutronTemperatureK: 300, ...obj.expectedIntensity };
     if (state.expectedIntensity.sourceType !== "neutron") state.expectedIntensity.sourceType = "xray";
     writeIntensitySettings();

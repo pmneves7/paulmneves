@@ -333,7 +333,7 @@
                 <input type="number" id="laue-pred-radius" step="1" min="2" max="80" value="5" />
               </div>
               <div class="tool-field">
-                <label for="laue-pred-alpha">Opacity (%)</label>
+                <label for="laue-pred-alpha" id="laue-pred-alpha-label">Opacity (%)</label>
                 <input type="number" id="laue-pred-alpha" step="1" min="0" max="100" value="80" />
               </div>
             </div>
@@ -345,7 +345,7 @@
             <div class="laue-intensity-controls">
               <h3 class="laue-subheading">Expected Laue intensity</h3>
               <div class="laue-check-row">
-                <label><input type="checkbox" id="laue-show-expected-intensity" disabled aria-describedby="laue-expected-intensity-status" /> Size dots by intensity (CIF)</label>
+                <label><input type="checkbox" id="laue-show-expected-intensity" disabled aria-describedby="laue-expected-intensity-status" /> Opacity by intensity (CIF)</label>
               </div>
               <div class="laue-intensity-base-row">
                 <div class="tool-field">
@@ -364,8 +364,8 @@
                   <input type="number" id="laue-wavelength-max" aria-label="Maximum wavelength (Å)" min="0" step="any" value="4" disabled />
                 </div>
                 <div class="tool-field">
-                  <label for="laue-minimum-peak-radius">Min radius (px)</label>
-                  <input type="number" id="laue-minimum-peak-radius" aria-label="Minimum peak radius (px)" min="0" max="80" step="0.1" value="1" disabled />
+                  <label for="laue-minimum-peak-opacity">Min opacity (%)</label>
+                  <input type="number" id="laue-minimum-peak-opacity" aria-label="Minimum peak opacity (%)" min="0" max="100" step="1" value="10" disabled />
                 </div>
               </div>
               <div id="laue-xray-spectrum-fields" class="laue-intensity-source-row">
@@ -424,9 +424,10 @@
                 is assumed; sample absorption, extinction, thermal motion, anomalous
                 X-ray and magnetic neutron scattering are omitted.
                 Harmonics receive spectral weights before summing within the Q/HKL
-                limits. r² = r_min² + (r_max² - r_min²) I/I_max adds a constant area
-                baseline; r_min=0 gives strictly proportional total area. Exact-zero
-                intensities stay hidden. Results are relative strengths, not rates.
+                limits. All peaks use the shared radius. Opacity varies linearly:
+                alpha = alpha_min + (alpha_max - alpha_min) I/I_max. The minimum
+                opacity preserves visibility of weak peaks; exact-zero intensities
+                stay hidden. Results are relative strengths, not rates.
               -->
             </div>
           </div>
@@ -629,9 +630,9 @@
   <script src="../js/cromer-mann-data.js"></script>
   <script src="../js/scattering-factors.js?v=20261008-3"></script>
   <script src="../js/laue-spectrum.js?v=20261110-2"></script>
-  <script src="../js/laue-intensity.js?v=20261110-2"></script>
+  <script src="../js/laue-intensity.js?v=20261110-3"></script>
   <script src="../js/laue-math.js?v=20261110"></script>
   <script src="../js/laue-formats.js?v=20261008-2"></script>
-  <script src="../js/laue-analysis.js?v=20261110-4"></script>
+  <script src="../js/laue-analysis.js?v=20261110-5"></script>
 </body>
 </html>

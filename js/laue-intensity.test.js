@@ -168,7 +168,7 @@ function uiFixture() {
   };
   for(const [id,value] of Object.entries({a:5,b:5,c:5,alpha:90,beta:90,gamma:90,spacegroup:'P1'}))el('laue-'+id).value=String(value);
   el('laue-intensity-source').value='neutron';el('laue-wavelength-min').value='.5';el('laue-wavelength-max').value='4';
-  el('laue-minimum-peak-radius').value='0';el('laue-xray-spectrum').value='flat';el('laue-neutron-spectrum').value='flat';
+  el('laue-minimum-peak-opacity').value='10';el('laue-xray-spectrum').value='flat';el('laue-neutron-spectrum').value='flat';
   el('laue-tube-voltage').value='40';el('laue-cu-line-width').value='3';el('laue-neutron-temperature').value='300';
   const s={...context,document:{getElementById:el},spaceGroupFieldsLink:null,intensityModelCache:null,
     state:{crystalStructure:{atoms:[],symmetryOperations:[],spaceGroupSetting:'',assumedP1:false},crystalMeta:{},
@@ -182,7 +182,7 @@ function uiFixture() {
     writeCorrectionsToForm(){},ensureCurveEndpoints(){},setRefinementUndoAvailable(){},migrateInstrumentConfig:x=>x,normalizeBeamStorage(){},
     writeInstrumentToForm(){},REFINE_PARAM_KEYS:[]};
   s.window=s;
-  s.overlayCtx={clearRect(){},beginPath(){},arc(x,y,r){s.draws.push({x,y,r});},fill(){s.draws.at(-1).filled=true;},stroke(){s.draws.at(-1).stroked=true;}};
+  s.overlayCtx={clearRect(){},beginPath(){},arc(x,y,r){s.draws.push({x,y,r});},fill(){Object.assign(s.draws.at(-1),{filled:true,alpha:this.globalAlpha});},stroke(){s.draws.at(-1).stroked=true;}};
   s.updatePredictions=()=>{s.state.crystal=s.readCrystal();s.updateExpectedIntensities();};
   vm.createContext(s);
   for(const name of ['readCrystal','setCrystalMeta','clearCrystalPresetMeta','num','readIntensitySettings','writeIntensitySettings',
@@ -190,15 +190,18 @@ function uiFixture() {
   return {s,el};
 }
 
-test('UI enables only with CIF atoms, fills area in proportion to intensity and returns to outlines',()=>{
+test('UI enables only with CIF atoms, varies opacity at a fixed radius and returns to outlines',()=>{
   const {s,el}=uiFixture();s.updateExpectedIntensities();assert.equal(el('laue-show-expected-intensity').disabled,true);
   s.applyCifData({...cell,atoms:[carbon]});assert.equal(el('laue-show-expected-intensity').disabled,false);
   el('laue-show-expected-intensity').checked=true;s.updateExpectedIntensities();s.redrawOverlays();
   assert.equal(s.draws.length,2);assert.ok(s.draws.every(d=>d.filled&&!d.stroked));
-  close(s.draws[1].r**2/s.draws[0].r**2,1/16);
+  assert.ok(s.draws.every(d=>d.r===8));
+  close(s.draws[0].alpha,.8);close(s.draws[1].alpha,.1+(.8-.1)/16);
+  assert.equal(el('laue-pred-alpha-label').textContent,'Max opacity (%)');
   assert.equal(el('laue-intensity-source').disabled,false);
   el('laue-show-expected-intensity').checked=false;s.updateExpectedIntensities();s.draws=[];s.redrawOverlays();
   assert.ok(s.draws.every(d=>d.stroked&&!d.filled&&d.r===8));assert.equal(el('laue-intensity-source').disabled,true);
+  assert.equal(el('laue-pred-alpha-label').textContent,'Opacity (%)');
 });
 
 test('UI preserves CIF sites, symmetry and intensity settings across config round trips and clears legacy structure',()=>{
@@ -254,32 +257,38 @@ test('each harmonic receives incident flux before the spot sum and no-flux refle
   for(const bad of [-1,NaN,Infinity]) assert.throws(()=>I.calculateSpots([p],m,.5,4,{density:()=>bad}),/spectral flux/);
 });
 
-test('radius baseline adds constant area, preserves strongest radius and does not turn extinct spots into dots',()=>{
-  close(I.markerRadius(0,1,8),1);close(I.markerRadius(1,1,8),8);
-  close((I.markerRadius(1/16,1,8)**2-1)/(I.markerRadius(1,1,8)**2-1),1/16);
-  close(I.markerRadius(.25,0,8),4);
-  for(const radii of [[-1,8],[9,8],[1,0],[NaN,8]]) assert.throws(()=>I.markerRadius(.5,...radii),/Peak radii/);
+test('opacity interpolates linearly within its bounds and never creates extinct peaks',()=>{
+  close(I.markerOpacity(0,.1,.8),.1);close(I.markerOpacity(1,.1,.8),.8);
+  close(I.markerOpacity(1/16,.1,.8),.14375);
+  close(I.markerOpacity(.25,0,1),.25);close(I.markerOpacity(2,0,1),1);
+  close(I.markerOpacity(.5,.4,.4),.4);close(I.markerOpacity(.5,0,0),0);
+  for(const bounds of [[-1,.8],[.9,.8],[0,1.1],[NaN,.8],[0,Infinity]]) assert.throws(()=>I.markerOpacity(.5,...bounds),/Peak opacities/);
+  for(const value of [-1,NaN,Infinity])assert.throws(()=>I.markerOpacity(value,.1,.8),/Peak opacities/);
   const {s,el}=uiFixture();s.applyCifData({...cell,atoms:[carbon]});
-  el('laue-show-expected-intensity').checked=true;el('laue-minimum-peak-radius').value='1';s.updateExpectedIntensities();s.redrawOverlays();
-  close((s.draws[1].r**2-1)/(s.draws[0].r**2-1),1/16);assert.ok(s.draws[1].r>1);
+  el('laue-show-expected-intensity').checked=true;s.updateExpectedIntensities();s.redrawOverlays();
+  close((s.draws[1].alpha-.1)/(s.draws[0].alpha-.1),1/16);assert.ok(s.draws.every(d=>d.r===8));
   s.state.intensitySpots[0].relativeIntensity=0;s.draws=[];s.redrawOverlays();assert.equal(s.draws.length,1);
-  el('laue-minimum-peak-radius').value='9';s.updateExpectedIntensities();assert.equal(s.state.intensitySpots.length,0);
-  assert.match(el('laue-expected-intensity-status').textContent,/Peak radii/);
+  el('laue-minimum-peak-opacity').value='90';s.updateExpectedIntensities();assert.equal(s.state.intensitySpots.length,0);
+  assert.match(el('laue-expected-intensity-status').textContent,/Peak opacities/);
 });
 
-test('spectrum settings and minimum radius persist, and older configs default to one pixel',()=>{
+test('spectrum and opacity settings persist while legacy radius configs migrate without changing the shared radius',()=>{
   const {s,el}=uiFixture();s.applyCifData({...cell,atoms:[carbon]});
-  el('laue-show-expected-intensity').checked=true;el('laue-minimum-peak-radius').value='1.5';
+  el('laue-show-expected-intensity').checked=true;el('laue-minimum-peak-opacity').value='15';
   el('laue-neutron-spectrum').value='maxwell';el('laue-neutron-temperature').value='45';
   el('laue-xray-spectrum').value='cu-lines';el('laue-tube-voltage').value='35';el('laue-cu-line-width').value='5';
   s.updateExpectedIntensities();const saved=JSON.parse(JSON.stringify(s.saveConfigToObject()));
   const restored=uiFixture();restored.s.loadConfigFromObject(saved);
-  assert.equal(restored.el('laue-minimum-peak-radius').value,1.5);
+  assert.equal(restored.el('laue-minimum-peak-opacity').value,15);
   assert.equal(restored.el('laue-neutron-temperature').value,45);assert.equal(restored.el('laue-tube-voltage').value,35);
   assert.equal(restored.el('laue-xray-spectrum').value,'cu-lines');
   assert.equal(restored.el('laue-xray-spectrum-fields').hidden,true);
   assert.equal(restored.el('laue-neutron-temperature-field').hidden,false);
-  restored.s.loadConfigFromObject({crystal:cell});assert.equal(restored.el('laue-minimum-peak-radius').value,1);
+  restored.s.loadConfigFromObject({crystal:cell});assert.equal(restored.el('laue-minimum-peak-opacity').value,10);
+  restored.s.loadConfigFromObject({crystal:cell,expectedIntensity:{enabled:true,minimumPeakRadius:100},overlay:{predRadius:6,predAlpha:.04}});
+  assert.equal(restored.el('laue-minimum-peak-opacity').value,4);
+  assert.equal(restored.s.state.overlay.predRadius,6);assert.equal(restored.s.state.overlay.predAlpha,.04);
+  assert.equal(restored.s.readIntensitySettings().minimumPeakRadius,undefined);
 });
 
 test('zone endpoints and UVW indices survive config save/load while malformed and legacy data clear safely',()=>{
