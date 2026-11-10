@@ -2836,6 +2836,71 @@ body.laue-page.laue-nav-hidden .laue-viewer-panel {
   gap: 0.35rem;
 }
 
+.laue-intensity-controls .laue-subheading {
+  margin: 0.85rem 0 0.35rem;
+}
+
+.laue-intensity-controls .laue-check-row {
+  margin: 0.35rem 0 0.5rem;
+}
+
+.laue-intensity-base-row,
+.laue-intensity-source-row {
+  display: grid;
+  gap: 0.4rem 0.5rem;
+  align-items: end;
+}
+
+.laue-intensity-base-row {
+  grid-template-columns: minmax(6rem, 1.2fr) repeat(3, minmax(4.5rem, 1fr));
+}
+
+.laue-intensity-source-row {
+  grid-template-columns: minmax(10rem, 2fr) minmax(4.5rem, 0.8fr) minmax(5rem, 1fr);
+  margin-top: 0.5rem;
+}
+
+.laue-intensity-controls .tool-field {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.laue-intensity-controls .tool-field label {
+  font-size: 0.8rem;
+  line-height: 1.2;
+  margin-bottom: 0.2rem;
+}
+
+.laue-intensity-controls .tool-field input,
+.laue-intensity-controls .tool-field select {
+  height: 1.9rem;
+  padding: 0.2rem 0.4rem;
+  font-size: 0.85rem;
+  line-height: 1.2;
+  border-radius: 0.35rem;
+}
+
+.laue-intensity-controls .tool-note {
+  margin: 0.4rem 0 0;
+  font-size: 0.8rem;
+}
+
+.laue-intensity-controls [hidden],
+.laue-intensity-controls .tool-note:empty {
+  display: none;
+}
+
+@media (max-width: 480px) {
+  .laue-intensity-base-row,
+  .laue-intensity-source-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .laue-intensity-spectrum-field {
+    grid-column: 1 / -1;
+  }
+}
+
 .laue-canvas-section {
   margin-top: 1.25rem;
 }

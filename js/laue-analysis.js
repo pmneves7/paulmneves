@@ -1216,32 +1216,30 @@
     document.getElementById("laue-tube-voltage-field").hidden = settings.xraySpectrum === "flat";
     document.getElementById("laue-cu-line-width-field").hidden = settings.xraySpectrum !== "cu-lines";
     document.getElementById("laue-neutron-temperature-field").hidden = settings.neutronSpectrum !== "maxwell";
-    document.getElementById("laue-spectrum-status").textContent = "";
     document.getElementById("laue-pred-radius-label").textContent = settings.enabled ? "Maximum dot radius (px)" : "Radius (px)";
     const note = document.getElementById("laue-expected-intensity-status");
     state.intensitySpots = [];
     if (!hasAtoms) {
-      note.textContent = "Load a CIF with fractional atom positions to enable expected intensities.";
+      note.textContent = "Load a CIF to enable intensities.";
       return;
     }
     if (!settings.enabled) {
-      note.textContent = `${state.crystalStructure.atoms.length} CIF atom sites loaded. Check the box to size solid dots by expected intensity.`;
+      note.textContent = `${state.crystalStructure.atoms.length} atom sites loaded.`;
       return;
     }
     try {
       const maximumRadius = readOverlaySettings().predRadius;
       LaueIntensity.markerRadius(1, settings.minimumPeakRadius, maximumRadius);
       const spectrum = LaueSpectrum.create(settings);
-      document.getElementById("laue-spectrum-status").textContent = spectrum.description;
       const crystal = readCrystal();
       const key = JSON.stringify([crystal, settings.sourceType]);
       if (intensityModelCache?.key !== key) intensityModelCache = { key, model: LaueIntensity.createModel(crystal, settings.sourceType) };
       const result = LaueIntensity.calculateSpots(state.predictedPeaks, intensityModelCache.model, settings.wavelengthMin, settings.wavelengthMax, spectrum);
       state.intensitySpots = result.spots;
       const visible = result.spots.filter(spot => spot.onImage && spot.available && spot.intensity > 0).length;
-      const missing = result.unavailableSpots ? ` ${result.unavailableSpots} visible spots unavailable: missing scattering factors for ${result.missingElements.join(", ")} at the required Q.` : "";
-      const symmetry = crystal.assumedP1 ? " No CIF symmetry was specified; the listed atom sites are assumed to form a complete P1 cell." : "";
-      note.textContent = `${visible} visible spots in ${settings.wavelengthMin}–${settings.wavelengthMax} Å. Dot area above the ${settings.minimumPeakRadius} px radius baseline is proportional to relative integrated intensity; the strongest visible spot has the maximum radius. Zero-intensity peaks stay hidden. Harmonics are weighted by incident flux before summing within the current Q and HKL limits.${missing}${symmetry}`;
+      const missing = result.unavailableSpots ? ` ${result.unavailableSpots} unavailable: missing factors for ${result.missingElements.join(", ")}.` : "";
+      const symmetry = crystal.assumedP1 ? " P1 assumed (no CIF symmetry)." : "";
+      note.textContent = `${visible} visible spots · ${settings.wavelengthMin}–${settings.wavelengthMax} Å.${missing}${symmetry}`;
     } catch (error) {
       note.textContent = `Expected intensity unavailable: ${error.message}`;
     }

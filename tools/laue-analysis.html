@@ -10,7 +10,7 @@
   <title>Laue analysis | Paul M. Neves</title>
   <link rel="canonical" href="https://paulmneves.com/tools/laue-analysis.html" />
   <link rel="icon" type="image/png" href="../media/favicon.png" />
-  <link rel="stylesheet" href="../css/site.css?v=20261109" />
+  <link rel="stylesheet" href="../css/site.css?v=20261110" />
 </head>
 <body class="laue-page">
   <header>
@@ -342,86 +342,91 @@
               <label><input type="checkbox" id="laue-show-predicted-labels" checked /> Show index labels</label>
               <label><input type="checkbox" id="laue-show-beam-center" checked /> Show beam center</label>
             </div>
-            <h3 class="laue-subheading">Expected Laue intensity</h3>
-            <div class="laue-check-row">
-              <label><input type="checkbox" id="laue-show-expected-intensity" disabled aria-describedby="laue-expected-intensity-status" /> Size solid predicted dots by intensity (CIF required)</label>
-            </div>
-            <div class="tool-grid">
-              <div class="tool-field">
-                <label for="laue-intensity-source">Radiation</label>
-                <select id="laue-intensity-source" disabled>
-                  <option value="xray">X-ray (unpolarized)</option>
-                  <option value="neutron">Neutron (nuclear)</option>
-                </select>
+            <div class="laue-intensity-controls">
+              <h3 class="laue-subheading">Expected Laue intensity</h3>
+              <div class="laue-check-row">
+                <label><input type="checkbox" id="laue-show-expected-intensity" disabled aria-describedby="laue-expected-intensity-status" /> Size dots by intensity (CIF)</label>
               </div>
-              <div class="tool-field">
-                <label for="laue-wavelength-min">Minimum wavelength (Å)</label>
-                <input type="number" id="laue-wavelength-min" min="0" step="any" value="0.5" disabled />
-              </div>
-              <div class="tool-field">
-                <label for="laue-wavelength-max">Maximum wavelength (Å)</label>
-                <input type="number" id="laue-wavelength-max" min="0" step="any" value="4" disabled />
-              </div>
-            </div>
-            <div class="tool-grid">
-              <div class="tool-field">
-                <label for="laue-minimum-peak-radius">Minimum peak radius (px)</label>
-                <input type="number" id="laue-minimum-peak-radius" min="0" max="80" step="0.1" value="1" disabled />
-              </div>
-            </div>
-            <div id="laue-xray-spectrum-fields">
-              <div class="tool-field">
-                <label for="laue-xray-spectrum">Incident X-ray spectrum</label>
-                <select id="laue-xray-spectrum" disabled>
-                  <option value="cu-lines" selected>Cu tube: continuum + K lines (approximate)</option>
-                  <option value="cu-continuum">Cu tube: continuum only</option>
-                  <option value="flat">Flat flux per Å</option>
-                </select>
-              </div>
-              <div id="laue-tube-voltage-field">
+              <div class="laue-intensity-base-row">
                 <div class="tool-field">
-                  <label for="laue-tube-voltage">Tube voltage (kV)</label>
-                  <input type="number" id="laue-tube-voltage" min="0" step="any" value="40" disabled />
+                  <label for="laue-intensity-source">Radiation</label>
+                  <select id="laue-intensity-source" disabled>
+                    <option value="xray">X-ray</option>
+                    <option value="neutron">Neutron</option>
+                  </select>
+                </div>
+                <div class="tool-field">
+                  <label for="laue-wavelength-min">λ min (Å)</label>
+                  <input type="number" id="laue-wavelength-min" aria-label="Minimum wavelength (Å)" min="0" step="any" value="0.5" disabled />
+                </div>
+                <div class="tool-field">
+                  <label for="laue-wavelength-max">λ max (Å)</label>
+                  <input type="number" id="laue-wavelength-max" aria-label="Maximum wavelength (Å)" min="0" step="any" value="4" disabled />
+                </div>
+                <div class="tool-field">
+                  <label for="laue-minimum-peak-radius">Min radius (px)</label>
+                  <input type="number" id="laue-minimum-peak-radius" aria-label="Minimum peak radius (px)" min="0" max="80" step="0.1" value="1" disabled />
                 </div>
               </div>
-              <div id="laue-cu-line-width-field">
-                <div class="tool-field">
-                  <label for="laue-cu-line-width">Effective Cu line FWHM (eV)</label>
-                  <input type="number" id="laue-cu-line-width" min="0" step="any" value="3" disabled />
+              <div id="laue-xray-spectrum-fields" class="laue-intensity-source-row">
+                <div class="tool-field laue-intensity-spectrum-field">
+                  <label for="laue-xray-spectrum">X-ray spectrum</label>
+                  <select id="laue-xray-spectrum" aria-label="Incident X-ray spectrum" disabled>
+                    <option value="cu-lines" selected>Cu continuum + K lines</option>
+                    <option value="cu-continuum">Cu continuum</option>
+                    <option value="flat">Flat flux per Å</option>
+                  </select>
+                </div>
+                <div id="laue-tube-voltage-field" class="tool-field">
+                  <label for="laue-tube-voltage">Voltage (kV)</label>
+                  <input type="number" id="laue-tube-voltage" aria-label="Tube voltage (kV)" min="0" step="any" value="40" disabled />
+                </div>
+                <div id="laue-cu-line-width-field" class="tool-field">
+                  <label for="laue-cu-line-width">FWHM (eV)</label>
+                  <input type="number" id="laue-cu-line-width" aria-label="Effective Cu line FWHM (eV)" min="0" step="any" value="3" disabled />
                 </div>
               </div>
-            </div>
-            <div id="laue-neutron-spectrum-fields" hidden>
-              <div class="tool-field">
-                <label for="laue-neutron-spectrum">Neutron moderator spectrum</label>
-                <select id="laue-neutron-spectrum" disabled>
-                  <option value="thermal" selected>Thermal moderator: 300 K Maxwellian</option>
-                  <option value="cold">Cold moderator: 25 K Maxwellian</option>
-                  <option value="hot">Hot moderator: 1200 K Maxwellian</option>
-                  <option value="maxwell">Custom Maxwellian temperature</option>
-                  <option value="ill-cold">ILL H1 cold source: fitted spectrum</option>
-                  <option value="ill-thermal">ILL H2 thermal source: fitted spectrum</option>
-                  <option value="ill-hot">ILL hot source: fitted spectrum</option>
-                  <option value="polyethylene">Polyethylene 300 K: thermal + epithermal fit</option>
-                  <option value="flat">Flat flux per Å</option>
-                </select>
-              </div>
-              <div id="laue-neutron-temperature-field" hidden>
-                <div class="tool-field">
-                  <label for="laue-neutron-temperature">Effective neutron temperature (K)</label>
-                  <input type="number" id="laue-neutron-temperature" min="0" step="any" value="300" disabled />
+              <div id="laue-neutron-spectrum-fields" class="laue-intensity-source-row" hidden>
+                <div class="tool-field laue-intensity-spectrum-field">
+                  <label for="laue-neutron-spectrum">Moderator</label>
+                  <select id="laue-neutron-spectrum" aria-label="Neutron moderator spectrum" disabled>
+                    <option value="thermal" selected>Thermal · 300 K</option>
+                    <option value="cold">Cold · 25 K</option>
+                    <option value="hot">Hot · 1200 K</option>
+                    <option value="maxwell">Custom Maxwellian</option>
+                    <option value="ill-cold">ILL H1 cold fit</option>
+                    <option value="ill-thermal">ILL H2 thermal fit</option>
+                    <option value="ill-hot">ILL hot fit</option>
+                    <option value="polyethylene">Polyethylene · 300 K fit</option>
+                    <option value="flat">Flat flux per Å</option>
+                  </select>
+                </div>
+                <div id="laue-neutron-temperature-field" class="tool-field" hidden>
+                  <label for="laue-neutron-temperature">Temp. (K)</label>
+                  <input type="number" id="laue-neutron-temperature" aria-label="Effective neutron temperature (K)" min="0" step="any" value="300" disabled />
                 </div>
               </div>
+              <p class="tool-note" id="laue-expected-intensity-status" role="status" aria-live="polite">Load a CIF to enable intensities.</p>
+              <!--
+                Source/model assumptions belong in code rather than the control panel.
+                All incident spectra are particle flux per Å. Cu uses the Kramers
+                continuum plus optional empirical K-line yields; windows, anode
+                self-absorption and beamline transmission are omitted. Narrow Cu
+                lines depend strongly on effective width and exact orientation.
+                Neutrons use Maxwellian/multi-Maxwellian moderator spectra or the
+                published polyethylene thermal + epithermal fit. Guides and filters
+                can change the spectrum reaching the sample. See laue-spectrum.js
+                for formulas, coefficients and primary reference links.
+                Intensities include occupancy, crystal symmetry, the Laue wavelength
+                factor and unpolarized X-ray polarization. Uniform detector efficiency
+                is assumed; sample absorption, extinction, thermal motion, anomalous
+                X-ray and magnetic neutron scattering are omitted.
+                Harmonics receive spectral weights before summing within the Q/HKL
+                limits. r² = r_min² + (r_max² - r_min²) I/I_max adds a constant area
+                baseline; r_min=0 gives strictly proportional total area. Exact-zero
+                intensities stay hidden. Results are relative strengths, not rates.
+              -->
             </div>
-            <p class="tool-note" id="laue-spectrum-status" aria-live="polite"></p>
-            <p class="tool-note" id="laue-expected-intensity-status" role="status" aria-live="polite">Load a CIF with fractional atom positions to enable expected intensities.</p>
-            <p class="tool-note">Relative integrated intensities use the selected incident spectrum and assume uniform detector efficiency. Includes atom occupancies, crystal symmetry, the Laue wavelength factor and X-ray polarization. Omits sample absorption, extinction, thermal motion, anomalous X-ray and magnetic neutron scattering. These are relative spot strengths, not count rates.</p>
-            <details>
-              <summary>Source models and dot sizing</summary>
-              <p class="tool-note">The Cu continuum uses Kramers photon flux per Å, proportional to (λ/λ<sub>min</sub> − 1)/λ² above λ<sub>min</sub> = 12.3984/V Å for V in kV. Cu K-line yields use an empirical overvoltage model; voltage alone does not determine the spectrum after windows and filters. Narrow characteristic lines make intensities sensitive to the chosen effective width and exact orientation. See <a href="https://mcxtrace.org/download/components/3.9.2/mcxtrace-components/Component_manualse17.html" target="_blank" rel="noopener">McXtrace's tube model</a>.</p>
-              <p class="tool-note">A Maxwellian neutron flux per Å is proportional to λ⁻⁵ exp[−949.2984/(Tλ²)], with T in kelvin. Fitted source presets sum Maxwellian components; the polyethylene preset adds an epithermal tail. See the <a href="https://www.mcstas.org/download/components/3.9.2/mcstas-components/Component_manualse17.html" target="_blank" rel="noopener">McStas source fits</a> and <a href="https://docs.mantidproject.org/nightly/algorithms/CalculateEfficiencyCorrection-v1.html" target="_blank" rel="noopener">Mantid moderator model</a>. Actual spectra at the sample also depend on guides, filters and instrument geometry.</p>
-              <p class="tool-note">For relative intensity i between 0 and 1, r² = r<sub>min</sub>² + (r<sub>max</sub>² − r<sub>min</sub>²)i. The minimum radius adds a constant area for visibility; the area above that baseline is proportional to intensity. Set the minimum to 0 for strictly proportional total area. Truly zero-intensity peaks are hidden.</p>
-            </details>
           </div>
             </div>
           </details>
@@ -619,6 +624,6 @@
   <script src="../js/laue-intensity.js?v=20261110-2"></script>
   <script src="../js/laue-math.js?v=20261109"></script>
   <script src="../js/laue-formats.js?v=20261008-2"></script>
-  <script src="../js/laue-analysis.js?v=20261110-2"></script>
+  <script src="../js/laue-analysis.js?v=20261110-3"></script>
 </body>
 </html>
