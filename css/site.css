@@ -2905,6 +2905,11 @@ body.laue-page.laue-nav-hidden .laue-viewer-panel {
   margin-top: 1.25rem;
 }
 
+.laue-zone-mode canvas,
+.laue-beam-center-mode canvas {
+  cursor: crosshair;
+}
+
 .laue-canvas-viewport {
   flex: 0 1 auto;
   overflow: hidden;

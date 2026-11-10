@@ -45,6 +45,46 @@ test('Cu characteristic lines follow K-shell threshold, radiative rates and effe
   close(integrate(3),integrate(6),1e-5);
 });
 
+test('W continuum has the tungsten Z factor, voltage cutoff and photon-wavelength shape',()=>{
+  const w=xray('w-continuum'),cu=xray(),cutoff=S.HC_KEV_ANGSTROM/40;
+  close(w.density(cutoff*.9),0);close(w.density(cutoff),0);
+  for(const l of [.4,.7,1,2,4]) close(w.density(l)/cu.density(l),74/29);
+  close(w.density(.6)/w.density(1.2),cu.density(.6)/cu.density(1.2));
+  assert.ok(w.density(2*cutoff)>w.density(1.9*cutoff));
+  assert.match(w.description,/W tube, 40 kV/);assert.match(w.description,/Characteristic lines are omitted/);
+});
+
+test('W K emission requires the K edge, not just enough voltage to emit a K-alpha-energy photon',()=>{
+  const hc=S.HC_KEV_ANGSTROM;
+  // 60 kV can emit 59.318 keV bremsstrahlung photons but cannot ionize W K.
+  for(const voltage of [40,60,69.525]) {
+    const line=xray('w-lines',voltage),continuum=xray('w-continuum',voltage);
+    for(const energy of [8.3976,11.3,20,57.981,59.3182,67.244])close(line.density(hc/energy),continuum.density(hc/energy));
+    assert.match(line.description,/K emission is absent/);assert.match(line.description,/W L emission is omitted/);
+  }
+  const line=xray('w-lines',80),continuum=xray('w-continuum',80);
+  assert.ok(line.density(hc/59.3182)>continuum.density(hc/59.3182)*10);
+  assert.equal(line.density(hc/81),0);
+  assert.match(line.description,/natural widths/);assert.match(line.description,/W L emission is omitted/);
+});
+
+test('W uses its own intrinsic K-line widths and does not inherit Cu width settings',()=>{
+  const hc=S.HC_KEV_ANGSTROM,s=xray('w-lines',80,0),other=xray('w-lines',80,300),continuum=xray('w-continuum',80);
+  const excess=e=>{const l=hc/e;return (s.density(l)-continuum.density(l))*l*l/hc;};
+  const center=59.3182,halfWidth=.04491/2;
+  close(excess(center+halfWidth)/excess(center),.5,1e-4);
+  close(excess(center-halfWidth)/excess(center),.5,1e-4);
+  close(s.density(hc/center),other.density(hc/center));
+  // xraylib rates: W Kα2/Kα1 = 0.289170/0.502430.
+  // Integrated yields, unlike peak heights, do not depend on line width.
+  const expectedYield=4*Math.PI*1.2e-5*69.525**1.67*Math.exp(-.077*74)*(80/69.525-1);
+  const lines=[[59.3182,.502430,.04491],[57.9810,.289170,.04492],[67.2440,.108080,.0465],[66.9501,.0558800,.0482]];
+  const lo=50,hi=75,n=25000,step=(hi-lo)/n;
+  let integral=0;for(let i=0;i<n;i++)integral+=excess(lo+(i+.5)*step)*step;
+  const expected=lines.reduce((sum,[e,rate,width])=>sum+expectedYield*rate/.502430*(Math.atan(2*(hi-e)/width)-Math.atan(2*(lo-e)/width))/Math.PI,0);
+  close(integral,expected,1e-10);
+});
+
 test('Maxwellian flux follows lambda^-5 with unit integrated flux and correct peak temperature shift',()=>{
   const T=300,a=S.NEUTRON_AA2_K/T,p=Math.sqrt(2*a/5),s=neutron();
   const expected=l=>2*a*a/l**5*Math.exp(-a/l**2);

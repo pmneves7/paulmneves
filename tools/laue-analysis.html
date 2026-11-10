@@ -10,7 +10,7 @@
   <title>Laue analysis | Paul M. Neves</title>
   <link rel="canonical" href="https://paulmneves.com/tools/laue-analysis.html" />
   <link rel="icon" type="image/png" href="../media/favicon.png" />
-  <link rel="stylesheet" href="../css/site.css?v=20261110" />
+  <link rel="stylesheet" href="../css/site.css?v=20261110-2" />
 </head>
 <body class="laue-page">
   <header>
@@ -374,6 +374,8 @@
                   <select id="laue-xray-spectrum" aria-label="Incident X-ray spectrum" disabled>
                     <option value="cu-lines" selected>Cu continuum + K lines</option>
                     <option value="cu-continuum">Cu continuum</option>
+                    <option value="w-continuum">W continuum (no L lines)</option>
+                    <option value="w-lines">W continuum + K lines</option>
                     <option value="flat">Flat flux per Å</option>
                   </select>
                 </div>
@@ -489,7 +491,7 @@
           <details class="tool-collapsible" id="laue-refinement-collapsible">
             <summary class="tool-collapsible-summary">6. Orientation refinement</summary>
             <div class="tool-collapsible-body">
-          <p class="tool-note">Local fit from the current approximate orientation. Add or auto-detect well-separated spots and check their index labels first. Index assignments stay fixed during the fit. Start with sample angles; add detector parameters only when enough spots constrain them.</p>
+          <p class="tool-note">Local fit from the current orientation using matched peaks and zones. Check their indices first; assignments stay fixed during the fit.</p>
           <div class="laue-check-row">
             <label><input type="checkbox" id="laue-refine-omega" checked /> Sample Ω</label>
             <label><input type="checkbox" id="laue-refine-chi" checked /> Sample χ</label>
@@ -509,7 +511,7 @@
               <input type="number" id="laue-refine-outlier-scale" min="0.01" step="any" value="2" />
             </div>
           </div>
-          <p class="tool-note">Residuals larger than the tolerance receive less weight. This helps with isolated bad matches; it does not replace correct indexing. Reported RMS is the 2D distance between observed and predicted spots.</p>
+          <p class="tool-note">Residuals above the tolerance receive less weight. RMS is reported in pixels: spot distance for peaks, perpendicular endpoint distance for zones.</p>
           <div class="laue-action-row">
             <button type="button" class="button primary" id="laue-refine-btn">Run refinement</button>
             <button type="button" class="button secondary" id="laue-refine-cancel-btn" hidden>Cancel refinement</button>
@@ -569,6 +571,8 @@
           <button type="button" class="laue-mode-btn" data-mode="pan-view">Pan view</button>
           <button type="button" class="laue-mode-btn laue-mode-action" id="laue-zoom-reset">Reset zoom</button>
           <span class="laue-mode-separator" role="separator" aria-hidden="true"></span>
+          <button type="button" class="laue-mode-btn" data-mode="beam-center">Beam center</button>
+          <span class="laue-mode-separator" role="separator" aria-hidden="true"></span>
           <button type="button" class="laue-mode-btn active" data-mode="pan-orientation">Pan orientation</button>
           <button type="button" class="laue-mode-btn" data-mode="rotate-pattern">Rotate pattern</button>
           <button type="button" class="laue-mode-btn" data-mode="move-rotation-center" title="Drag the cyan dot or click a peak or the beam center to place the rotation center">Move rotation center</button>
@@ -577,6 +581,10 @@
           <button type="button" class="laue-mode-btn" data-mode="add-peak">Add peak</button>
           <button type="button" class="laue-mode-btn" data-mode="move-peak">Move peak</button>
           <button type="button" class="laue-mode-btn" data-mode="remove-peak">Remove peak</button>
+          <span class="laue-mode-separator" role="separator" aria-hidden="true"></span>
+          <button type="button" class="laue-mode-btn" data-mode="add-zone">Add zone</button>
+          <button type="button" class="laue-mode-btn" data-mode="move-zone">Move zone</button>
+          <button type="button" class="laue-mode-btn" data-mode="remove-zone">Remove zone</button>
         </div>
         <div class="laue-status-slot">
           <p class="laue-status" id="laue-status" aria-live="polite"></p>
@@ -620,10 +628,10 @@
   <script src="../js/scattering-extinctions.js"></script>
   <script src="../js/cromer-mann-data.js"></script>
   <script src="../js/scattering-factors.js?v=20261008-3"></script>
-  <script src="../js/laue-spectrum.js?v=20261110"></script>
+  <script src="../js/laue-spectrum.js?v=20261110-2"></script>
   <script src="../js/laue-intensity.js?v=20261110-2"></script>
-  <script src="../js/laue-math.js?v=20261109"></script>
+  <script src="../js/laue-math.js?v=20261110"></script>
   <script src="../js/laue-formats.js?v=20261008-2"></script>
-  <script src="../js/laue-analysis.js?v=20261110-3"></script>
+  <script src="../js/laue-analysis.js?v=20261110-4"></script>
 </body>
 </html>

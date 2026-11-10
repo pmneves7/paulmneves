@@ -105,6 +105,8 @@
     },
     predictedPeaks: [],
     observedPeaks: [],
+    zones: [],
+    pendingZone: null,
     mode: "pan-orientation",
     rotationCenter: null, // null follows the beam center; otherwise fixed image coordinates
     view: { zoom: 1, fitScale: 1, centerX: null, centerY: null, tx: 0, ty: 0, totalScale: 1 },
@@ -200,8 +202,12 @@
     inst.peakMinRadius = num("laue-peak-min-radius");
     inst.peakMatchRadius = num("laue-match-radius");
     if (state.instrument.beamX != null) {
-      inst.beamX = state.instrument.beamX;
-      inst.beamY = state.instrument.beamY;
+      // Solver configs contain the absolute beam position. Saved UI configs
+      // store the image-center reference plus separate detector offsets.
+      // Keeping the solver's absolute beamX/Y would apply the offsets twice
+      // when normalizeBeamStorage migrates a subsequently imported config.
+      inst.beamX = state.displayData ? state.displayData.width / 2 : state.instrument.beamX;
+      inst.beamY = state.displayData ? state.displayData.height / 2 : state.instrument.beamY;
       inst.beamRadius = state.instrument.beamRadius;
     }
     return inst;
@@ -709,6 +715,8 @@
       const remap = p => LaueFormats.transformDisplayPoint(
         LaueFormats.transformDisplayPoint(p, width, height, previous.t, true), width, height, t);
       state.observedPeaks = state.observedPeaks.map(remap);
+      state.zones = (state.zones || []).map(zone => ({ ...zone, p1: remap(zone.p1), p2: remap(zone.p2) }));
+      state.pendingZone = null;
       if (state.rotationCenter) state.rotationCenter = remap(state.rotationCenter);
       beam = remap(beamCenterPosition());
     }
@@ -937,6 +945,8 @@
       state.rawIntensityRange = null;
       state.appliedImageTransform = null;
       state.observedPeaks = [];
+      state.zones = [];
+      state.pendingZone = null;
       state.rotationCenter = null;
       state.transform = { rotate90: 0, flipH: false, flipV: false };
       state.instrument.beamX = null;
@@ -1291,7 +1301,20 @@
       setStatus(err.message);
     }
     if (options?.rematch !== false) rematchObservedPeaksIfAny();
+    if (options?.rematch !== false) matchZones();
     redraw();
+  }
+
+  function matchZones() {
+    if (!state.displayData || !state.zones?.length) return;
+    const crystal = readCrystal(), config = buildConfig(readInstrument());
+    for (const zone of state.zones) {
+      try {
+        const match = LaueMath.indexZone(crystal, zone, config, state.displayData);
+        zone.uvw = match?.uvw || null;
+        zone.angleDeg = match?.angleDeg ?? null;
+      } catch (_) { zone.uvw = null; zone.angleDeg = null; }
+    }
   }
 
   function renderPeaksTable() {
@@ -1418,7 +1441,9 @@
     const beamVp = imageToViewport(beam.x, beam.y);
     const beamR = state.instrument.beamRadius;
 
-    if (overlay.showBeamCenter) {
+    if (state.zones?.length || state.pendingZone) drawZoneOverlays();
+
+    if (overlay.showBeamCenter || state.mode === "beam-center") {
       overlayCtx.globalAlpha = 1;
       overlayCtx.strokeStyle = "rgb(255, 220, 0)";
       overlayCtx.lineWidth = 1;
@@ -1429,10 +1454,12 @@
       overlayCtx.beginPath();
       overlayCtx.arc(beamVp.x, beamVp.y, 4, 0, Math.PI * 2);
       overlayCtx.fill();
-      overlayCtx.fillStyle = "rgb(255, 120, 0)";
-      overlayCtx.beginPath();
-      overlayCtx.arc(beamVp.x + beamR * total, beamVp.y, 5, 0, Math.PI * 2);
-      overlayCtx.fill();
+      if (state.mode === "beam-center") {
+        overlayCtx.fillStyle = "rgb(255, 120, 0)";
+        overlayCtx.beginPath();
+        overlayCtx.arc(beamVp.x + beamR * total, beamVp.y, 5, 0, Math.PI * 2);
+        overlayCtx.fill();
+      }
     }
 
     if (overlay.showPredictedPeaks) {
@@ -1721,6 +1748,7 @@
       overlay: readOverlaySettings(),
       view: state.view,
       rotationCenter: state.rotationCenter,
+      zones: (state.zones || []).map(({ p1, p2, uvw }) => ({ p1: { ...p1 }, p2: { ...p2 }, uvw: uvw?.slice() || null })),
       observedPeaks: state.observedPeaks.map(({ x, y, matchedH, matchedK, matchedL }) => ({
         x, y, matchedH, matchedK, matchedL
       }))
@@ -1793,6 +1821,11 @@
       }
     }
     if (obj.observedPeaks) state.observedPeaks = obj.observedPeaks.map((p, i) => ({ ...p, id: i }));
+    state.zones = (Array.isArray(obj.zones) ? obj.zones : []).filter(zone =>
+      [zone?.p1?.x, zone?.p1?.y, zone?.p2?.x, zone?.p2?.y].every(Number.isFinite))
+      .map(zone => ({ p1: { ...zone.p1 }, p2: { ...zone.p2 }, uvw: Array.isArray(zone.uvw) && zone.uvw.length === 3 &&
+        zone.uvw.every(Number.isInteger) && zone.uvw.some(v => v !== 0) ? zone.uvw.slice() : null }));
+    state.pendingZone = null;
     if (obj.view) state.view = { ...state.view, ...obj.view };
     state.rotationCenter = obj.rotationCenter &&
       Number.isFinite(obj.rotationCenter.x) && Number.isFinite(obj.rotationCenter.y)
@@ -1935,7 +1968,8 @@
 
   function refinementFingerprint() {
     return JSON.stringify({ crystal: readCrystal(), instrument: readInstrument(), transform: state.transform,
-      settings: readRefinementSettings(), peaks: state.observedPeaks.map(p => [p.x,p.y,p.matchedH,p.matchedK,p.matchedL]) });
+      settings: readRefinementSettings(), peaks: state.observedPeaks.map(p => [p.x,p.y,p.matchedH,p.matchedK,p.matchedL]),
+      zones: (state.zones || []).map(zone => [zone.p1, zone.p2, zone.uvw]) });
   }
 
   async function runRefinement() {
@@ -1949,13 +1983,16 @@
       return;
     }
     matchPeaks();
+    if (state.zones?.length) matchZones();
     const matchMsg = matchPeaksStatusMessage();
+    const zoneCount = (state.zones || []).filter(zone => zone.uvw).length;
+    const constraintMsg = zoneCount ? `${matchMsg} ${zoneCount} indexed zones.` : matchMsg;
     const matchedCount = countMatchedPeaks(state.observedPeaks);
     const selectedParamCount = countRefinementParameters(flags);
     const minMatched = minMatchedPeaksForRefinement(flags);
-    if (!selectedParamCount || matchedCount < minMatched) {
+    if (!selectedParamCount || matchedCount + zoneCount < minMatched) {
       refineResult.textContent = !selectedParamCount ? "Select at least one parameter to refine."
-        : `${matchMsg} Need at least ${minMatched} matched spots for ${selectedParamCount} selected parameters.`;
+        : `${constraintMsg} Need at least ${minMatched} matched spots or zones for ${selectedParamCount} selected parameters.`;
       return;
     }
     const before = snapshotRefinementInstrument();
@@ -1963,6 +2000,7 @@
     const config = buildConfig(readInstrument());
     const imageSize = { width: state.displayData.width, height: state.displayData.height };
     const observations = state.observedPeaks.map(p => ({ ...p }));
+    const zones = (state.zones || []).filter(zone => zone.uvw).map(zone => ({ p1: { ...zone.p1 }, p2: { ...zone.p2 }, uvw: zone.uvw.slice() }));
     const fingerprint = refinementFingerprint();
     const image = state.rawData || state.displayData;
     const run = { cancelled: false, contextChanged: false };
@@ -1973,23 +2011,23 @@
     state.refinementRun = run;
     if (refineBtn) refineBtn.disabled = true;
     if (cancelBtn) cancelBtn.hidden = false;
-    refineResult.textContent = `${matchMsg} Refining fixed index assignments…`;
+    refineResult.textContent = `${constraintMsg} Refining fixed index assignments…`;
     try {
       const result = await LaueMath.refineOrientation(crystal, config, imageSize, observations, flags,
         allowedPredicateForCrystal(crystal), 100, {
-          ...settings, shouldCancel, yieldToBrowser: nextPaint,
+          ...settings, zones, shouldCancel, yieldToBrowser: nextPaint,
           onProgress: progress => {
-            refineResult.textContent = `${matchMsg} Iteration ${progress.iteration}/${progress.maxIterations}: RMS spot distance ${progress.rms.toFixed(3)} px.`;
+            refineResult.textContent = `${constraintMsg} Iteration ${progress.iteration}/${progress.maxIterations}: RMS ${zoneCount ? "constraint" : "spot distance"} ${progress.rms.toFixed(3)} px.`;
           }
         });
       if (shouldCancel() || result.status === "cancelled") {
         refineResult.textContent = run.contextChanged
-          ? "Refinement cancelled because the image, peaks or settings changed. Current edits were kept."
+          ? "Refinement cancelled because the image, peaks, zones or settings changed. Current edits were kept."
           : "Refinement cancelled; parameters were not changed.";
         return;
       }
       if (!result.improved) {
-        refineResult.textContent = `${matchMsg} ${result.message || "No improvement; parameters were not changed."}`;
+        refineResult.textContent = `${constraintMsg} ${result.message || "No improvement; parameters were not changed."}`;
         return;
       }
       state.refinementUndo = before;
@@ -1997,6 +2035,14 @@
       writeInstrumentToForm(result.config);
       updatePredictions({ rematch: false });
       persistConfig();
+      if (result.usedZones > 0) {
+        const spotFit = result.used ? `${result.used} spots: RMS ${result.spotRms.toFixed(3)} px. ` : "";
+        const outliers = result.outliers ? ` ${result.outliers} outlier constraints.` : "";
+        const excluded = result.excluded ? ` ${result.excluded} invalid or repeated constraints excluded.` : "";
+        const coupled = result.coupled ? " Selected parameters are strongly coupled; try fewer detector parameters." : "";
+        refineResult.textContent = `${spotFit}${result.usedZones} zones: RMS endpoint distance ${result.zoneRms.toFixed(3)} px (was ${result.initialZoneRms.toFixed(3)} px). ${result.message}${outliers}${excluded}${coupled}`;
+        return;
+      }
       const fit = settings.robust
         ? `Inlier RMS spot distance: ${result.inlierRms.toFixed(3)} px (${result.inliers} spots within ${3 * settings.outlierScalePx} px; ${result.outliers} farther away). `
         : "";
@@ -2119,6 +2165,82 @@
     return best;
   }
 
+  function drawZoneOverlays() {
+    const config = buildConfig(readInstrument()), size = state.displayData;
+    const zones = [...(state.zones || []), ...(state.pendingZone ? [state.pendingZone] : [])];
+    const origin = imageToViewport(0, 0), total = viewTotalScale();
+    overlayCtx.save();
+    overlayCtx.beginPath(); overlayCtx.rect(origin.x, origin.y, size.width * total, size.height * total); overlayCtx.clip();
+    for (const zone of zones) {
+      overlayCtx.globalAlpha = .9;
+      overlayCtx.strokeStyle = "#ee8a16"; overlayCtx.fillStyle = "#ee8a16"; overlayCtx.lineWidth = 1.5;
+      for (const points of LaueMath.zoneCurve(zone, config, size)) {
+        overlayCtx.beginPath();
+        points.forEach((point, i) => {
+          const pos = imageToViewport(point.x, point.y);
+          if (i === 0) overlayCtx.moveTo(pos.x, pos.y); else overlayCtx.lineTo(pos.x, pos.y);
+        });
+        overlayCtx.stroke();
+      }
+      for (const point of [zone.p1, zone.p2]) {
+        const pos = imageToViewport(point.x, point.y);
+        overlayCtx.beginPath(); overlayCtx.arc(pos.x, pos.y, 4.5, 0, 2 * Math.PI); overlayCtx.fill();
+        overlayCtx.strokeStyle = "#fff"; overlayCtx.lineWidth = 1; overlayCtx.stroke();
+      }
+      const pos = imageToViewport(zone.p1.x, zone.p1.y);
+      overlayCtx.font = "11px sans-serif";
+      const label = zone.uvw ? `[${zone.uvw.join(" ")}]` : zone === state.pendingZone ? "" : "[?]";
+      if (label) {
+        const width = overlayCtx.measureText(label).width;
+        overlayCtx.fillStyle = "rgba(0,0,0,.65)"; overlayCtx.fillRect(pos.x + 7, pos.y - 16, width + 6, 15);
+        overlayCtx.fillStyle = "#ffae4b"; overlayCtx.fillText(label, pos.x + 10, pos.y - 5);
+      }
+    }
+    overlayCtx.restore();
+  }
+
+  function findZoneHit(pos, endpointsOnly) {
+    const radius = screenPxToCanvas(12);
+    let best = null, bestDistance = radius;
+    for (let i = 0; i < state.zones.length; i++) {
+      for (const endpoint of ["p1", "p2"]) {
+        const p = state.zones[i][endpoint], d = Math.hypot(p.x - pos.x, p.y - pos.y);
+        if (d < bestDistance) { bestDistance = d; best = { index: i, endpoint }; }
+      }
+    }
+    if (best || endpointsOnly) return best;
+    const config = buildConfig(readInstrument());
+    for (let i = 0; i < state.zones.length; i++) {
+      for (const segment of LaueMath.zoneCurve(state.zones[i], config, state.displayData)) {
+        for (let j = 1; j < segment.length; j++) {
+          const a = segment[j - 1], b = segment[j], dx = b.x - a.x, dy = b.y - a.y;
+          const t = Math.max(0, Math.min(1, ((pos.x - a.x) * dx + (pos.y - a.y) * dy) / (dx*dx + dy*dy || 1)));
+          const d = Math.hypot(pos.x - a.x - t * dx, pos.y - a.y - t * dy);
+          if (d < bestDistance) { bestDistance = d; best = { index: i }; }
+        }
+      }
+    }
+    return best;
+  }
+
+  function addZonePoint(pos) {
+    if (!state.pendingZone) {
+      state.pendingZone = { p1: { ...pos }, p2: { ...pos } };
+      setStatus("Click a second point on the zone; Esc cancels.");
+    } else {
+      const zone = { p1: { ...state.pendingZone.p1 }, p2: { ...pos }, uvw: null };
+      if (Math.hypot(pos.x - zone.p1.x, pos.y - zone.p1.y) < screenPxToCanvas(8) ||
+          !LaueMath.measuredZoneAxis(zone, buildConfig(readInstrument()), state.displayData)) {
+        setStatus("Choose two separated points on the same zone.");
+        return;
+      }
+      state.zones.push(zone); state.pendingZone = null;
+      matchZones(); persistConfig();
+      setStatus(zone.uvw ? `Added zone [${zone.uvw.join(" ")}], deviation ${zone.angleDeg.toFixed(2)}°.` : "Zone added; no axis within 5°. Check orientation or adjust endpoints.");
+    }
+    redrawOverlays();
+  }
+
   function beamHandleHit(pos) {
     const beam = beamCenterPosition();
     const beamX = beam.x;
@@ -2182,9 +2304,24 @@
       return;
     }
 
-    const beamDrag = beamHandleHit(pos);
-    if (beamDrag) {
-      state.drag = beamDrag;
+    if (state.mode === "beam-center") {
+      state.drag = beamHandleHit(pos);
+      return;
+    }
+
+    if (state.mode === "add-zone") { addZonePoint(pos); return; }
+    if (state.mode === "remove-zone") {
+      const hit = findZoneHit(pos, false);
+      if (hit) { state.zones.splice(hit.index, 1); redrawOverlays(); persistConfig(); }
+      return;
+    }
+    if (state.mode === "move-zone") {
+      const hit = findZoneHit(pos, true);
+      if (hit) {
+        const point = state.zones[hit.index][hit.endpoint];
+        state.drag = { type: "move-zone", ...hit, dx: pos.x - point.x, dy: pos.y - point.y };
+        if (canvasViewport) canvasViewport.classList.add("laue-dragging");
+      }
       return;
     }
 
@@ -2242,6 +2379,10 @@
   }
 
   function onCanvasMouseMove(event) {
+    if (state.mode === "add-zone" && state.pendingZone) {
+      state.pendingZone.p2 = clientToImage(event);
+      redrawOverlays(); return;
+    }
     if (state.drag && state.drag.type === "zoom-rect") {
       const vp = viewportPoint(event);
       state.drag.x1 = vp.x;
@@ -2262,7 +2403,13 @@
     if (!state.drag) return;
     const pos = clientToImage(event);
 
-    if (state.drag.type === "move-rotation-center") {
+    if (state.drag.type === "move-zone") {
+      const zone = state.zones[state.drag.index];
+      if (zone) {
+        zone[state.drag.endpoint] = { x: pos.x - state.drag.dx, y: pos.y - state.drag.dy };
+        zone.uvw = null; zone.angleDeg = null; redrawOverlays();
+      }
+    } else if (state.drag.type === "move-rotation-center") {
       placeRotationCenter(pos);
     } else if (state.drag.type === "beam-center") {
       setBeamCenterPosition(pos.x - (state.drag.dx || 0), pos.y - (state.drag.dy || 0));
@@ -2350,8 +2497,9 @@
     }
     if (state.drag) {
       const wasMovePeak = state.drag.type === "move-peak";
+      const wasMoveZone = state.drag.type === "move-zone";
       const wasBeamCenter = state.drag.type === "beam-center";
-      if (wasMovePeak || state.drag.type === "pan-view" || state.drag.type === "move-rotation-center") {
+      if (wasMovePeak || wasMoveZone || state.drag.type === "pan-view" || state.drag.type === "move-rotation-center") {
         clearObservedPeakSelection();
         if (canvasViewport) canvasViewport.classList.remove("laue-dragging");
       }
@@ -2362,6 +2510,7 @@
         return;
       }
       if (wasMovePeak) rematchObservedPeaksIfAny();
+      if (wasMoveZone) matchZones();
       redraw();
       persistConfig();
     }
@@ -2369,17 +2518,21 @@
 
   function onCanvasContextMenu(event) {
     event.preventDefault();
+    if (state.pendingZone) {
+      state.pendingZone = null; redrawOverlays(); setStatus("Zone creation cancelled."); return;
+    }
     resetViewToFit();
     hideZoomRect();
     setStatus("Zoom reset to fit image.");
   }
 
   function setMode(mode) {
-    if (state.drag?.type === "move-peak" || state.drag?.type === "pan-view" || state.drag?.type === "move-rotation-center") {
+    if (state.drag?.type === "move-peak" || state.drag?.type === "move-zone" || state.drag?.type === "pan-view" || state.drag?.type === "move-rotation-center") {
       clearObservedPeakSelection();
       if (canvasViewport) canvasViewport.classList.remove("laue-dragging");
     }
     state.drag = null;
+    state.pendingZone = null;
     state.mode = mode;
     modeButtons.forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.mode === mode);
@@ -2390,22 +2543,33 @@
       canvasViewport.classList.toggle("laue-pan-view-mode", mode === "pan-view");
       canvasViewport.classList.toggle("laue-move-peak-mode", mode === "move-peak");
       canvasViewport.classList.toggle("laue-move-rotation-center-mode", mode === "move-rotation-center");
+      canvasViewport.classList.toggle("laue-zone-mode", ["add-zone", "move-zone", "remove-zone"].includes(mode));
+      canvasViewport.classList.toggle("laue-beam-center-mode", mode === "beam-center");
     }
     redrawOverlays();
     setStatus({
       view: "View mode — scroll wheel to zoom; right-click resets zoom",
       "zoom-area": "Drag a rectangle to zoom; right-click resets zoom",
       "pan-view": "Drag to pan the image view",
-      "pan-orientation": "Drag to pan orientation; drag beam-center handles directly when needed",
+      "beam-center": "Drag the beam center or radius handle",
+      "pan-orientation": "Drag to pan orientation",
       "rotate-pattern": "Drag around the cyan dot to rotate the pattern. Use Move rotation center to choose a different pivot.",
       "move-rotation-center": "Drag the cyan dot or click anywhere to place the rotation center. It snaps to visible peaks and the beam center.",
       "add-peak": "Click to add observed peak",
       "move-peak": "Click and drag detected peaks to reposition them",
-      "remove-peak": "Click to remove nearest observed peak"
+      "remove-peak": "Click to remove nearest observed peak",
+      "add-zone": "Click two separated points along a zone",
+      "move-zone": "Drag an orange endpoint to adjust a zone",
+      "remove-zone": "Click a zone curve or endpoint to remove it"
     }[mode] || mode);
   }
 
   function bindEvents() {
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape" && state.pendingZone) {
+        state.pendingZone = null; redrawOverlays(); setStatus("Zone creation cancelled.");
+      }
+    });
     document.getElementById("laue-file-input").addEventListener("change", (e) => {
       const file = e.target.files && e.target.files[0];
       if (file) loadFile(file);
@@ -2585,7 +2749,7 @@
     });
     window.addEventListener("mousemove", (e) => {
       if (state.drag && (state.drag.type === "zoom-rect" ||
-        (state.drag.type === "move-rotation-center" && e.target !== canvas))) {
+        (["move-rotation-center", "move-zone", "beam-center", "beam-radius"].includes(state.drag.type) && e.target !== canvas))) {
         onCanvasMouseMove(e);
       }
     });
@@ -2682,14 +2846,10 @@
       cifFileInput.addEventListener("change", () => {
         const file = cifFileInput.files && cifFileInput.files[0];
         if (!file) return;
-        file.text().then((text) => {
-          try {
-            applyCifData(parseCif(text));
-          } catch (err) {
-            const status = document.getElementById("cif-status");
-            status.textContent = err.message;
-            status.classList.add("tool-cif-status-error");
-          }
+        file.text().then((text) => applyCifData(parseCif(text))).catch((err) => {
+          const status = document.getElementById("cif-status");
+          status.textContent = err.message || "Could not read the CIF file.";
+          status.classList.add("tool-cif-status-error");
         });
         cifFileInput.value = "";
       });

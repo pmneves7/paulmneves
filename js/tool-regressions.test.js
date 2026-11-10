@@ -149,11 +149,14 @@ test('Laue peak coordinates follow every pixel rotation and mirror on a nonsquar
   const text=source('js/laue-analysis.js');
   const central=text.slice(text.indexOf('  function updateTransformedDataFromRaw()'),text.indexOf('  function reprocessImage('));
   const state={rawData:data,transform:{rotate90:0,flipH:false,flipV:false},instrument:{beamX:1,beamY:1},
-    observedPeaks:[{id:5,x:2,y:0}],rotationCenter:{x:2,y:0},displayData:data};
+    observedPeaks:[{id:5,x:2,y:0}],zones:[{p1:{x:2,y:0},p2:{x:0,y:1},uvw:[1,0,1]}],
+    pendingZone:{p1:{x:0,y:0},p2:{x:1,y:1}},rotationCenter:{x:2,y:0},displayData:data};
   const s={state,LaueFormats:F,readInstrument:()=>({}),beamCenterPosition:()=>({x:2,y:0}),setBeamCenterPosition:(x,y)=>{s.beam={x,y}}};
   vm.createContext(s);vm.runInContext(central,s);s.updateTransformedDataFromRaw();state.transform.rotate90=1;s.updateTransformedDataFromRaw();
   assert.equal(state.observedPeaks[0].x,1);assert.equal(state.observedPeaks[0].y,2);assert.equal(state.observedPeaks[0].id,5);
   assert.equal(state.rotationCenter.x,1);assert.equal(state.rotationCenter.y,2);
+  assert.equal(state.zones[0].p1.x,1);assert.equal(state.zones[0].p1.y,2);
+  assert.equal(state.zones[0].p2.x,0);assert.equal(state.zones[0].p2.y,0);assert.equal(state.pendingZone,null);
   assert.deepEqual(s.beam,{x:1,y:2});s.updateTransformedDataFromRaw();assert.equal(state.observedPeaks[0].x,1);
 });
 
@@ -172,6 +175,17 @@ test('Laue image loading normalizes the beam against the incoming image size', (
   assert.deepEqual(s.beam,{x:135,y:61});
   assert.equal(s.state.instrument.detOffsetX,7);assert.equal(s.state.instrument.detOffsetY,-3);
   assert.equal(s.state.instrument.beamX,128);assert.equal(s.state.instrument.beamY,64);
+});
+
+test('Laue post-refinement exports keep beam reference separate from offsets to avoid a doubled shift on reload',()=>{
+  const text=source('js/laue-analysis.js');
+  const start=text.indexOf('  function readInstrument()'),end=text.indexOf('  function num(',start);
+  const elements=new Map(),el=id=>{if(!elements.has(id))elements.set(id,{value:'0',checked:false});return elements.get(id);};
+  const s={state:{displayData:{width:258,height:258},instrument:{beamX:127.3,beamY:128.3,beamRadius:14}},
+    document:{getElementById:el},num:id=>id==='laue-det-offset-x'?-1.7:id==='laue-det-offset-y'?-.7:0};
+  vm.createContext(s);vm.runInContext(text.slice(start,end),s);
+  const config=s.readInstrument();assert.equal(config.beamX,129);assert.equal(config.beamY,129);
+  assert.equal(config.detOffsetX,-1.7);assert.equal(config.detOffsetY,-.7);
 });
 
 test('colormap rejects degenerate calibration, exports only current results and draws logarithmic ticks', () => {

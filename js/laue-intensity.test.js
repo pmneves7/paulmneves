@@ -281,3 +281,15 @@ test('spectrum settings and minimum radius persist, and older configs default to
   assert.equal(restored.el('laue-neutron-temperature-field').hidden,false);
   restored.s.loadConfigFromObject({crystal:cell});assert.equal(restored.el('laue-minimum-peak-radius').value,1);
 });
+
+test('zone endpoints and UVW indices survive config save/load while malformed and legacy data clear safely',()=>{
+  const {s}=uiFixture();
+  const zone={p1:{x:120,y:85},p2:{x:460,y:200},uvw:[1,0,-1]};
+  s.state.zones=[zone];
+  const saved=JSON.parse(JSON.stringify(s.saveConfigToObject()));
+  const restored=uiFixture();restored.s.loadConfigFromObject(saved);
+  assert.equal(JSON.stringify(restored.s.state.zones),JSON.stringify([zone]));
+  restored.s.loadConfigFromObject({crystal:cell,zones:[zone,{p1:{x:NaN,y:1},p2:{x:2,y:3}}]});
+  assert.equal(restored.s.state.zones.length,1);
+  restored.s.loadConfigFromObject({crystal:cell});assert.equal(restored.s.state.zones.length,0);
+});

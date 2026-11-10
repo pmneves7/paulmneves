@@ -521,6 +521,105 @@
     cfg.beamY = imageSize.height / 2 + (cfg.detOffsetY || 0);
   }
 
+  function imagePointToScatteringDirection(point, config, imageSize, geometry) {
+    if (![point?.x, point?.y].every(Number.isFinite)) return null;
+    const cfg = { ...config };
+    syncBeamFromOffsets(cfg, imageSize);
+    const geom = geometry || projectionGeometry(cfg, imageSize);
+    const hit = add(geom.planePoint, add(
+      scale(geom.basis.u, (point.x - geom.beamX) / geom.pxPerMmX),
+      scale(geom.basis.v, (point.y - geom.beamY) / geom.pxPerMmY)));
+    const g = subtract(normalize(hit), [1, 0, 0]);
+    return norm(g) > 1e-10 ? normalize(g) : null;
+  }
+
+  function measuredZoneAxis(zone, config, imageSize) {
+    const a = imagePointToScatteringDirection(zone.p1, config, imageSize);
+    const b = imagePointToScatteringDirection(zone.p2, config, imageSize);
+    if (!a || !b) return null;
+    const axis = cross(a, b);
+    return norm(axis) > 1e-5 ? normalize(axis) : null;
+  }
+
+  function directDirection(params, uvw) {
+    const { va, vb, vc } = directLatticeVectors(params);
+    return add(scale(va, uvw[0]), add(scale(vb, uvw[1]), scale(vc, uvw[2])));
+  }
+
+  const ZONE_INDEX_CACHE = new Map();
+  function indexZone(params, zone, config, imageSize, maxIndex = 6, maxAngleDeg = 5) {
+    const measured = measuredZoneAxis(zone, config, imageSize);
+    if (!measured) return null;
+    const cacheKey = JSON.stringify([params.a, params.b, params.c, params.alpha, params.beta, params.gamma, maxIndex]);
+    let candidates = ZONE_INDEX_CACHE.get(cacheKey);
+    if (!candidates) {
+      const gcd = (a, b) => b ? gcd(b, a % b) : a;
+      candidates = enumerateHKL(maxIndex * maxIndex).filter(hkl => {
+        const indices = hkl.slice(0, 3);
+        return indices.find(value => value !== 0) > 0 && indices.reduce((a, b) => gcd(a, Math.abs(b)), 0) === 1;
+      }).map(hkl => ({ uvw: hkl.slice(0, 3), sq: hkl[3], direction: normalize(directDirection(params, hkl)) }));
+      if (ZONE_INDEX_CACHE.size > 20) ZONE_INDEX_CACHE.clear();
+      ZONE_INDEX_CACHE.set(cacheKey, candidates);
+    }
+    const rotation = uMatrix(config.sampleOmega, config.sampleChi, config.samplePhi, config.sampleSigns);
+    let best = null;
+    for (const candidate of candidates) {
+      const angleDeg = radToDeg(Math.acos(clamp(Math.abs(dot(measured, mat3Vec(rotation, candidate.direction))), 0, 1)));
+      if (angleDeg <= maxAngleDeg && (!best || angleDeg < best.angleDeg - 1e-7 ||
+          (Math.abs(angleDeg - best.angleDeg) <= 1e-7 && candidate.sq < best.sq))) best = { ...candidate, angleDeg };
+    }
+    return best && { uvw: best.uvw.slice(), angleDeg: best.angleDeg };
+  }
+
+  function zoneCurve(zone, config, imageSize, samples = 720) {
+    const normal = measuredZoneAxis(zone, config, imageSize);
+    if (!normal) return [];
+    const cfg = { ...config, qMin: 0, qMax: Infinity };
+    syncBeamFromOffsets(cfg, imageSize);
+    const geometry = projectionGeometry(cfg, imageSize);
+    const a = imagePointToScatteringDirection(zone.p1, cfg, imageSize, geometry);
+    const b = cross(normal, a);
+    const second = imagePointToScatteringDirection(zone.p2, cfg, imageSize, geometry);
+    const endAngle = (Math.atan2(dot(second, b), dot(second, a)) + 2 * Math.PI) % (2 * Math.PI);
+    const angles = Array.from({ length: samples + 1 }, (_, i) => i * 2 * Math.PI / samples);
+    angles.push(endAngle); angles.sort((x, y) => x - y);
+    const segments = []; let segment = [];
+    const flush = () => { if (segment.length > 1) segments.push(segment); segment = []; };
+    for (const angle of angles) {
+      const g = add(scale(a, Math.cos(angle)), scale(b, Math.sin(angle)));
+      const point = projectReflectionWithGeometry(g, cfg, imageSize, geometry);
+      if (!point || !Number.isFinite(point.x + point.y) ||
+          Math.abs(point.x) > 4 * imageSize.width || Math.abs(point.y) > 4 * imageSize.height) { flush(); continue; }
+      if (segment.length && Math.hypot(point.x - segment.at(-1).x, point.y - segment.at(-1).y) > Math.hypot(imageSize.width, imageSize.height)) flush();
+      segment.push({ x: point.x, y: point.y });
+    }
+    flush(); return segments;
+  }
+
+  function zoneEndpointResiduals(zone, axis, config, imageSize, geometry) {
+    const cfg = { ...config };
+    syncBeamFromOffsets(cfg, imageSize);
+    const geom = geometry || projectionGeometry(cfg, imageSize);
+    const value = point => {
+      const g = imagePointToScatteringDirection(point, cfg, imageSize, geom);
+      return g ? dot(axis, g) : null;
+    };
+    const residuals = [];
+    for (const point of [zone.p1, zone.p2]) {
+      const f = value(point), step = .25;
+      const xp = value({ x: point.x + step, y: point.y }), xm = value({ x: point.x - step, y: point.y });
+      const yp = value({ x: point.x, y: point.y + step }), ym = value({ x: point.x, y: point.y - step });
+      if ([f, xp, xm, yp, ym].some(v => v == null)) return null;
+      const gradient = Math.hypot((xp - xm) / (2 * step), (yp - ym) / (2 * step));
+      if (!(gradient > 1e-10)) return null;
+      // First-order signed distance in detector pixels, perpendicular to the
+      // predicted zone curve. Sliding an endpoint along its zone costs zero;
+      // endpoints are not incorrectly treated as indexed Bragg reflections.
+      residuals.push(f / gradient);
+    }
+    return residuals;
+  }
+
   function copyConfig(cfg) {
     return { ...cfg, sampleSigns: cfg.sampleSigns ? { ...cfg.sampleSigns } : undefined };
   }
@@ -610,7 +709,7 @@
     return { rank, coupled: smallest < 1e-3 };
   }
 
-  /** Local, robust spot refinement. Index assignments stay fixed during a fit. */
+  /** Local, robust spot/zone refinement. Index assignments stay fixed during a fit. */
   async function refineOrientation(params, config, imageSize, observedPeaks, refineFlags, isAllowed, maxIter, options) {
     const opts = options || {};
     const flags = refineFlags || { sampleOmega: true, sampleChi: true, samplePhi: true };
@@ -619,7 +718,7 @@
     const robust = opts.robust !== false;
     const lossScale = Number.isFinite(opts.outlierScalePx) && opts.outlierScalePx > 0 ? opts.outlierScalePx : 2;
     const result = { config: cfg0, rms: null, initialRms: null, iterations: 0, improved: false, converged: false,
-      status: "invalid_input", message: "Check the crystal, detector dimensions, distance and angles.", excluded: 0 };
+      status: "invalid_input", message: "Check the crystal, detector dimensions, distance and angles.", excluded: 0, usedZones: 0 };
     if (!imageSize || ![imageSize.width, imageSize.height, config.detWidth, config.detHeight, config.detDistance]
       .every(v => Number.isFinite(v) && v > 0) ||
       ![config.sampleOmega, config.sampleChi, config.samplePhi, config.detOmega, config.detChi,
@@ -650,10 +749,24 @@
       if (!visible) result.excluded++;
       return visible;
     });
+    const activeZones = [];
+    const zoneKeys = new Set();
+    for (const zone of opts.zones || []) {
+      if (!Array.isArray(zone.uvw) || zone.uvw.length !== 3 || !zone.uvw.every(Number.isInteger) ||
+          zone.uvw.every(v => v === 0) || !measuredZoneAxis(zone, cfg0, imageSize)) { result.excluded++; continue; }
+      const axis = normalize(directDirection(params, zone.uvw));
+      const axisSign = Math.sign(axis.find(v => Math.abs(v) > 1e-10));
+      const key = JSON.stringify([axis.map(v => Math.round(axisSign * v * 1e9)),
+        [zone.p1, zone.p2].map(p => [p.x, p.y]).sort((a, b) => a[0] - b[0] || a[1] - b[1])]);
+      if (zoneKeys.has(key) || !zoneEndpointResiduals(zone, mat3Vec(initialU, axis), cfg0, imageSize)) { result.excluded++; continue; }
+      zoneKeys.add(key);
+      activeZones.push({ p1: { ...zone.p1 }, p2: { ...zone.p2 }, axis });
+    }
     const minPeaks = Math.floor(nParams / 2) + 1;
     result.used = active.length;
-    if (active.length < minPeaks) return { ...result, status: "insufficient_matches",
-      message: `Need at least ${minPeaks} valid matched spots for ${nParams} selected parameters.` };
+    result.usedZones = activeZones.length;
+    if (active.length + activeZones.length < minPeaks) return { ...result, status: "insufficient_matches",
+      message: `Need at least ${minPeaks} valid matched spots or zones for ${nParams} selected parameters.` };
 
     function evaluate(cfg) {
       if (!(cfg.detDistance > 0) || !Number.isFinite(cfg.detDistance)) return null;
@@ -676,8 +789,19 @@
         weights.push(weight, weight);
         cost += robust && distance > lossScale ? 2 * lossScale * distance - lossScale ** 2 : distance ** 2;
       }
+      for (const zone of activeZones) {
+        const residual = zoneEndpointResiduals(zone, mat3Vec(rotation, zone.axis), cfg, imageSize, geometry);
+        if (!residual) return null;
+        const distance = Math.hypot(...residual);
+        residuals.push(...residual); distances.push(distance);
+        const weight = robust && distance > lossScale ? lossScale / distance : 1;
+        weights.push(weight, weight);
+        cost += robust && distance > lossScale ? 2 * lossScale * distance - lossScale ** 2 : distance ** 2;
+      }
       return { residuals, weights, distances, cost,
-        rms: Math.sqrt(distances.reduce((sum, d) => sum + d * d, 0) / active.length) };
+        rms: Math.sqrt(distances.reduce((sum, d) => sum + d * d, 0) / distances.length),
+        spotRms: active.length ? Math.sqrt(distances.slice(0, active.length).reduce((s, d) => s + d*d, 0) / active.length) : null,
+        zoneRms: activeZones.length ? Math.sqrt(distances.slice(active.length).reduce((s, d) => s + d*d, 0) / (2 * activeZones.length)) : null };
     }
     function jacobianAt(cfg, steps, current) {
       const jacobian = current.residuals.map(() => []);
@@ -701,6 +825,8 @@
     if (!current) return result;
     const initialCost = current.cost;
     result.initialRms = current.rms;
+    result.initialSpotRms = current.spotRms;
+    result.initialZoneRms = current.zoneRms;
     result.status = "max_iterations";
     let lambda = 1e-3;
     let rankInfo;
@@ -708,14 +834,14 @@
       result.iterations = iteration + 1;
       if (opts.shouldCancel?.()) return { ...result, status: "cancelled", message: "Refinement cancelled; parameters were not changed." };
       opts.onProgress?.({ iteration: iteration + 1, maxIterations: limit, rms: current.rms,
-        bestRms: current.rms, matched: active.length, missing: 0 });
+        bestRms: current.rms, matched: active.length, zones: activeZones.length, missing: 0 });
       if (opts.yieldToBrowser) await opts.yieldToBrowser();
       if (opts.shouldCancel?.()) return { ...result, status: "cancelled", message: "Refinement cancelled; parameters were not changed." };
       const steps = refinementSteps(flags, cfg);
       const jacobian = jacobianAt(cfg, steps, current);
       rankInfo = refinementRank(jacobian, nParams);
       if (rankInfo.rank < nParams) {
-        let message = `Only ${rankInfo.rank} of ${nParams} parameter directions are constrained. Add well-separated spots or select fewer parameters.`;
+        let message = `Only ${rankInfo.rank} of ${nParams} parameter directions are constrained. Add independent spots/zones or select fewer parameters.`;
         if (flags.detOmega && !flags.detChi && Math.abs(Math.sin(degToRad(cfg.detChi))) < 1e-8) {
           message = "Detector Ω is undefined at zero tilt. Select Detector χ as well, or keep Detector Ω fixed.";
         }
@@ -761,7 +887,7 @@
     const finalJacobian = jacobianAt(cfg, refinementSteps(flags, cfg), current);
     const inlierJacobian = finalJacobian.filter((_, i) => inliers[Math.floor(i / 2)]);
     if (inlierCount < minPeaks || refinementRank(inlierJacobian, nParams).rank < nParams) return {
-      ...result, status: "underconstrained", message: "Too few independent inlier spots support this fit. Add spots or refine fewer parameters." };
+      ...result, status: "underconstrained", message: "Too few independent inlier constraints support this fit. Add spots/zones or refine fewer parameters." };
     const improved = current.cost < initialCost - Math.max(1e-12, initialCost * 1e-10);
     const messages = {
       converged: improved ? "Fit converged." : "Already converged; parameters were not changed.",
@@ -770,7 +896,8 @@
     };
     return { ...result, config: improved ? cfg : cfg0, rms: current.rms, improved,
       converged: result.status === "converged", message: messages[result.status],
-      inliers: inlierCount, outliers: active.length - inlierCount,
+      spotRms: current.spotRms, zoneRms: current.zoneRms,
+      inliers: inlierCount, outliers: current.distances.length - inlierCount,
       inlierRms: Math.sqrt(current.distances.reduce((sum, d, i) => sum + (inliers[i] ? d * d : 0), 0) / inlierCount),
       coupled: rankInfo?.coupled || refinementRank(finalJacobian, nParams).coupled };
   }
@@ -1213,6 +1340,12 @@
     projectReflection,
     projectHKL,
     computePredictedPeaks,
+    imagePointToScatteringDirection,
+    measuredZoneAxis,
+    directDirection,
+    indexZone,
+    zoneCurve,
+    zoneEndpointResiduals,
     refineOrientation,
     idealOrientationDeviation,
     alignHKLToBeam,

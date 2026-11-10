@@ -16,6 +16,18 @@
     { energy: 8.9053, rate: 0.0781600 },
     { energy: 8.9053, rate: 0.0398900 }
   ];
+  // Tungsten K data from the same xraylib tables. The excitation edge is
+  // 69.525 keV (NIST), so a normal 40 kV W tube has NO K emission.
+  // https://physics.nist.gov/PhysRefData/XrayMassCoef/ElemTab/z74.html
+  // Natural line FWHM = K-level width + final-level width, in eV:
+  // https://github.com/tschoonj/xraylib/blob/master/data/atomiclevelswidth.dat
+  const W_K_EDGE_KEV = 69.525;
+  const W_LINES = [
+    { energy: 59.3182, rate: 0.502430, widthEv: 44.91 }, // Kα1: 40.1 + 4.81
+    { energy: 57.9810, rate: 0.289170, widthEv: 44.92 }, // Kα2: 40.1 + 4.82
+    { energy: 67.2440, rate: 0.108080, widthEv: 46.5 },  // Kβ1: 40.1 + 6.4
+    { energy: 66.9501, rate: 0.0558800, widthEv: 48.2 }  // Kβ3: 40.1 + 8.1
+  ];
   // Effective multi-Maxwellian fits; weights are integrated component fluxes.
   // These describe the moderator, before beamline optics, not a calibrated
   // spectrum at the sample. Overall source power cancels in relative intensity.
@@ -52,7 +64,13 @@
         density = () => 1;
         description = "Flat incident photon flux per Å.";
       } else {
-        if (!["cu-continuum", "cu-lines"].includes(kind)) throw new Error("Unknown X-ray spectrum model.");
+        if (!["cu-continuum", "cu-lines", "w-continuum", "w-lines"].includes(kind)) throw new Error("Unknown X-ray spectrum model.");
+        const tungsten = kind.startsWith("w-");
+        const symbol = tungsten ? "W" : "Cu";
+        const atomicNumber = tungsten ? 74 : 29;
+        const edge = tungsten ? W_K_EDGE_KEV : CU_K_EDGE_KEV;
+        const lines = tungsten ? W_LINES : CU_LINES;
+        const withLines = kind.endsWith("-lines");
         const voltage = positive(settings.tubeVoltageKv, "Tube voltage (kV)");
         const width = kind === "cu-lines" ? positive(settings.cuLineWidthEv, "Cu line FWHM (eV)") / 1000 : 0;
         const cutoff = HC_KEV_ANGSTROM / voltage;
@@ -61,28 +79,38 @@
         // Empirical characteristic-line yield follows the McXtrace Source_lab
         // model (Honkimäki), with a linear K-shell overvoltage dependence.
         // https://mcxtrace.org/download/components/3.9.2/mcxtrace-components/Component_manualse17.html
-        const lineYield = kind === "cu-lines" && voltage > CU_K_EDGE_KEV
-          ? 4 * Math.PI * 1.2e-5 * CU_K_EDGE_KEV ** 1.67 * Math.exp(-0.077 * 29) * (voltage / CU_K_EDGE_KEV - 1)
+        // The McXtrace empirical yield is K-shell specific. Do not apply it to
+        // W L shells: their vacancy/cascade yields need a different model.
+        // Consequently W L emission (present at ordinary Laue tube voltages)
+        // is omitted. The W model is a continuum / optional K-only estimate,
+        // not a full calibrated tungsten-tube spectrum. At a fixed voltage the
+        // Kramers continuum differs from Cu only by Z, which cancels when the
+        // displayed spot intensities are normalized.
+        const lineYield = withLines && voltage > edge
+          ? 4 * Math.PI * 1.2e-5 * edge ** 1.67 * Math.exp(-0.077 * atomicNumber) * (voltage / edge - 1)
           : 0;
         density = wavelength => {
           const energy = HC_KEV_ANGSTROM / wavelength;
           if (energy >= voltage) return 0;
-          let perKev = 2e-6 * 29 * (voltage / energy - 1);
+          let perKev = 2e-6 * atomicNumber * (voltage / energy - 1);
           if (lineYield) {
-            const halfWidth = width / 2;
-            for (const line of CU_LINES) {
+            for (const line of lines) {
+              // W uses its own intrinsic widths, not an inherited Cu width.
+              const halfWidth = tungsten ? line.widthEv / 2000 : width / 2;
               // Unit-area Lorentzian in ENERGY, then transform the combined
               // photon density to wavelength. The width is an effective input.
-              perKev += lineYield * line.rate / CU_LINES[0].rate * halfWidth /
+              perKev += lineYield * line.rate / lines[0].rate * halfWidth /
                 (Math.PI * ((energy - line.energy) ** 2 + halfWidth ** 2));
             }
           }
           return perKev * HC_KEV_ANGSTROM / wavelength ** 2;
         };
-        const lineNote = kind !== "cu-lines" ? " Characteristic lines are omitted." : lineYield > 0
-          ? " Line strengths are empirical; the effective width controls how sharply they enhance nearby reflections."
-          : ` Cu K emission is absent at or below the ${CU_K_EDGE_KEV.toFixed(3)} kV K-shell threshold.`;
-        description = `Cu tube, ${voltage} kV: Kramers continuum${lineYield > 0 ? ` + Cu K lines (${settings.cuLineWidthEv} eV FWHM)` : ""}; short-wavelength cutoff ${cutoff.toFixed(3)} Å. Unfiltered source approximation; window, anode self-absorption and beamline transmission are omitted.${lineNote}`;
+        const lineNote = !withLines ? " Characteristic lines are omitted." : lineYield > 0
+          ? tungsten ? " K-line strengths are empirical; natural line widths are used. W L emission is omitted."
+            : " Line strengths are empirical; the effective width controls how sharply they enhance nearby reflections."
+          : ` ${symbol} K emission is absent at or below the ${edge.toFixed(3)} kV K-shell threshold.${tungsten ? " W L emission is omitted." : ""}`;
+        const lineWidthNote = tungsten ? "natural widths" : `${settings.cuLineWidthEv} eV FWHM`;
+        description = `${symbol} tube, ${voltage} kV: Kramers continuum${lineYield > 0 ? ` + ${symbol} K lines (${lineWidthNote})` : ""}; short-wavelength cutoff ${cutoff.toFixed(3)} Å. Unfiltered source approximation; window, anode self-absorption and beamline transmission are omitted.${lineNote}`;
       }
     } else if (sourceType === "neutron") {
       const kind = settings.neutronSpectrum || "flat";

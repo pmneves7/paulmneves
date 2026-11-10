@@ -248,3 +248,9 @@ test('an already-converged UI run keeps the prior undo snapshot and reports conv
   const previous={sampleOmega:12};s.state.refinementUndo=previous;await s.runRefinement();
   assert.equal(s.writes.length,0);assert.equal(s.state.refinementUndo,previous);assert.match(s.refineResult.textContent,/Already converged/);
 });
+
+test('editing an observed zone during an asynchronous fit cancels the stale result',async()=>{
+  const {s}=uiFixture(async ctx=>{ctx.state.zones[0].p1.x+=1;return successfulFit();});
+  s.state.zones=[{p1:{x:30,y:70},p2:{x:700,y:400},uvw:[0,1,0]}];s.matchZones=()=>{};
+  await s.runRefinement();assert.equal(s.writes.length,0);assert.match(s.refineResult.textContent,/Current edits were kept/);
+});
