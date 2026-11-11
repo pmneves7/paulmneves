@@ -3037,12 +3037,19 @@
       });
     }
 
-    window.addEventListener("resize", () => {
+    const resizeViewer = () => {
       if (state.displayData) {
         applyViewTransform();
         updateColorbar();
       }
-    });
+    };
+    if (canvasViewport && window.ResizeObserver) {
+      // The plot can resize without a window resize, including while the
+      // navigation bar is hiding after a refresh.
+      new ResizeObserver(resizeViewer).observe(canvasViewport);
+    } else {
+      window.addEventListener("resize", resizeViewer);
+    }
 
     document.getElementById("laue-auto-detect-btn").addEventListener("click", runAutoDetect);
     document.getElementById("laue-identify-btn").addEventListener("click", runOrientationIdentification);
@@ -3245,7 +3252,7 @@
       restored = await restoreCachedImage();
       if (restored) {
         rematchObservedPeaksIfAny();
-        redraw();
+        resetViewToFit();
       }
     } catch (_) { /* ignore cache read errors */ }
     if (!restored) {

@@ -2807,6 +2807,10 @@ body.laue-page.laue-nav-hidden .laue-viewer-panel {
   font-weight: inherit;
 }
 
+#laue-overlay-collapsible > .tool-collapsible-body {
+  padding-block-start: 0.75rem;
+}
+
 .laue-overlay-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -3007,18 +3011,18 @@ body.laue-page.laue-nav-hidden .laue-viewer-panel {
 .laue-mode-bar {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem 0.3rem;
+  gap: 0.35rem 0.4375rem;
   margin-bottom: 0;
   flex: 0 0 auto;
 }
 
 .laue-mode-group {
   display: flex;
-  gap: 0.1875rem;
+  gap: 0.15625rem;
 }
 
 .laue-mode-group + .laue-mode-group {
-  padding-inline-start: 0.3rem;
+  padding-inline-start: 0.4375rem;
   border-inline-start: 1px solid var(--border, #c8ccd4);
 }
 
