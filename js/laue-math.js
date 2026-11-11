@@ -546,6 +546,279 @@
     return add(scale(va, uvw[0]), add(scale(vb, uvw[1]), scale(vc, uvw[2])));
   }
 
+  function primitiveIndices(indices) {
+    const gcd = (a, b) => b ? gcd(b, a % b) : a;
+    const divisor = indices.reduce((a, b) => gcd(a, Math.abs(b)), 0);
+    return indices.map(value => value / divisor || 0);
+  }
+
+  function directionCatalogue(params, config, isAllowed, zone) {
+    const basis = zone ? directLatticeVectors(params) : reciprocalBasis(params);
+    const vectors = Object.values(basis);
+    const matrix = matrixFromColumns(...vectors);
+    const unique = new Map();
+    for (const [h, k, l, sq] of enumerateHKL(zone ? 36 : config.maxHklSq)) {
+      if (!zone && isAllowed && !isAllowed(h, k, l)) continue;
+      const indices = [h, k, l];
+      const vector = mat3Vec(matrix, indices);
+      const length = norm(vector);
+      if (!zone && (length < config.qMin || length > config.qMax)) continue;
+      const direction = primitiveIndices(indices);
+      const key = direction.join(",");
+      if (unique.has(key) && unique.get(key).sq <= sq) continue;
+      const ray = zone && direction.find(value => value !== 0) < 0 ? direction.map(value => -value || 0) : direction;
+      unique.set(key, { key: ray.join(","), vector: scale(vector, 1 / length), sq, length });
+    }
+    return [...unique.values()].sort((a, b) => (zone ? a.sq - b.sq : a.length - b.length) || a.sq - b.sq);
+  }
+
+  function directionTree(entries, depth = 0) {
+    if (!entries.length) return null;
+    const axis = depth % 3;
+    const sorted = entries.slice().sort((a, b) => a.vector[axis] - b.vector[axis]);
+    const middle = sorted.length >> 1;
+    return {
+      entry: sorted[middle], axis,
+      left: directionTree(sorted.slice(0, middle), depth + 1),
+      right: directionTree(sorted.slice(middle + 1), depth + 1)
+    };
+  }
+
+  function nearestDirection(tree, vector, distanceLimit) {
+    let distance = distanceLimit, entry = null;
+    function visit(node) {
+      if (!node) return;
+      const v = node.entry.vector;
+      const dx = v[0] - vector[0], dy = v[1] - vector[1], dz = v[2] - vector[2];
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 < distance) {
+        distance = d2;
+        entry = node.entry;
+      }
+      const d = vector[node.axis] - v[node.axis];
+      visit(d < 0 ? node.left : node.right);
+      if (d * d < distance) visit(d < 0 ? node.right : node.left);
+    }
+    visit(tree);
+    return entry && { entry, distance };
+  }
+
+  function pairFrame(a, b) {
+    // The bisector frame shares a small inter-direction angle error between
+    // both inputs instead of aligning one exactly and giving all error to the other.
+    const x = normalize(add(a, b));
+    const y = normalize(subtract(a, b));
+    return matrixFromColumns(x, y, cross(x, y));
+  }
+
+  function spreadDirections(items, limit) {
+    if (items.length <= limit) return items;
+    const pool = items.slice();
+    const selected = [pool.shift()];
+    while (selected.length < limit) {
+      let best = 0, separation = -Infinity;
+      for (let i = 0; i < pool.length; i++) {
+        const d = Math.min(...selected.map(item => 1 - Math.abs(dot(item.vector, pool[i].vector))));
+        if (d > separation) { best = i; separation = d; }
+      }
+      selected.push(pool.splice(best, 1)[0]);
+    }
+    return selected;
+  }
+
+  function indexingSymmetry(params, operations) {
+    const { va, vb, vc } = directLatticeVectors(params);
+    const a = matrixFromColumns(va, vb, vc);
+    const inverseA = transpose3(bMatrix(params)).map(row => scale(row, 1 / (2 * Math.PI)));
+    const identity = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+    const matrices = new Map([["1,0,0,0,1,0,0,0,1", identity]]);
+    for (const fractional of operations || []) {
+      const cartesian = mat3Mul(a, mat3Mul(fractional, inverseA));
+      // Positions are Friedel-equivalent, so compose improper operations
+      // with inversion to get the equivalent proper orientation.
+      const sign = Math.sign(dot(cartesian[0], cross(cartesian[1], cartesian[2])));
+      const rotation = cartesian.map(row => scale(row, sign));
+      const metric = mat3Mul(rotation, transpose3(rotation));
+      if (metric.some((row, i) => row.some((value, j) => Math.abs(value - identity[i][j]) > 1e-5))) continue;
+      matrices.set(rotation.flat().map(value => Math.round(value * 1e7) / 1e7).join(","), rotation);
+    }
+    return [...matrices.values()];
+  }
+
+  function representativeSeedDirections(catalogue, symmetry) {
+    const seen = new Set();
+    return catalogue.map((entry, rank) => ({ entry, rank })).filter(({ entry }) => {
+      const key = symmetry.map(rotation => mat3Vec(rotation, entry.vector)
+        .map(value => Math.round(value * 1e7)).join(",")).sort()[0];
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function scoreIndexingRotation(rotation, observed, trees, tolerance) {
+    const inverse = transpose3(rotation);
+    const distances = new Map();
+    for (const item of observed) {
+      const hit = nearestDirection(trees[item.kind], mat3Vec(inverse, item.vector), tolerance);
+      if (!hit) continue;
+      const key = item.kind + ":" + hit.entry.key;
+      const previous = distances.get(key);
+      if (!previous || hit.distance < previous.distance) distances.set(key, { ...hit, item });
+    }
+    const matches = [...distances.values()];
+    const cost = matches.reduce((sum, hit) => sum + hit.distance, 0);
+    const complexity = matches.reduce((sum, hit) => sum + hit.entry.sq, 0);
+    // A borderline extra match should not outrank several tight matches.
+    return { rotation, matches, agreement: matches.length - cost / tolerance, cost, complexity };
+  }
+
+  function compareIndexingScores(a, b) {
+    return b.agreement - a.agreement || b.matches.length - a.matches.length || a.cost - b.cost || a.complexity - b.complexity;
+  }
+
+  function polishIndexingCandidate(candidate, observed, trees, tolerance) {
+    // A small angular correction using all assigned directions stabilizes a
+    // seed from two noisy points. Detector parameters are held fixed here.
+    for (let step = 0; step < 2; step++) {
+      const system = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+      const rhs = [0, 0, 0];
+      for (const { entry, item } of candidate.matches) {
+        const vector = mat3Vec(candidate.rotation, entry.vector);
+        const error = cross(vector, item.vector);
+        for (let i = 0; i < 3; i++) {
+          rhs[i] += error[i];
+          for (let j = 0; j < 3; j++) system[i][j] += (i === j ? 1 : 0) - vector[i] * vector[j];
+        }
+      }
+      const delta = solveSymmetric(system, rhs);
+      if (!delta || norm(delta) < 1e-9 || norm(delta) > Math.sqrt(tolerance)) break;
+      const moved = mat3Mul(rotAxis(delta, norm(delta)), candidate.rotation);
+      const next = scoreIndexingRotation(moved, observed, trees, tolerance);
+      if (compareIndexingScores(next, candidate) >= 0) break;
+      candidate = next;
+    }
+    return candidate;
+  }
+
+  async function identifyOrientations(params, config, imageSize, peaks, zones, options = {}) {
+    const toleranceDeg = options.toleranceDeg ?? 1;
+    if (!(toleranceDeg >= 0.05 && toleranceDeg <= 5)) throw new Error("Use an angular tolerance from 0.05° to 5°.");
+    if (![config.detDistance, config.detWidth, config.detHeight, imageSize.width, imageSize.height]
+      .every(value => Number.isFinite(value) && value > 0)) throw new Error("Enter valid detector geometry first.");
+    const cfg = { ...config };
+    syncBeamFromOffsets(cfg, imageSize);
+    const geometry = projectionGeometry(cfg, imageSize);
+    const observed = [];
+    function addObservation(vector, kind) {
+      if (!vector) return;
+      const sameDirection = item => item.kind === kind &&
+        (kind === "zone" ? Math.abs(dot(item.vector, vector)) : dot(item.vector, vector)) > Math.cos(degToRad(.05));
+      if (!observed.some(sameDirection)) observed.push({ vector, kind });
+    }
+    for (const peak of peaks) addObservation(imagePointToScatteringDirection(peak, cfg, imageSize, geometry), "peak");
+    for (const zone of zones) addObservation(measuredZoneAxis(zone, cfg, imageSize), "zone");
+    const observedPeaks = observed.filter(item => item.kind === "peak");
+    const observedZones = observed.filter(item => item.kind === "zone");
+    if (observedPeaks.length && !(cfg.maxHklSq >= 1 && cfg.maxHklSq <= 500)) {
+      throw new Error("Use Max h²+k²+l² from 1 to 500 for orientation identification.");
+    }
+    if (observedPeaks.length && !(cfg.qMin >= 0 && cfg.qMax > cfg.qMin)) {
+      throw new Error("Set Q max above Q min before identifying an orientation.");
+    }
+    const seeds = [...spreadDirections(observedPeaks, 10), ...spreadDirections(observedZones, 6)];
+    const pairTypes = { "peak:peak": [], "peak:zone": [], "zone:zone": [] };
+    for (let i = 0; i < seeds.length; i++) {
+      for (let j = i + 1; j < seeds.length; j++) {
+        const a = seeds[i], b = seeds[j], cosine = clamp(dot(a.vector, b.vector), -1, 1);
+        if (Math.abs(cosine) < Math.cos(degToRad(3))) {
+          pairTypes[a.kind + ":" + b.kind].push({ a, b, cosine, frame: pairFrame(a.vector, b.vector) });
+        }
+      }
+    }
+    const pairs = Object.values(pairTypes).flatMap((list, i) => list.sort((a, b) => Math.abs(a.cosine) - Math.abs(b.cosine))
+      .slice(0, [14, 12, 8][i]));
+    if (!pairs.length) throw new Error("Use two nonparallel measurements: peaks, zones, or one of each.");
+    const catalogue = {
+      peak: observedPeaks.length ? directionCatalogue(params, cfg, options.isAllowed, false) : [],
+      zone: observedZones.length ? directionCatalogue(params, cfg, null, true) : []
+    };
+    const symmetry = indexingSymmetry(params, options.symmetryRotations);
+    const tree = { peak: directionTree(catalogue.peak), zone: directionTree(catalogue.zone) };
+    const representatives = {
+      peak: representativeSeedDirections(catalogue.peak, symmetry),
+      zone: representativeSeedDirections(catalogue.zone, symmetry)
+    };
+    const coarseObserved = [...spreadDirections(observedPeaks, 16), ...spreadDirections(observedZones, 8)];
+    const angle = degToRad(toleranceDeg);
+    const tolerance = 4 * Math.sin(angle / 2) ** 2;
+    const duplicateTrace = 1 + 2 * Math.cos(Math.max(degToRad(.25), angle * .8));
+    const shortlist = [];
+    function retain(list, candidate, limit) {
+      if (candidate.matches.length < 2 || (list.length >= limit && compareIndexingScores(candidate, list.at(-1)) >= 0)) return;
+      const variants = symmetry.map(operation => mat3Mul(candidate.rotation, operation));
+      const duplicate = list.findIndex(other => variants.some(rotation =>
+        rotation.reduce((sum, row, i) => sum + dot(row, other.rotation[i]), 0) >= duplicateTrace));
+      if (duplicate >= 0) {
+        if (compareIndexingScores(candidate, list[duplicate]) >= 0) return;
+        list.splice(duplicate, 1);
+      }
+      list.push(candidate);
+      list.sort(compareIndexingScores);
+      if (list.length > limit) list.pop();
+    }
+
+    let tested = 0, lastYield = Date.now();
+    const start = uMatrix(cfg.sampleOmega || 0, cfg.sampleChi || 0, cfg.samplePhi || 0, cfg.sampleSigns);
+    retain(shortlist, scoreIndexingRotation(start, coarseObserved, tree, tolerance), 64);
+    for (let i = 0; i < pairs.length; i++) {
+      const { a, b, cosine, frame } = pairs[i];
+      if (options.shouldCancel?.()) return { cancelled: true, candidates: [] };
+      options.onProgress?.({ pair: i + 1, totalPairs: pairs.length, tested });
+      const angleBetween = Math.acos(cosine);
+      const lo = Math.cos(Math.min(Math.PI, angleBetween + 2 * angle));
+      const hi = Math.cos(Math.max(0, angleBetween - 2 * angle));
+      const bEntries = catalogue[b.kind];
+      // For peak-only pairs at least one seed is from the 320 shortest
+      // reciprocal directions. Every catalogue direction can be its partner.
+      for (const { entry: aEntry, rank } of representatives[a.kind]) {
+        const limit = a.kind === "peak" && b.kind === "peak" && rank >= 320
+          ? Math.min(320, bEntries.length) : bEntries.length;
+        for (let j = 0; j < limit; j++) {
+          const bEntry = bEntries[j];
+          const d = dot(aEntry.vector, bEntry.vector);
+          if (d < lo || d > hi || Math.abs(d) >= 1 - 1e-9) continue;
+          const rotation = mat3Mul(frame, transpose3(pairFrame(aEntry.vector, bEntry.vector)));
+          tested++;
+          retain(shortlist, scoreIndexingRotation(rotation, coarseObserved, tree, tolerance), 64);
+        }
+        if (Date.now() - lastYield > 15 && options.yieldToBrowser) {
+          await options.yieldToBrowser();
+          lastYield = Date.now();
+          if (options.shouldCancel?.()) return { cancelled: true, candidates: [] };
+        }
+      }
+    }
+
+    const finalists = [];
+    for (const seed of shortlist) {
+      const scored = scoreIndexingRotation(seed.rotation, observed, tree, tolerance);
+      retain(finalists, polishIndexingCandidate(scored, observed, tree, tolerance), 8);
+    }
+    return {
+      tested,
+      peakCount: observedPeaks.length,
+      zoneCount: observedZones.length,
+      candidates: finalists.map(({ rotation, matches }) => ({
+        ...sampleEulerFromUMatrix(rotation, cfg.sampleSigns),
+        matchedPeaks: matches.filter(hit => hit.item.kind === "peak").length,
+        matchedZones: matches.filter(hit => hit.item.kind === "zone").length,
+        rmsDeg: radToDeg(Math.sqrt(matches.reduce((sum, hit) =>
+          sum + (2 * Math.asin(Math.sqrt(hit.distance) / 2)) ** 2, 0) / matches.length))
+      }))
+    };
+  }
+
   const ZONE_INDEX_CACHE = new Map();
   function indexZone(params, zone, config, imageSize, maxIndex = 6, maxAngleDeg = 5) {
     const measured = measuredZoneAxis(zone, config, imageSize);
@@ -1346,6 +1619,7 @@
     indexZone,
     zoneCurve,
     zoneEndpointResiduals,
+    identifyOrientations,
     refineOrientation,
     idealOrientationDeviation,
     alignHKLToBeam,

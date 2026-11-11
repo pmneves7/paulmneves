@@ -10,7 +10,7 @@
   <title>Laue analysis | Paul M. Neves</title>
   <link rel="canonical" href="https://paulmneves.com/tools/laue-analysis.html" />
   <link rel="icon" type="image/png" href="../media/favicon.png" />
-  <link rel="stylesheet" href="../css/site.css?v=20261111" />
+  <link rel="stylesheet" href="../css/site.css?v=20261111-2" />
 </head>
 <body class="laue-page">
   <header>
@@ -348,7 +348,7 @@
             <div class="laue-check-row">
               <label><input type="checkbox" id="laue-show-predicted-peaks" checked /> Show predicted peaks</label>
               <label><input type="checkbox" id="laue-show-predicted-labels" checked /> Show index labels</label>
-              <label><input type="checkbox" id="laue-show-beam-center" checked /> Show beam center</label>
+              <label><input type="checkbox" id="laue-show-beam-center" checked /> Show beam and rotation centers</label>
             </div>
             <div class="laue-intensity-controls" id="laue-intensity-controls">
               <h3 class="laue-subheading">Expected Laue intensity</h3>
@@ -507,9 +507,30 @@
           </details>
         </section>
 
+        <section class="tool-section" id="laue-identification-section">
+          <details class="tool-collapsible">
+            <summary class="tool-collapsible-summary">7. Orientation identification</summary>
+            <div class="tool-collapsible-body">
+              <p class="tool-note">Find candidate orientations from the measured peaks and zones using the current detector geometry.</p>
+              <div class="laue-identification-controls">
+                <div class="tool-field">
+                  <label for="laue-identify-tolerance">Angular tolerance (°)</label>
+                  <input id="laue-identify-tolerance" type="number" min="0.05" max="5" step="0.05" value="1" />
+                </div>
+                <div class="laue-action-row">
+                  <button type="button" class="button primary" id="laue-identify-btn">Find orientations</button>
+                  <button type="button" class="button secondary" id="laue-identify-cancel-btn" hidden>Cancel</button>
+                </div>
+              </div>
+              <p class="tool-note" id="laue-identify-status" role="status" aria-live="polite"></p>
+              <ol class="laue-orientation-list" id="laue-identify-candidates" aria-label="Candidate orientations"></ol>
+            </div>
+          </details>
+        </section>
+
         <section class="tool-section" id="laue-refinement-section">
           <details class="tool-collapsible" id="laue-refinement-collapsible">
-            <summary class="tool-collapsible-summary">7. Orientation refinement</summary>
+            <summary class="tool-collapsible-summary">8. Orientation refinement</summary>
             <div class="tool-collapsible-body">
           <p class="tool-note">Local fit from the current orientation using matched peaks and zones. Check their indices first; assignments stay fixed during the fit.</p>
           <div class="laue-check-row">
@@ -585,26 +606,74 @@
       </div>
 
       <aside class="laue-viewer-panel" aria-label="Laue image viewer">
-        <div class="laue-mode-bar" role="toolbar" aria-label="Canvas interaction modes">
-          <button type="button" class="laue-mode-btn" data-mode="view">View</button>
-          <button type="button" class="laue-mode-btn" data-mode="zoom-area">Zoom</button>
-          <button type="button" class="laue-mode-btn" data-mode="pan-view">Pan view</button>
-          <button type="button" class="laue-mode-btn laue-mode-action" id="laue-zoom-reset">Reset zoom</button>
-          <span class="laue-mode-separator" role="separator" aria-hidden="true"></span>
-          <button type="button" class="laue-mode-btn" data-mode="beam-center">Beam center</button>
-          <span class="laue-mode-separator" role="separator" aria-hidden="true"></span>
-          <button type="button" class="laue-mode-btn active" data-mode="pan-orientation">Pan orientation</button>
-          <button type="button" class="laue-mode-btn" data-mode="rotate-pattern">Rotate pattern</button>
-          <button type="button" class="laue-mode-btn" data-mode="move-rotation-center" title="Drag the cyan dot or click a peak or the beam center to place the rotation center">Move rotation center</button>
-          <button type="button" class="laue-mode-btn laue-mode-action" id="laue-rotation-center-reset" title="Return the rotation center to the beam center">Reset rotation center</button>
-          <span class="laue-mode-separator" role="separator" aria-hidden="true"></span>
-          <button type="button" class="laue-mode-btn" data-mode="add-peak">Add peak</button>
-          <button type="button" class="laue-mode-btn" data-mode="move-peak">Move peak</button>
-          <button type="button" class="laue-mode-btn" data-mode="remove-peak">Remove peak</button>
-          <span class="laue-mode-separator" role="separator" aria-hidden="true"></span>
-          <button type="button" class="laue-mode-btn" data-mode="add-zone">Add zone</button>
-          <button type="button" class="laue-mode-btn" data-mode="move-zone">Move zone</button>
-          <button type="button" class="laue-mode-btn" data-mode="remove-zone">Remove zone</button>
+        <div class="laue-mode-bar" role="toolbar" aria-label="Plot tools">
+          <div class="laue-mode-group" role="group" aria-label="View">
+            <button type="button" class="laue-mode-btn" data-mode="view" aria-pressed="false" aria-label="View" title="View">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 3 14 10-7 1-3 6z"/></svg>
+            </button>
+            <button type="button" class="laue-mode-btn" data-mode="zoom-area" aria-pressed="false" aria-label="Zoom" title="Zoom">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m14.5 14.5 5.5 5.5M7.5 10h5m-2.5-2.5v5"/></svg>
+            </button>
+            <button type="button" class="laue-mode-btn" data-mode="pan-view" aria-pressed="false" aria-label="Pan view" title="Pan view">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M3 12h18M9 6l3-3 3 3m-6 12 3 3 3-3M6 9l-3 3 3 3m12-6 3 3-3 3"/></svg>
+            </button>
+            <button type="button" class="laue-mode-btn laue-mode-action" id="laue-zoom-reset" aria-label="Reset zoom" title="Reset zoom">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5"/><rect x="8" y="8" width="8" height="8" rx="1"/></svg>
+            </button>
+          </div>
+          <div class="laue-mode-group" role="group" aria-label="Beam and rotation centers">
+            <button type="button" class="laue-mode-btn laue-visibility-btn" data-overlay="showBeamCenter" aria-pressed="true" aria-label="Show beam and rotation centers" title="Show or hide beam and rotation centers">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.5"/><path class="laue-visibility-slash" d="m3 3 18 18"/></svg>
+            </button>
+            <button type="button" class="laue-mode-btn" data-mode="beam-center" aria-pressed="false" aria-label="Beam center" title="Adjust beam center and radius">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2"/><circle cx="20" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg>
+            </button>
+            <button type="button" class="laue-mode-btn" data-mode="move-rotation-center" aria-pressed="false" aria-label="Move rotation center" title="Move rotation center">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 3v3m0 12v3M3 12h3m12 0h3"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/></svg>
+            </button>
+            <button type="button" class="laue-mode-btn laue-mode-action" id="laue-rotation-center-reset" aria-label="Reset rotation center" title="Reset rotation center to the beam center">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v5h5M5 9a7.5 7.5 0 1 1 0 6"/><circle cx="12" cy="12" r="2"/></svg>
+            </button>
+          </div>
+          <div class="laue-mode-group" role="group" aria-label="Predicted peaks and orientation">
+            <button type="button" class="laue-mode-btn laue-visibility-btn" data-overlay="showPredictedPeaks" aria-pressed="true" aria-label="Show predicted peak overlay" title="Show or hide predicted peak overlay">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.5"/><path class="laue-visibility-slash" d="m3 3 18 18"/></svg>
+            </button>
+            <button type="button" class="laue-mode-btn active" data-mode="pan-orientation" aria-pressed="true" aria-label="Pan orientation" title="Pan orientation">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="6" r="1.5"/><circle cx="16" cy="18" r="1.5"/><path d="M3 12h18m-3-3 3 3-3 3M6 9l-3 3 3 3"/></svg>
+            </button>
+            <button type="button" class="laue-mode-btn" data-mode="rotate-pattern" aria-pressed="false" aria-label="Rotate pattern" title="Rotate pattern">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10a8 8 0 1 0-2 8m2-13v5h-5"/><circle cx="12" cy="12" r="1.5"/></svg>
+            </button>
+          </div>
+          <div class="laue-mode-group" role="group" aria-label="Identified peaks">
+            <button type="button" class="laue-mode-btn laue-visibility-btn" data-overlay="showObservedPeaks" aria-pressed="true" aria-label="Show identified peaks" title="Show or hide identified peaks">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.5"/><path class="laue-visibility-slash" d="m3 3 18 18"/></svg>
+            </button>
+            <button type="button" class="laue-mode-btn" data-mode="add-peak" aria-pressed="false" aria-label="Add peak" title="Add peak">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="14" r="4"/><path d="M17 4v8m-4-4h8"/></svg>
+            </button>
+            <button type="button" class="laue-mode-btn" data-mode="move-peak" aria-pressed="false" aria-label="Move peak" title="Move peak">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="7" cy="17" r="3.5"/><path d="m12 12 7-7m-5 0h5v5"/></svg>
+            </button>
+            <button type="button" class="laue-mode-btn" data-mode="remove-peak" aria-pressed="false" aria-label="Remove peak" title="Remove peak">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="14" r="4"/><path d="M13 8h8"/></svg>
+            </button>
+          </div>
+          <div class="laue-mode-group" role="group" aria-label="Zones">
+            <button type="button" class="laue-mode-btn laue-visibility-btn" data-overlay="showZones" aria-pressed="true" aria-label="Show zones" title="Show or hide zones">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.5"/><path class="laue-visibility-slash" d="m3 3 18 18"/></svg>
+            </button>
+            <button type="button" class="laue-mode-btn" data-mode="add-zone" aria-pressed="false" aria-label="Add zone" title="Add zone">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="4.5" cy="17.5" r="2"/><circle cx="13.5" cy="11.5" r="2"/><path d="m6.2 16.4 5.6-3.8M18 2v7m-3.5-3.5h7"/></svg>
+            </button>
+            <button type="button" class="laue-mode-btn" data-mode="move-zone" aria-pressed="false" aria-label="Move zone" title="Move zone">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="4.5" cy="17.5" r="2"/><circle cx="13.5" cy="11.5" r="2"/><path d="m6.2 16.4 5.6-3.8m4.5-4.3L21 3m-4 0h4v4"/></svg>
+            </button>
+            <button type="button" class="laue-mode-btn" data-mode="remove-zone" aria-pressed="false" aria-label="Remove zone" title="Remove zone">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="4.5" cy="17.5" r="2"/><circle cx="13.5" cy="11.5" r="2"/><path d="m6.2 16.4 5.6-3.8m2.7-7.1h7"/></svg>
+            </button>
+          </div>
         </div>
         <div class="laue-status-slot">
           <p class="laue-status" id="laue-status" aria-live="polite"></p>
@@ -651,9 +720,9 @@
   <script src="../js/laue-spectrum.js?v=20261111"></script>
   <script src="../js/laue-xray-data.js?v=20261111"></script>
   <script src="../js/laue-xray-corrections.js?v=20261111"></script>
-  <script src="../js/laue-intensity.js?v=20261111"></script>
-  <script src="../js/laue-math.js?v=20261110"></script>
+  <script src="../js/laue-intensity.js?v=20261111-2"></script>
+  <script src="../js/laue-math.js?v=20261111"></script>
   <script src="../js/laue-formats.js?v=20261008-2"></script>
-  <script src="../js/laue-analysis.js?v=20261111-3"></script>
+  <script src="../js/laue-analysis.js?v=20261111-4"></script>
 </body>
 </html>

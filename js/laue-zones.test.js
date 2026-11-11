@@ -29,6 +29,42 @@ function rotationError(a,b){
   return Math.acos(Math.max(-1,Math.min(1,(trace-1)/2)))*180/Math.PI;
 }
 
+test('orientation identification recovers a distant orientation from peaks or zones, including mixed inputs with an outlier', async () => {
+  const crystal = { a: 4.1, b: 5.8, c: 7.2, alpha: 78, beta: 102, gamma: 112 };
+  const truth = { ...base, sampleOmega: 62, sampleChi: -19, samplePhi: 56,
+    sampleSigns: { omega: -1, chi: 1, phi: -1 }, detChi: 8, maxHklSq: 80 };
+  const start = { ...truth, sampleOmega: -35, sampleChi: 11, samplePhi: 0 };
+  const predicted = M.computePredictedPeaks(crystal, { ...truth }, size)
+    .filter(p => p.onImage && p.x > 30 && p.y > 30 && p.x < 995 && p.y < 740)
+    .sort((a, b) => a.hklSq - b.hklSq);
+  const spots = [];
+  for (const p of predicted) {
+    if (!spots.some(q => Math.hypot(q.x - p.x, q.y - p.y) < 35)) spots.push(p);
+    if (spots.length === 8) break;
+  }
+  const measured = spots.map((p, i) => ({ x: p.x + (i % 3 - 1) * .4, y: p.y + (i % 2 - .5) * .9 }));
+  const zones = knownZones(truth, crystal).slice(0, 4).map(({ p1, p2 }) => ({ p1, p2 }));
+  assert.ok(zones.length >= 3);
+  for (const [peaks, lines] of [[measured, []], [[], zones], [[measured[0], measured[2], { x: 321, y: 222 }], zones]]) {
+    const before = JSON.stringify({ start, peaks, lines });
+    const result = await M.identifyOrientations(crystal, start, size, peaks, lines, { toleranceDeg: .55 });
+    assert.equal(JSON.stringify({ start, peaks, lines }), before);
+    const best = result.candidates[0];
+    assert.ok(best, 'No orientation candidates');
+    const found = { ...start, sampleOmega: best.omega, sampleChi: best.chi, samplePhi: best.phi };
+    assert.ok(rotationError(found, truth) < .15, JSON.stringify(best));
+    assert.equal(best.matchedZones, lines.length);
+  }
+});
+
+test('orientation identification rejects parallel measurements and can cancel without results', async () => {
+  const zone = knownZones()[0];
+  await assert.rejects(M.identifyOrientations(cell, base, size, [], [zone, { p1: zone.p2, p2: zone.p1 }]), /nonparallel/);
+  const result = await M.identifyOrientations(cell, base, size, [], knownZones().slice(0, 3), { shouldCancel: () => true });
+  assert.equal(result.cancelled, true);
+  assert.equal(result.candidates.length, 0);
+});
+
 test('pixel inverse recovers scattering directions for tilted and rectangular detectors in both modes',()=>{
   for(const laueMode of ['backscatter','transmission'])for(const detChi of [0,12]){
     const cfg={...base,laueMode,detChi,detOmega:38};

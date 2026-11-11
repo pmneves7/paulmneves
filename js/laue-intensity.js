@@ -227,5 +227,5 @@
     return minimumOpacity + (maximumOpacity - minimumOpacity) * Math.min(1, relativeIntensity);
   }
 
-  global.LaueIntensity = { createModel, calculateSpots, allowedPredicate, markerOpacity };
+  global.LaueIntensity = { createModel, calculateSpots, allowedPredicate, symmetryOperations, markerOpacity };
 })(typeof window !== "undefined" ? window : globalThis);

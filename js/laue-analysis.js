@@ -7,6 +7,22 @@
   const IMAGE_STORE_NAME = "image";
   const IMAGE_CACHE_KEY = "last";
   const BLANK_DETECTOR_LONG_SIDE_PX = 1024;
+  const OVERLAY_CHECKBOXES = {
+    showBeamCenter: "laue-show-beam-center",
+    showObservedPeaks: "laue-show-observed-peaks",
+    showPredictedPeaks: "laue-show-predicted-peaks"
+  };
+  const EDIT_MODE_OVERLAYS = {
+    "beam-center": "showBeamCenter",
+    "move-rotation-center": "showBeamCenter",
+    "rotate-pattern": "showBeamCenter",
+    "add-peak": "showObservedPeaks",
+    "move-peak": "showObservedPeaks",
+    "remove-peak": "showObservedPeaks",
+    "add-zone": "showZones",
+    "move-zone": "showZones",
+    "remove-zone": "showZones"
+  };
   const INTENSITY_DEFAULTS = {
     enabled: false, sourceType: "xray", wavelengthMin: null, wavelengthMax: null,
     minimumPeakOpacity: 0.1, xraySpectrum: "w-continuum", tubeVoltageKv: 40,
@@ -32,6 +48,8 @@
   const statusEl = document.getElementById("laue-status");
   const loadError = document.getElementById("laue-load-error");
   const peaksTbody = document.getElementById("laue-peaks-tbody");
+  const identifyStatus = document.getElementById("laue-identify-status");
+  const identifyList = document.getElementById("laue-identify-candidates");
   const refineResult = document.getElementById("laue-refine-result");
   const idealResult = document.getElementById("laue-ideal-result");
 
@@ -72,6 +90,7 @@
       showBeamCenter: true,
       showObservedPeaks: true,
       showPredictedPeaks: true,
+      showZones: true,
       showPredictedLabels: true,
       showObservedLabels: true
     },
@@ -117,6 +136,7 @@
     view: { zoom: 1, fitScale: 1, centerX: null, centerY: null, tx: 0, ty: 0, totalScale: 1 },
     drag: null,
     curveDrag: null,
+    identificationRun: null,
     refinementUndo: null,
     lastLoadedFileName: ""
   };
@@ -128,6 +148,7 @@
   let blankLongSidePx = BLANK_DETECTOR_LONG_SIDE_PX;
 
   const modeButtons = Array.from(document.querySelectorAll(".laue-mode-btn[data-mode]"));
+  const visibilityButtons = Array.from(document.querySelectorAll(".laue-visibility-btn[data-overlay]"));
 
   function showError(msg) {
     if (!msg) {
@@ -511,9 +532,9 @@
     state.overlay.obsLineWidth = num("laue-obs-linewidth") || 2;
     state.overlay.obsRadius = num("laue-obs-radius") || 5;
     state.overlay.obsAlpha = readOverlayAlpha("laue-obs-alpha");
-    state.overlay.showBeamCenter = document.getElementById("laue-show-beam-center").checked;
-    state.overlay.showObservedPeaks = document.getElementById("laue-show-observed-peaks").checked;
-    state.overlay.showPredictedPeaks = document.getElementById("laue-show-predicted-peaks").checked;
+    for (const [key, id] of Object.entries(OVERLAY_CHECKBOXES)) {
+      state.overlay[key] = document.getElementById(id).checked;
+    }
     state.overlay.showPredictedLabels = document.getElementById("laue-show-predicted-labels").checked;
     state.overlay.showObservedLabels = document.getElementById("laue-show-observed-labels").checked;
     return state.overlay;
@@ -530,11 +551,35 @@
     document.getElementById("laue-obs-radius").value = o.obsRadius ?? 5;
     const obsAlpha = o.obsAlpha ?? o.observedAlpha ?? 0.8;
     document.getElementById("laue-obs-alpha").value = Math.round(obsAlpha * 100);
-    document.getElementById("laue-show-beam-center").checked = o.showBeamCenter !== false;
-    document.getElementById("laue-show-observed-peaks").checked = o.showObservedPeaks !== false;
-    document.getElementById("laue-show-predicted-peaks").checked = o.showPredictedPeaks !== false;
+    for (const [key, id] of Object.entries(OVERLAY_CHECKBOXES)) {
+      document.getElementById(id).checked = o[key] !== false;
+    }
     document.getElementById("laue-show-predicted-labels").checked = o.showPredictedLabels !== false;
     document.getElementById("laue-show-observed-labels").checked = o.showObservedLabels !== false;
+    syncVisibilityButtons();
+    const editingOverlay = EDIT_MODE_OVERLAYS[state.mode];
+    if (editingOverlay && o[editingOverlay] === false) setMode("view");
+  }
+
+  function syncVisibilityButtons() {
+    for (const button of visibilityButtons) {
+      button.setAttribute("aria-pressed", String(state.overlay[button.dataset.overlay] !== false));
+    }
+  }
+
+  function setOverlayVisibility(key, visible) {
+    state.overlay[key] = visible;
+    const checkboxId = OVERLAY_CHECKBOXES[key];
+    if (checkboxId) document.getElementById(checkboxId).checked = visible;
+    syncVisibilityButtons();
+  }
+
+  function changeOverlayVisibility(key, visible) {
+    setOverlayVisibility(key, visible);
+    // Leave editing mode when its handles or targets are hidden.
+    if (!visible && EDIT_MODE_OVERLAYS[state.mode] === key) setMode("view");
+    else redrawOverlays();
+    persistConfig();
   }
 
   function readCorrections() {
@@ -1475,9 +1520,9 @@
     const beamVp = imageToViewport(beam.x, beam.y);
     const beamR = state.instrument.beamRadius;
 
-    if (state.zones?.length || state.pendingZone) drawZoneOverlays();
+    if (overlay.showZones !== false && (state.zones?.length || state.pendingZone)) drawZoneOverlays();
 
-    if (overlay.showBeamCenter || state.mode === "beam-center") {
+    if (overlay.showBeamCenter) {
       overlayCtx.globalAlpha = 1;
       overlayCtx.strokeStyle = "rgb(255, 220, 0)";
       overlayCtx.lineWidth = 1;
@@ -1547,7 +1592,7 @@
       }
     }
 
-    if (state.rotationCenter || state.mode === "rotate-pattern" || state.mode === "move-rotation-center") {
+    if (overlay.showBeamCenter && (state.rotationCenter || state.mode === "rotate-pattern" || state.mode === "move-rotation-center")) {
       const center = rotationCenterPosition();
       const pos = imageToViewport(center.x, center.y);
       overlayCtx.globalAlpha = 1;
@@ -1862,7 +1907,7 @@
       writeCorrectionsToForm(state.corrections);
     }
     if (obj.overlay) {
-      state.overlay = { ...state.overlay, ...obj.overlay };
+      state.overlay = { ...state.overlay, showZones: true, ...obj.overlay };
       if (obj.overlay.observedAlpha != null && obj.overlay.obsAlpha == null) {
         state.overlay.obsAlpha = obj.overlay.observedAlpha;
       }
@@ -1982,6 +2027,122 @@
     if (state.observedPeaks.length) matchPeaks();
   }
 
+  function identificationInputs() {
+    const crystal = readCrystal(), config = buildConfig(readInstrument());
+    const imageSize = { width: state.displayData.width, height: state.displayData.height };
+    const peaks = state.observedPeaks.map(({ x, y }) => ({ x, y }));
+    const zones = state.zones.map(({ p1, p2 }) => ({ p1: { ...p1 }, p2: { ...p2 } }));
+    const toleranceDeg = num("laue-identify-tolerance");
+    const { detDistance, detWidth, detHeight, detOffsetX, detOffsetY, detOmega, detChi,
+      laueMode, maxHklSq, qMin, qMax, sampleSigns } = config;
+    // Candidate scores are independent of the current angles, so the user
+    // can switch between candidates without rerunning the search.
+    const fingerprint = JSON.stringify([crystal, imageSize, peaks, zones, toleranceDeg, detDistance,
+      detWidth, detHeight, detOffsetX, detOffsetY, detOmega, detChi, laueMode, maxHklSq, qMin, qMax, sampleSigns]);
+    return { crystal, config, imageSize, peaks, zones, toleranceDeg, fingerprint, image: state.rawData || state.displayData };
+  }
+
+  function identificationIsCurrent(inputs) {
+    return state.displayData && inputs.image === (state.rawData || state.displayData) &&
+      inputs.fingerprint === identificationInputs().fingerprint;
+  }
+
+  function showOrientationCandidates(result, inputs) {
+    const { candidates, peakCount, zoneCount } = result;
+    identifyStatus.textContent = candidates.length
+      ? `Found ${candidates.length} candidates. Select one to set the sample orientation.`
+      : "No candidate matched the measurements. Check the cell, detector geometry, or angular tolerance.";
+    candidates.forEach((candidate, i) => {
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+      const angles = document.createElement("strong");
+      const fit = document.createElement("span");
+      button.type = "button";
+      button.className = "button secondary";
+      button.setAttribute("aria-pressed", "false");
+      angles.textContent = `${i + 1}. Ω ${candidate.omega.toFixed(2)}° · χ ${candidate.chi.toFixed(2)}° · Φ ${candidate.phi.toFixed(2)}°`;
+      fit.textContent = [
+        peakCount ? `${candidate.matchedPeaks}/${peakCount} peaks` : "",
+        zoneCount ? `${candidate.matchedZones}/${zoneCount} zones` : "",
+        `${candidate.rmsDeg.toFixed(3)}° RMS`
+      ].filter(Boolean).join(" · ");
+      button.append(angles, fit);
+      item.append(button);
+      identifyList.append(item);
+      button.addEventListener("click", () => {
+        if (state.refinementRun) {
+          identifyStatus.textContent = "Wait for the current refinement to finish.";
+          return;
+        }
+        if (!identificationIsCurrent(inputs)) {
+          identifyList.replaceChildren();
+          identifyStatus.textContent = "The measurements or search settings changed. Find orientations again.";
+          return;
+        }
+        document.getElementById("laue-sample-omega").value = candidate.omega;
+        document.getElementById("laue-sample-chi").value = candidate.chi;
+        document.getElementById("laue-sample-phi").value = candidate.phi;
+        state.refinementUndo = null;
+        setRefinementUndoAvailable(false);
+        refineResult.textContent = "";
+        updatePredictions();
+        persistConfig();
+        for (const option of identifyList.querySelectorAll("button")) {
+          option.setAttribute("aria-pressed", String(option === button));
+        }
+        identifyStatus.textContent = `Applied candidate ${i + 1}. You can refine it in the next section.`;
+      });
+    });
+  }
+
+  async function runOrientationIdentification() {
+    if (!state.displayData || state.identificationRun) return;
+    if (state.refinementRun) {
+      identifyStatus.textContent = "Wait for the current refinement to finish.";
+      return;
+    }
+    const inputs = identificationInputs();
+    const { crystal, config, imageSize, peaks, zones, toleranceDeg } = inputs;
+    const run = { cancelled: false };
+    const startBtn = document.getElementById("laue-identify-btn");
+    const cancelBtn = document.getElementById("laue-identify-cancel-btn");
+    state.identificationRun = run;
+    startBtn.disabled = true;
+    cancelBtn.hidden = false;
+    identifyList.replaceChildren();
+    identifyStatus.textContent = "Preparing the orientation search…";
+    const yieldToBrowser = () => new Promise(resolve => window.setTimeout(resolve, 0));
+    try {
+      await yieldToBrowser();
+      let symmetryRotations = [];
+      try {
+        symmetryRotations = LaueIntensity.symmetryOperations(crystal).map(operation => operation.rotation);
+      } catch (_) { /* An unresolved space group leaves the identity symmetry. */ }
+      const result = await LaueMath.identifyOrientations(crystal, config, imageSize, peaks, zones, {
+        toleranceDeg,
+        symmetryRotations,
+        isAllowed: allowedPredicateForCrystal(crystal),
+        shouldCancel: () => run.cancelled || !identificationIsCurrent(inputs),
+        yieldToBrowser,
+        onProgress: ({ pair, totalPairs }) => {
+          identifyStatus.textContent = `Searching direction pairs ${pair}/${totalPairs}…`;
+        }
+      });
+      if (run.cancelled || result.cancelled || !identificationIsCurrent(inputs)) {
+        identifyStatus.textContent = run.cancelled ? "Orientation search cancelled."
+          : "The measurements or search settings changed. Find orientations again.";
+        return;
+      }
+      showOrientationCandidates(result, inputs);
+    } catch (error) {
+      identifyStatus.textContent = error.message || String(error);
+    } finally {
+      state.identificationRun = null;
+      startBtn.disabled = false;
+      cancelBtn.hidden = true;
+    }
+  }
+
   function snapshotRefinementInstrument() {
     const inst = readInstrument();
     return {
@@ -2021,6 +2182,10 @@
 
   async function runRefinement() {
     if (!state.displayData || state.refinementRun) return;
+    if (state.identificationRun) {
+      refineResult.textContent = "Wait for the orientation search to finish.";
+      return;
+    }
     const refineBtn = document.getElementById("laue-refine-btn");
     const cancelBtn = document.getElementById("laue-refine-cancel-btn");
     const settings = readRefinementSettings();
@@ -2699,12 +2864,19 @@
     [
       "laue-pred-color", "laue-pred-linewidth", "laue-pred-radius",
       "laue-obs-color", "laue-obs-linewidth", "laue-obs-radius", "laue-obs-alpha",
-      "laue-show-beam-center", "laue-show-observed-peaks", "laue-show-predicted-peaks",
       "laue-show-predicted-labels", "laue-show-observed-labels"
     ].forEach((id) => {
       document.getElementById(id).addEventListener("input", () => { readOverlaySettings(); redraw(); persistConfig(); });
       document.getElementById(id).addEventListener("change", () => { readOverlaySettings(); redraw(); persistConfig(); });
     });
+    for (const [key, id] of Object.entries(OVERLAY_CHECKBOXES)) {
+      const checkbox = document.getElementById(id);
+      checkbox.addEventListener("change", () => changeOverlayVisibility(key, checkbox.checked));
+    }
+    for (const button of visibilityButtons) {
+      const key = button.dataset.overlay;
+      button.addEventListener("click", () => changeOverlayVisibility(key, state.overlay[key] === false));
+    }
     document.querySelectorAll("#laue-intensity-controls input, #laue-intensity-controls select, #laue-pred-alpha")
       .forEach(el => {
         const update = () => { updateExpectedIntensities(); redraw(); persistConfig(); };
@@ -2812,7 +2984,15 @@
     canvas.addEventListener("contextmenu", onCanvasContextMenu);
 
     modeButtons.forEach((btn) => {
-      btn.addEventListener("click", () => setMode(btn.dataset.mode));
+      btn.addEventListener("click", () => {
+        const mode = btn.dataset.mode;
+        const editingOverlay = EDIT_MODE_OVERLAYS[mode];
+        if (editingOverlay && state.overlay[editingOverlay] === false) {
+          setOverlayVisibility(editingOverlay, true);
+          persistConfig();
+        }
+        setMode(mode);
+      });
     });
 
     document.querySelectorAll(
@@ -2865,6 +3045,10 @@
     });
 
     document.getElementById("laue-auto-detect-btn").addEventListener("click", runAutoDetect);
+    document.getElementById("laue-identify-btn").addEventListener("click", runOrientationIdentification);
+    document.getElementById("laue-identify-cancel-btn").addEventListener("click", () => {
+      if (state.identificationRun) state.identificationRun.cancelled = true;
+    });
     document.getElementById("laue-refine-btn").addEventListener("click", runRefinement);
     document.getElementById("laue-refine-cancel-btn").addEventListener("click", () => {
       if (state.refinementRun) state.refinementRun.cancelled = true;
