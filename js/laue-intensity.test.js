@@ -217,6 +217,30 @@ test('UI preserves CIF sites, symmetry and intensity settings across config roun
   assert.equal(restored.el('laue-show-expected-intensity').disabled,true);assert.equal(restored.s.state.crystalStructure.atoms.length,0);
 });
 
+test('beam circle spots use small dots and resizing the circle rescales the other spots', () => {
+  const {s, el} = uiFixture();
+  s.state.predictedPeaks[0].x = 18;
+  s.state.predictedPeaks[0].y = 24; // On the 30 px boundary.
+  s.applyCifData({...cell, atoms: [carbon]});
+  el('laue-show-expected-intensity').checked = true;
+  s.updateExpectedIntensities();
+  s.redrawOverlays();
+  assert.deepEqual(s.draws.map(({r}) => r), [2, 8]);
+  close(s.draws[1].alpha, .8);
+
+  s.state.instrument.beamRadius = 29;
+  s.draws = [];
+  s.redrawOverlays();
+  assert.deepEqual(s.draws.map(({r}) => r), [8, 8]);
+  close(s.draws[1].alpha, .1 + (.8 - .1) / 16);
+
+  s.state.instrument.beamRadius = 150;
+  s.draws = [];
+  s.redrawOverlays();
+  assert.deepEqual(s.draws.map(({r}) => r), [2, 2]);
+  assert.ok(s.draws.every(({filled, alpha}) => filled && alpha === .8));
+});
+
 test('invalid CIF upload is atomic, missing symmetry does not inherit silicon, and SG edits clear imported operations',()=>{
   const {s,el}=uiFixture();s.applyCifData({...cell,atoms:[carbon],symmetryOperations:['x,y,z']});
   const before=JSON.stringify(s.readCrystal());assert.throws(()=>s.applyCifData({a:10,atoms:[]}),/Cell lengths/);
@@ -267,7 +291,7 @@ test('opacity interpolates linearly within its bounds and never creates extinct 
   const {s,el}=uiFixture();s.applyCifData({...cell,atoms:[carbon]});
   el('laue-show-expected-intensity').checked=true;s.updateExpectedIntensities();s.redrawOverlays();
   close((s.draws[1].alpha-.1)/(s.draws[0].alpha-.1),1/16);assert.ok(s.draws.every(d=>d.r===8));
-  s.state.intensitySpots[0].relativeIntensity=0;s.draws=[];s.redrawOverlays();assert.equal(s.draws.length,1);
+  s.state.intensitySpots[0].intensity=0;s.draws=[];s.redrawOverlays();assert.equal(s.draws.length,1);
   el('laue-minimum-peak-opacity').value='90';s.updateExpectedIntensities();assert.equal(s.state.intensitySpots.length,0);
   assert.match(el('laue-expected-intensity-status').textContent,/Peak opacities/);
 });

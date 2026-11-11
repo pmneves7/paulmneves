@@ -1466,24 +1466,32 @@
       setOverlayStroke(overlayCtx, overlay.predColor, predA);
       overlayCtx.lineWidth = overlay.predLineWidth ?? 2;
       const intensity = state.expectedIntensity.enabled;
+      const insideBeamCircle = p => Math.hypot(p.x - beam.x, p.y - beam.y) <= beamR;
+      // Normalize the display outside the beam circle. Use image coordinates
+      // so zoom, pan and hiding the guide have no effect on the intensity scale.
+      const maxOutsideBeam = intensity ? state.intensitySpots.reduce((max, p) => {
+        return p.onImage && p.available && !insideBeamCircle(p) ? Math.max(max, p.intensity) : max;
+      }, 0) : 0;
       for (const p of intensity ? state.intensitySpots : state.predictedPeaks) {
         if (!p.onImage) continue;
-        if (intensity && (!p.available || !(p.relativeIntensity > 0))) continue;
+        if (intensity && (!p.available || !(p.intensity > 0))) continue;
         const pos = imageToViewport(p.x, p.y);
+        const inBeam = intensity && insideBeamCircle(p);
         let alpha = predA;
-        if (intensity) {
+        if (intensity && !inBeam) {
           try {
-            alpha = LaueIntensity.markerOpacity(p.relativeIntensity, state.expectedIntensity.minimumPeakOpacity, predA);
+            alpha = LaueIntensity.markerOpacity(p.intensity / maxOutsideBeam, state.expectedIntensity.minimumPeakOpacity, predA);
           } catch (_) { continue; } // A transient invalid opacity edit is reported by the controls.
         }
         if (alpha <= 0) continue;
         overlayCtx.beginPath();
-        overlayCtx.arc(pos.x, pos.y, overlay.predRadius, 0, Math.PI * 2);
+        const radius = inBeam ? Math.min(2, overlay.predRadius) : overlay.predRadius;
+        overlayCtx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
         if (intensity) {
           setOverlayFill(overlayCtx, overlay.predColor, alpha);
           overlayCtx.fill();
         } else overlayCtx.stroke();
-        if (overlay.showPredictedLabels) {
+        if (overlay.showPredictedLabels && !inBeam) {
           drawPeakIndexLabel(overlayCtx, pos, p.h, p.k, p.l, alpha);
         }
       }
