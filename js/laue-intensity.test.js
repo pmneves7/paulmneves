@@ -225,7 +225,7 @@ test('beam circle spots use small dots and resizing the circle rescales the othe
   el('laue-show-expected-intensity').checked = true;
   s.updateExpectedIntensities();
   s.redrawOverlays();
-  assert.deepEqual(s.draws.map(({r}) => r), [2, 8]);
+  assert.deepEqual(s.draws.map(({r}) => r), [6, 8]);
   close(s.draws[1].alpha, .8);
 
   s.state.instrument.beamRadius = 29;
@@ -237,7 +237,7 @@ test('beam circle spots use small dots and resizing the circle rescales the othe
   s.state.instrument.beamRadius = 150;
   s.draws = [];
   s.redrawOverlays();
-  assert.deepEqual(s.draws.map(({r}) => r), [2, 2]);
+  assert.deepEqual(s.draws.map(({r}) => r), [6, 6]);
   assert.ok(s.draws.every(({filled, alpha}) => filled && alpha === .8));
 });
 

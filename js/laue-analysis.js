@@ -1485,7 +1485,7 @@
         }
         if (alpha <= 0) continue;
         overlayCtx.beginPath();
-        const radius = inBeam ? Math.min(2, overlay.predRadius) : overlay.predRadius;
+        const radius = inBeam ? Math.min(6, overlay.predRadius) : overlay.predRadius;
         overlayCtx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
         if (intensity) {
           setOverlayFill(overlayCtx, overlay.predColor, alpha);
