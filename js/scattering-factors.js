@@ -241,7 +241,7 @@
     atoms.forEach((atom) => {
       const occupancy = occupancyValue(atom.occupancy);
       if (occupancy === 0) return;
-      const factor = atomicScatteringFactor(atom.element, options);
+      const factor = options.atomicFactor ? options.atomicFactor(atom.element) : atomicScatteringFactor(atom.element, options);
       if (factor.missing) missing.add(sanitizeElement(atom.element));
       const phase = 2 * Math.PI * (
         h * Number(atom.fractX || 0) +

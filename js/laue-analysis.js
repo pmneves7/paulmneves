@@ -7,6 +7,13 @@
   const IMAGE_STORE_NAME = "image";
   const IMAGE_CACHE_KEY = "last";
   const BLANK_DETECTOR_LONG_SIDE_PX = 1024;
+  const INTENSITY_DEFAULTS = {
+    enabled: false, sourceType: "xray", wavelengthMin: null, wavelengthMax: null,
+    minimumPeakOpacity: 0.1, xraySpectrum: "w-continuum", tubeVoltageKv: 40,
+    neutronSpectrum: "thermal", neutronTemperatureK: 300,
+    airWindowAttenuation: true, energyDependent: true,
+    incidentAirCm: null, beWindowMm: 0.5, detectorFilmUm: 25
+  };
 
   const canvas = document.getElementById("laue-canvas");
   const overlayCanvas = document.getElementById("laue-overlay-canvas");
@@ -71,9 +78,7 @@
     crystal: { a: 5.43, b: 5.43, c: 5.43, alpha: 90, beta: 90, gamma: 90, spaceGroup: "Fd-3m" },
     crystalMeta: { presetId: "si-diamond", structureModel: "diamond", chemicalFormula: "" },
     crystalStructure: { atoms: [], symmetryOperations: [], spaceGroupSetting: "", assumedP1: false },
-    expectedIntensity: { enabled: false, sourceType: "xray", wavelengthMin: 0.5, wavelengthMax: 4,
-      minimumPeakOpacity: 0.1, xraySpectrum: "cu-lines", tubeVoltageKv: 40, cuLineWidthEv: 3,
-      neutronSpectrum: "thermal", neutronTemperatureK: 300 },
+    expectedIntensity: { ...INTENSITY_DEFAULTS },
     intensitySpots: [],
     instrument: {
       detDistance: 150,
@@ -98,7 +103,7 @@
       beamRadius: 30,
       maxHklSq: 200,
       qMin: 0,
-      qMax: 10,
+      qMax: 25,
       peakThreshold: 100,
       peakMinRadius: 5,
       peakMatchRadius: 10
@@ -1182,15 +1187,23 @@
 
   function readIntensitySettings() {
     const source = document.getElementById("laue-intensity-source").value;
+    const optionalNumber = id => {
+      const value = document.getElementById(id).value;
+      return value === "" ? null : Number(value);
+    };
     state.expectedIntensity = {
       enabled: document.getElementById("laue-show-expected-intensity").checked,
       sourceType: source === "neutron" ? "neutron" : "xray",
-      wavelengthMin: Number(document.getElementById("laue-wavelength-min").value),
-      wavelengthMax: Number(document.getElementById("laue-wavelength-max").value),
+      wavelengthMin: optionalNumber("laue-wavelength-min"),
+      wavelengthMax: optionalNumber("laue-wavelength-max"),
       minimumPeakOpacity: Number(document.getElementById("laue-minimum-peak-opacity").value) / 100,
       xraySpectrum: document.getElementById("laue-xray-spectrum").value,
       tubeVoltageKv: Number(document.getElementById("laue-tube-voltage").value),
-      cuLineWidthEv: Number(document.getElementById("laue-cu-line-width").value),
+      airWindowAttenuation: document.getElementById("laue-xray-attenuation").checked,
+      energyDependent: document.getElementById("laue-xray-dispersion").checked,
+      incidentAirCm: optionalNumber("laue-incident-air"),
+      beWindowMm: Number(document.getElementById("laue-be-window").value),
+      detectorFilmUm: Number(document.getElementById("laue-detector-film").value),
       neutronSpectrum: document.getElementById("laue-neutron-spectrum").value,
       neutronTemperatureK: Number(document.getElementById("laue-neutron-temperature").value)
     };
@@ -1201,31 +1214,42 @@
     const settings = state.expectedIntensity;
     document.getElementById("laue-show-expected-intensity").checked = !!settings.enabled;
     document.getElementById("laue-intensity-source").value = settings.sourceType;
-    document.getElementById("laue-wavelength-min").value = settings.wavelengthMin;
-    document.getElementById("laue-wavelength-max").value = settings.wavelengthMax;
+    document.getElementById("laue-wavelength-min").value = settings.wavelengthMin ?? "";
+    document.getElementById("laue-wavelength-max").value = settings.wavelengthMax ?? "";
     document.getElementById("laue-minimum-peak-opacity").value = Number((settings.minimumPeakOpacity * 100).toFixed(6));
     document.getElementById("laue-xray-spectrum").value = settings.xraySpectrum;
     document.getElementById("laue-tube-voltage").value = settings.tubeVoltageKv;
-    document.getElementById("laue-cu-line-width").value = settings.cuLineWidthEv;
+    document.getElementById("laue-xray-attenuation").checked = settings.airWindowAttenuation;
+    document.getElementById("laue-xray-dispersion").checked = settings.energyDependent;
+    document.getElementById("laue-incident-air").value = settings.incidentAirCm ?? "";
+    document.getElementById("laue-be-window").value = settings.beWindowMm;
+    document.getElementById("laue-detector-film").value = settings.detectorFilmUm;
     document.getElementById("laue-neutron-spectrum").value = settings.neutronSpectrum;
     document.getElementById("laue-neutron-temperature").value = settings.neutronTemperatureK;
   }
 
-  function updateExpectedIntensities() {
+  function updateExpectedIntensities(isAllowed) {
     const settings = readIntensitySettings();
+    const xray = settings.sourceType === "xray";
     const hasAtoms = state.crystalStructure.atoms.length > 0;
     const checkbox = document.getElementById("laue-show-expected-intensity");
     checkbox.disabled = !hasAtoms;
     if (!hasAtoms) checkbox.checked = settings.enabled = false;
     for (const id of ["laue-intensity-source", "laue-wavelength-min", "laue-wavelength-max", "laue-minimum-peak-opacity",
-      "laue-xray-spectrum", "laue-tube-voltage", "laue-cu-line-width", "laue-neutron-spectrum", "laue-neutron-temperature"]) {
+      "laue-xray-spectrum", "laue-tube-voltage", "laue-neutron-spectrum", "laue-neutron-temperature",
+      "laue-xray-attenuation", "laue-xray-dispersion"]) {
       document.getElementById(id).disabled = !hasAtoms || !settings.enabled;
     }
-    document.getElementById("laue-xray-spectrum-fields").hidden = settings.sourceType !== "xray";
-    document.getElementById("laue-neutron-spectrum-fields").hidden = settings.sourceType !== "neutron";
+    for (const id of ["laue-incident-air", "laue-be-window", "laue-detector-film"]) {
+      document.getElementById(id).disabled = !settings.enabled || !xray || !settings.airWindowAttenuation;
+    }
+    document.getElementById("laue-xray-spectrum-fields").hidden = !xray;
+    document.getElementById("laue-xray-correction-fields").hidden = !xray;
+    document.getElementById("laue-attenuation-fields").hidden = !settings.airWindowAttenuation;
+    document.getElementById("laue-neutron-spectrum-fields").hidden = xray;
     document.getElementById("laue-tube-voltage-field").hidden = settings.xraySpectrum === "flat";
-    document.getElementById("laue-cu-line-width-field").hidden = settings.xraySpectrum !== "cu-lines";
     document.getElementById("laue-neutron-temperature-field").hidden = settings.neutronSpectrum !== "maxwell";
+    document.getElementById("laue-wavelength-max").placeholder = xray ? "6.2" : "8";
     document.getElementById("laue-pred-alpha-label").textContent = settings.enabled ? "Max opacity (%)" : "Opacity (%)";
     const note = document.getElementById("laue-expected-intensity-status");
     state.intensitySpots = [];
@@ -1240,15 +1264,26 @@
     try {
       LaueIntensity.markerOpacity(1, settings.minimumPeakOpacity, readOverlaySettings().predAlpha);
       const spectrum = LaueSpectrum.create(settings);
+      const band = LaueSpectrum.wavelengthBand(settings, spectrum);
       const crystal = readCrystal();
-      const key = JSON.stringify([crystal, settings.sourceType]);
-      if (intensityModelCache?.key !== key) intensityModelCache = { key, model: LaueIntensity.createModel(crystal, settings.sourceType) };
-      const result = LaueIntensity.calculateSpots(state.predictedPeaks, intensityModelCache.model, settings.wavelengthMin, settings.wavelengthMax, spectrum);
+      const energyDependent = xray && settings.energyDependent;
+      const key = JSON.stringify([crystal, settings.sourceType, energyDependent]);
+      if (intensityModelCache?.key !== key) {
+        intensityModelCache = { key, model: LaueIntensity.createModel(crystal, settings.sourceType, { energyDependent }) };
+      }
+      const transmission = xray && settings.airWindowAttenuation
+        ? LaueXrayCorrections.createTransmission(settings, state.instrument) : null;
+      const result = LaueIntensity.calculateSpots(state.predictedPeaks, intensityModelCache.model, band.min, band.max, spectrum, {
+        qMin: state.instrument.qMin,
+        qMax: state.instrument.qMax,
+        isAllowed: isAllowed ?? LaueIntensity.allowedPredicate(crystal),
+        transmission
+      });
       state.intensitySpots = result.spots;
       const visible = result.spots.filter(spot => spot.onImage && spot.available && spot.intensity > 0).length;
       const missing = result.unavailableSpots ? ` ${result.unavailableSpots} unavailable: missing factors for ${result.missingElements.join(", ")}.` : "";
       const symmetry = crystal.assumedP1 ? " P1 assumed (no CIF symmetry)." : "";
-      note.textContent = `${visible} visible spots · ${settings.wavelengthMin}–${settings.wavelengthMax} Å.${missing}${symmetry}`;
+      note.textContent = `${visible} visible spots · ${+band.min.toPrecision(4)}–${+band.max.toPrecision(4)} Å.${missing}${symmetry}`;
     } catch (error) {
       note.textContent = `Expected intensity unavailable: ${error.message}`;
     }
@@ -1271,7 +1306,7 @@
         imageSize,
         allowed
       );
-      updateExpectedIntensities();
+      updateExpectedIntensities(allowed);
       renderPeaksTable();
       const onImage = state.predictedPeaks.filter((p) => p.onImage).length;
       const total = state.predictedPeaks.length;
@@ -1804,10 +1839,11 @@
     // Radius-based legacy configs retain their shared radius and maximum
     // opacity; the obsolete minimum radius no longer affects rendering.
     const legacyMaxOpacity = obj.overlay?.predAlpha ?? state.overlay?.predAlpha ?? .8;
-    state.expectedIntensity = { enabled: false, sourceType: "xray", wavelengthMin: 0.5, wavelengthMax: 4,
-      minimumPeakOpacity: Math.max(0, Math.min(.1, legacyMaxOpacity)), xraySpectrum: "cu-lines", tubeVoltageKv: 40, cuLineWidthEv: 3,
-      neutronSpectrum: "thermal", neutronTemperatureK: 300, ...obj.expectedIntensity };
+    state.expectedIntensity = { ...INTENSITY_DEFAULTS,
+      minimumPeakOpacity: Math.max(0, Math.min(.1, legacyMaxOpacity)), ...obj.expectedIntensity };
     if (state.expectedIntensity.sourceType !== "neutron") state.expectedIntensity.sourceType = "xray";
+    if (state.expectedIntensity.xraySpectrum === "cu-lines") state.expectedIntensity.xraySpectrum = "w-lines";
+    if (state.expectedIntensity.xraySpectrum === "cu-continuum") state.expectedIntensity.xraySpectrum = "w-continuum";
     writeIntensitySettings();
     if (obj.instrument) {
       writeInstrumentToForm(migrateInstrumentConfig(obj.instrument));
@@ -2661,7 +2697,7 @@
     document.getElementById("laue-align-beam-btn").addEventListener("click", alignBeamHKL);
 
     [
-      "laue-pred-color", "laue-pred-linewidth", "laue-pred-radius", "laue-pred-alpha",
+      "laue-pred-color", "laue-pred-linewidth", "laue-pred-radius",
       "laue-obs-color", "laue-obs-linewidth", "laue-obs-radius", "laue-obs-alpha",
       "laue-show-beam-center", "laue-show-observed-peaks", "laue-show-predicted-peaks",
       "laue-show-predicted-labels", "laue-show-observed-labels"
@@ -2669,6 +2705,12 @@
       document.getElementById(id).addEventListener("input", () => { readOverlaySettings(); redraw(); persistConfig(); });
       document.getElementById(id).addEventListener("change", () => { readOverlaySettings(); redraw(); persistConfig(); });
     });
+    document.querySelectorAll("#laue-intensity-controls input, #laue-intensity-controls select, #laue-pred-alpha")
+      .forEach(el => {
+        const update = () => { updateExpectedIntensities(); redraw(); persistConfig(); };
+        el.addEventListener("input", update);
+        el.addEventListener("change", update);
+      });
 
     document.getElementById("laue-zoom-reset").addEventListener("click", () => resetViewToFit());
     document.getElementById("laue-rotation-center-reset").addEventListener("click", resetRotationCenter);

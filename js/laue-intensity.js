@@ -6,13 +6,38 @@
     return a;
   }
 
-  function directionKey(peak) {
+  function primitiveRay(peak) {
     const indices = [peak.h, peak.k, peak.l];
     if (!indices.every(Number.isInteger)) throw new Error("Laue indices must be integers.");
     const divisor = indices.reduce((a, b) => gcd(a, Math.abs(b)), 0);
     if (!divisor) throw new Error("The direct beam has no Laue intensity.");
     // Keep the sign: Friedel partners are different outgoing directions.
-    return indices.map(value => value / divisor || 0).join(",");
+    const direction = indices.map(value => value / divisor || 0);
+    return { direction, order: divisor, key: direction.join(",") };
+  }
+
+  function* rayHarmonics(peaks, wavelengthMin, wavelengthMax, options) {
+    const qMin = options.qMin ?? 0, qMax = options.qMax ?? Infinity;
+    const rays = new Set();
+    for (const peak of peaks) {
+      const { direction, order, key } = primitiveRay(peak);
+      if (rays.has(key)) continue;
+      rays.add(key);
+      const q0 = peak.q / order, lambda0 = peak.lambda * order;
+      const first = Math.max(1, Math.ceil(Math.max(qMin / q0, lambda0 / wavelengthMax) - 1e-10));
+      const last = Math.floor(Math.min(qMax / q0, lambda0 / wavelengthMin) + 1e-10);
+      if (!Number.isSafeInteger(last) || last - first > 10000) {
+        throw new Error("Too many harmonic orders. Narrow the Q or wavelength range.");
+      }
+      for (let n = first; n <= last; n += 1) {
+        const [h, k, l] = direction.map(index => index * n);
+        if (!options.isAllowed(h, k, l)) continue;
+        yield {
+          ...peak, h, k, l, hklSq: h * h + k * k + l * l,
+          q: q0 * n, lambda: lambda0 / n, g: peak.g?.map(value => value * n / order)
+        };
+      }
+    }
   }
 
   function symmetryOperations(crystal) {
@@ -65,7 +90,7 @@
     };
   }
 
-  function createModel(crystal, sourceType) {
+  function createModel(crystal, sourceType, options = {}) {
     if (!["xray", "neutron"].includes(sourceType)) throw new Error("Choose X-ray or neutron Laue.");
     const factors = global.ScatteringFactors;
     if (!factors) throw new Error("Scattering factors failed to load. Please refresh the page.");
@@ -82,6 +107,10 @@
     // H-M label is missing or P1. The shared expander otherwise special-cases P1.
     const atoms = factors.expandAtomSites({ ...crystal, spaceGroup: "", symmetryOperations: operations.map(operation => operation.text) });
     const cache = new Map();
+    const xray = sourceType === "xray";
+    const dispersive = xray && options.energyDependent;
+    const corrections = global.LaueXrayCorrections;
+    if (dispersive && !global.LaueXrayData) throw new Error("Energy-dependent atomic scattering data failed to load.");
     return {
       sourceType,
       reflectionIntensity(peak) {
@@ -91,22 +120,41 @@
         const sinTheta = peak.q * peak.lambda / (4 * Math.PI);
         if (!(sinTheta > 0 && sinTheta <= 1 + 1e-10)) throw new Error("Reflection does not satisfy Bragg's law.");
         const key = [peak.h, peak.k, peak.l, peak.q].join(",");
-        let factor = cache.get(key);
+        let factor = dispersive ? null : cache.get(key);
         if (!factor) {
           // Laue Q is 2π/d; Cromer–Mann uses s = sinθ/λ = 1/(2d).
-          factor = factors.structureFactor(peak.h, peak.k, peak.l, atoms, { sourceType, s: peak.q / (4 * Math.PI) });
+          const s = peak.q / (4 * Math.PI);
+          const energy = dispersive ? global.LaueSpectrum.HC_KEV_ANGSTROM / peak.lambda : null;
+          const elementFactors = new Map();
+          const atomicFactor = element => {
+            if (elementFactors.has(element)) return elementFactors.get(element);
+            let value = factors.atomicScatteringFactor(element, { sourceType, s });
+            if (xray && s > 2) {
+              const f0 = corrections?.highQFormFactor(element, s);
+              if (f0 != null) value = { re: f0, im: 0, missing: false };
+            }
+            if (dispersive && !value.missing) {
+              if (energy < 0.5 || energy > 300) throw new Error("Energy-dependent atomic scattering data cover 0.5–300 keV.");
+              const delta = corrections.dispersion(element, energy);
+              value = delta ? { re: value.re + delta[0], im: value.im + delta[1], missing: false }
+                : { ...value, missing: true };
+            }
+            elementFactors.set(element, value);
+            return value;
+          };
+          factor = factors.structureFactor(peak.h, peak.k, peak.l, atoms, { sourceType, s, atomicFactor });
           // Suppress roundoff remnants of exact basis cancellations, without
           // discarding physically weak reflections by a relative display cutoff.
           const amplitudeBound = atoms.reduce((sum, atom) => {
-            const f = factors.atomicScatteringFactor(atom.element, { sourceType, s: peak.q / (4 * Math.PI) });
+            const f = atomicFactor(atom.element);
             return sum + (atom.occupancy ?? 1) * Math.hypot(f.re, f.im);
           }, 0);
           if (factor.magnitude <= 1e-12 * amplitudeBound) factor = { ...factor, intensity: 0 };
-          cache.set(key, factor);
+          if (!dispersive) cache.set(key, factor);
         }
         if (factor.missingElements.length) return { intensity: null, missingElements: factor.missingElements };
         const cosTwoTheta = 1 - 2 * Math.min(1, sinTheta) ** 2;
-        const polarization = sourceType === "xray" ? (1 + cosTwoTheta ** 2) / 2 : 1;
+        const polarization = xray ? (1 + cosTwoTheta ** 2) / 2 : 1;
         // Stationary white-beam Laue integrated counts for flat particle flux
         // per unit wavelength. Do not use the monochromatic rocking factor.
         // https://single-crystal.ornl.gov/more/integration/index.html
@@ -117,26 +165,32 @@
     };
   }
 
-  function calculateSpots(peaks, model, wavelengthMin, wavelengthMax, spectrum) {
+  function calculateSpots(peaks, model, wavelengthMin, wavelengthMax, spectrum, options = {}) {
     if (!Number.isFinite(wavelengthMin) || !Number.isFinite(wavelengthMax) ||
         !(wavelengthMin > 0 && wavelengthMax > wavelengthMin)) {
       throw new Error("Wavelength limits must satisfy 0 < minimum < maximum.");
     }
     const groups = new Map();
     const missing = new Set();
-    for (const peak of peaks) {
+    // Max h²+k²+l² discovers rays. Each ray then contributes every
+    // symmetry-allowed order in the Q and wavelength bands.
+    const candidates = options.isAllowed ? rayHarmonics(peaks, wavelengthMin, wavelengthMax, options) : peaks;
+    for (const peak of candidates) {
       if (peak.lambda < wavelengthMin || peak.lambda > wavelengthMax) continue;
       const spectralDensity = spectrum ? spectrum.density(peak.lambda) : 1;
       if (!Number.isFinite(spectralDensity) || spectralDensity < 0) throw new Error("Incident spectral flux must be finite and nonnegative.");
       if (spectralDensity === 0) continue;
-      const key = directionKey(peak);
+      const transmission = options.transmission ? options.transmission(peak) : 1;
+      if (!Number.isFinite(transmission) || transmission < 0 || transmission > 1) throw new Error("Invalid X-ray transmission.");
+      if (transmission === 0) continue;
+      const { key } = primitiveRay(peak);
       let spot = groups.get(key);
       if (!spot) {
         spot = { ...peak, intensity: 0, reflections: [], available: true };
         groups.set(key, spot);
       }
       const result = model.reflectionIntensity(peak);
-      const intensity = result.intensity == null ? null : result.intensity * spectralDensity;
+      const intensity = result.intensity == null ? null : result.intensity * spectralDensity * transmission;
       if (intensity != null && !Number.isFinite(intensity)) throw new Error("Intensity is outside the numeric range.");
       spot.reflections.push({ ...peak, intensity });
       if (result.intensity == null) spot.available = false;

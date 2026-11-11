@@ -2860,6 +2860,10 @@ body.laue-page.laue-nav-hidden .laue-viewer-panel {
   margin-top: 0.5rem;
 }
 
+.laue-intensity-attenuation-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .laue-intensity-controls .tool-field {
   min-width: 0;
   margin-bottom: 0;

@@ -10,7 +10,7 @@
   <title>Laue analysis | Paul M. Neves</title>
   <link rel="canonical" href="https://paulmneves.com/tools/laue-analysis.html" />
   <link rel="icon" type="image/png" href="../media/favicon.png" />
-  <link rel="stylesheet" href="../css/site.css?v=20261110-2" />
+  <link rel="stylesheet" href="../css/site.css?v=20261111" />
 </head>
 <body class="laue-page">
   <header>
@@ -300,7 +300,7 @@
               </div>
               <div class="tool-field">
                 <label for="laue-q-max">Q max (Å⁻¹)</label>
-                <input type="number" id="laue-q-max" step="any" min="0" value="10" />
+                <input type="number" id="laue-q-max" step="any" min="0" value="25" />
               </div>
             </div>
             <div class="laue-action-row">
@@ -318,7 +318,15 @@
             </div>
             <p class="tool-note" id="laue-align-beam-result" aria-live="polite"></p>
 
-            <h3 class="laue-subheading">Predicted peak overlay</h3>
+          </div>
+            </div>
+          </details>
+        </section>
+
+        <section class="tool-section" id="laue-overlay-section">
+          <details class="tool-collapsible" id="laue-overlay-collapsible">
+            <summary class="tool-collapsible-summary">5. Predicted peak overlay</summary>
+            <div class="tool-collapsible-body">
             <div class="tool-grid laue-overlay-grid">
               <div class="tool-field">
                 <label for="laue-pred-color">Circle color</label>
@@ -342,7 +350,7 @@
               <label><input type="checkbox" id="laue-show-predicted-labels" checked /> Show index labels</label>
               <label><input type="checkbox" id="laue-show-beam-center" checked /> Show beam center</label>
             </div>
-            <div class="laue-intensity-controls">
+            <div class="laue-intensity-controls" id="laue-intensity-controls">
               <h3 class="laue-subheading">Expected Laue intensity</h3>
               <div class="laue-check-row">
                 <label><input type="checkbox" id="laue-show-expected-intensity" disabled aria-describedby="laue-expected-intensity-status" /> Opacity by intensity (CIF)</label>
@@ -357,11 +365,11 @@
                 </div>
                 <div class="tool-field">
                   <label for="laue-wavelength-min">λ min (Å)</label>
-                  <input type="number" id="laue-wavelength-min" aria-label="Minimum wavelength (Å)" min="0" step="any" value="0.5" disabled />
+                  <input type="number" id="laue-wavelength-min" aria-label="Minimum wavelength (Å)" min="0" step="any" placeholder="Auto" title="Blank uses the tube cutoff, 0.31 Å for flat X-rays, or 0.5 Å for neutrons." disabled />
                 </div>
                 <div class="tool-field">
                   <label for="laue-wavelength-max">λ max (Å)</label>
-                  <input type="number" id="laue-wavelength-max" aria-label="Maximum wavelength (Å)" min="0" step="any" value="4" disabled />
+                  <input type="number" id="laue-wavelength-max" aria-label="Maximum wavelength (Å)" min="0" step="any" placeholder="6.2" title="Blank uses 6.2 Å for X-rays or 8 Å for neutrons." disabled />
                 </div>
                 <div class="tool-field">
                   <label for="laue-minimum-peak-opacity">Min opacity (%)</label>
@@ -372,20 +380,14 @@
                 <div class="tool-field laue-intensity-spectrum-field">
                   <label for="laue-xray-spectrum">X-ray spectrum</label>
                   <select id="laue-xray-spectrum" aria-label="Incident X-ray spectrum" disabled>
-                    <option value="cu-lines" selected>Cu continuum + K lines</option>
-                    <option value="cu-continuum">Cu continuum</option>
-                    <option value="w-continuum">W continuum (no L lines)</option>
-                    <option value="w-lines">W continuum + K lines</option>
+                    <option value="w-continuum" selected>Tungsten continuum</option>
+                    <option value="w-lines">Tungsten continuum + K lines</option>
                     <option value="flat">Flat flux per Å</option>
                   </select>
                 </div>
                 <div id="laue-tube-voltage-field" class="tool-field">
                   <label for="laue-tube-voltage">Voltage (kV)</label>
                   <input type="number" id="laue-tube-voltage" aria-label="Tube voltage (kV)" min="0" step="any" value="40" disabled />
-                </div>
-                <div id="laue-cu-line-width-field" class="tool-field">
-                  <label for="laue-cu-line-width">FWHM (eV)</label>
-                  <input type="number" id="laue-cu-line-width" aria-label="Effective Cu line FWHM (eV)" min="0" step="any" value="3" disabled />
                 </div>
               </div>
               <div id="laue-neutron-spectrum-fields" class="laue-intensity-source-row" hidden>
@@ -408,37 +410,53 @@
                   <input type="number" id="laue-neutron-temperature" aria-label="Effective neutron temperature (K)" min="0" step="any" value="300" disabled />
                 </div>
               </div>
+              <div id="laue-xray-correction-fields">
+                <div class="laue-check-row">
+                  <label><input type="checkbox" id="laue-xray-attenuation" checked disabled /> Air &amp; window attenuation</label>
+                  <label><input type="checkbox" id="laue-xray-dispersion" checked disabled /> Energy-dependent scattering factors</label>
+                </div>
+                <div class="laue-intensity-source-row laue-intensity-attenuation-row" id="laue-attenuation-fields">
+                  <div class="tool-field">
+                    <label for="laue-incident-air">Incident air (cm)</label>
+                    <input type="number" id="laue-incident-air" min="0" step="any" placeholder="Auto" title="Blank estimates the incident air path from the detector distance. The outgoing air path is calculated from the geometry." disabled />
+                  </div>
+                  <div class="tool-field">
+                    <label for="laue-be-window">Be window (mm)</label>
+                    <input type="number" id="laue-be-window" min="0" step="any" value="0.5" disabled />
+                  </div>
+                  <div class="tool-field">
+                    <label for="laue-detector-film">PET equiv. (µm)</label>
+                    <input type="number" id="laue-detector-film" aria-label="PET-equivalent detector film (µm)" min="0" step="any" value="25" title="Effective PET thickness for the protector and any detector entrance covering." disabled />
+                  </div>
+                </div>
+              </div>
               <p class="tool-note" id="laue-expected-intensity-status" role="status" aria-live="polite">Load a CIF to enable intensities.</p>
               <!--
                 Source/model assumptions belong in code rather than the control panel.
-                All incident spectra are particle flux per Å. Cu uses the Kramers
-                continuum plus optional empirical K-line yields; windows, anode
-                self-absorption and beamline transmission are omitted. Narrow Cu
-                lines depend strongly on effective width and exact orientation.
-                Neutrons use Maxwellian/multi-Maxwellian moderator spectra or the
-                published polyethylene thermal + epithermal fit. Guides and filters
-                can change the spectrum reaching the sample. See laue-spectrum.js
-                for formulas, coefficients and primary reference links.
-                Intensities include occupancy, crystal symmetry, the Laue wavelength
-                factor and unpolarized X-ray polarization. Uniform detector efficiency
-                is assumed; sample absorption, extinction, thermal motion, anomalous
-                X-ray and magnetic neutron scattering are omitted.
-                Harmonics receive spectral weights before summing within the Q/HKL
-                limits. Peaks within the beam circle are small reference dots.
+                The W spectrum uses the Kramers continuum and optional K lines.
+                W L lines and anode self-absorption are omitted. Neutron presets
+                are incident flux per Å. See laue-spectrum.js for references.
+                Air, Be and PET use Beer–Lambert transmission; the assumed
+                incident air length defaults to the detector distance. Detector
+                gas efficiency, sample absorption, extinction, thermal motion,
+                and magnetic scattering are omitted. The optional f′ and f″
+                terms use Xraylib data at each harmonic's energy.
+                Max h²+k²+l² discovers spot directions. All orders in the Q and
+                wavelength ranges then contribute to their spot. Peaks within
+                the beam circle are small reference dots.
                 Other peaks share a radius and scale linearly in opacity between
                 the set bounds using the strongest spot outside the circle.
                 Exact-zero intensities stay hidden. Results are relative
                 strengths, not rates.
               -->
             </div>
-          </div>
             </div>
           </details>
         </section>
 
         <section class="tool-section" id="laue-peak-section">
           <details class="tool-collapsible" id="laue-peak-collapsible">
-            <summary class="tool-collapsible-summary">5. Peak detection &amp; matching</summary>
+            <summary class="tool-collapsible-summary">6. Peak detection &amp; matching</summary>
             <div class="tool-collapsible-body">
           <div id="laue-peak-param-fields">
           <div class="tool-grid">
@@ -491,7 +509,7 @@
 
         <section class="tool-section" id="laue-refinement-section">
           <details class="tool-collapsible" id="laue-refinement-collapsible">
-            <summary class="tool-collapsible-summary">6. Orientation refinement</summary>
+            <summary class="tool-collapsible-summary">7. Orientation refinement</summary>
             <div class="tool-collapsible-body">
           <p class="tool-note">Local fit from the current orientation using matched peaks and zones. Check their indices first; assignments stay fixed during the fit.</p>
           <div class="laue-check-row">
@@ -629,11 +647,13 @@
   <script src="../js/spacegroup-fields.js"></script>
   <script src="../js/scattering-extinctions.js"></script>
   <script src="../js/cromer-mann-data.js"></script>
-  <script src="../js/scattering-factors.js?v=20261008-3"></script>
-  <script src="../js/laue-spectrum.js?v=20261110-2"></script>
-  <script src="../js/laue-intensity.js?v=20261110-3"></script>
+  <script src="../js/scattering-factors.js?v=20261111"></script>
+  <script src="../js/laue-spectrum.js?v=20261111"></script>
+  <script src="../js/laue-xray-data.js?v=20261111"></script>
+  <script src="../js/laue-xray-corrections.js?v=20261111"></script>
+  <script src="../js/laue-intensity.js?v=20261111"></script>
   <script src="../js/laue-math.js?v=20261110"></script>
   <script src="../js/laue-formats.js?v=20261008-2"></script>
-  <script src="../js/laue-analysis.js?v=20261111-2"></script>
+  <script src="../js/laue-analysis.js?v=20261111-3"></script>
 </body>
 </html>

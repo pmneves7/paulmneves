@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const context = {}; context.window = context;
 for (const file of ['space-groups-data.js', 'spacegroup-settings-data.js', 'spacegroup-engine.js',
-  'cromer-mann-data.js', 'scattering-factors.js', 'cif-parser.js', 'laue-math.js', 'laue-spectrum.js', 'laue-intensity.js']) {
+  'cromer-mann-data.js', 'scattering-factors.js', 'cif-parser.js', 'laue-math.js', 'laue-spectrum.js', 'laue-xray-data.js', 'laue-xray-corrections.js', 'laue-intensity.js']) {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, file), 'utf8'), context);
 }
 const I = context.LaueIntensity, F = context.ScatteringFactors;
@@ -45,6 +45,48 @@ test('harmonics sum incoherently before on-image normalization and wavelength li
   assert.equal(I.calculateSpots([p],m,3,4).spots.length,0);
 });
 
+test('a discovered ray includes higher orders beyond the search cutoff within Q and wavelength limits', () => {
+  const centered = {...cell, spaceGroup: 'Im-3m', atoms: [carbon]};
+  const m = I.createModel(centered, 'neutron');
+  const seed = peak(2, 2), next = peak(4, 1);
+  const options = { qMin: 0, qMax: next.q, isAllowed: I.allowedPredicate(centered) };
+  const transmission = p => p.h === 4 ? .5 : 1;
+  const r = I.calculateSpots([seed], m, 1, 4, null, {...options, transmission});
+  assert.equal(r.spots[0].reflections.map(p => p.h).join(','), '2,4');
+  close(r.spots[0].intensity, m.reflectionIntensity(seed).intensity + .5 * m.reflectionIntensity(next).intensity);
+  assert.equal(I.calculateSpots([seed], m, 1, 4, null, {...options, qMax: next.q - .01}).spots[0].reflections.length, 1);
+  assert.equal(I.calculateSpots([seed], m, 1.01, 4, null, options).spots[0].reflections.length, 1);
+});
+
+test('X-ray dispersion uses photon energy and high-Q Rayleigh data cover orders outside Cromer–Mann', () => {
+  const ce = {...carbon, element: 'Ce'};
+  const crystal = {...cell, atoms: [ce]};
+  const wavelength = context.LaueSpectrum.HC_KEV_ANGSTROM / 6;
+  const p = peak(1, wavelength);
+  const f0 = F.atomicScatteringFactor('Ce', {sourceType: 'xray', s: p.q / (4*Math.PI)}).re;
+  const neutral = I.createModel(crystal, 'xray').reflectionIntensity(p).intensity;
+  const corrected = I.createModel(crystal, 'xray', {energyDependent: true}).reflectionIntensity(p).intensity;
+  // xraylib 4.3.0 Ce dispersion at 6 keV: f′ ≈ −10.427, f″ ≈ 9.719 electrons.
+  close(corrected / neutral, ((f0 - 10.427)**2 + 9.719**2) / f0**2, .002);
+  const highQ = I.createModel(crystal, 'xray').reflectionIntensity(peak(10, .20));
+  assert.ok(highQ.intensity > 0);
+  assert.equal(highQ.missingElements.length, 0);
+});
+
+test('air and window transmission includes outgoing path and film incidence angle', () => {
+  const xray = context.LaueXrayCorrections;
+  const settings = {incidentAirCm: 10, beWindowMm: .5, detectorFilmUm: 25};
+  const T = xray.createTransmission(settings, {detDistance: 150});
+  const hc = context.LaueSpectrum.HC_KEV_ANGSTROM;
+  const normal = {xLab: 0, yLab: 0, lambda: hc / 8};
+  assert.ok(T(normal) > T({...normal, lambda: hc / 4}));
+  assert.ok(T(normal) > T({...normal, xLab: 150}));
+  // Cross sections from xraylib at 8 keV and normal incidence.
+  const expected = Math.exp(-(.001205*25*9.918661 + .0924*1.123758 + .003475*6.749471));
+  close(T(normal), expected, .004);
+  assert.throws(() => xray.createTransmission({...settings, beWindowMm: -1}, {detDistance: 150}), /nonnegative/);
+});
+
 test('off-image strengths do not shrink visible dots, distinct rays do not merge, and Friedel signs are retained',()=>{
   const result=I.calculateSpots([peak(),peak(1,3,.5,{k:1,onImage:false}),peak(-1,1)],model(),.5,4);
   assert.equal(result.spots.length,3);close(result.spots[0].relativeIntensity,1);close(result.spots[2].relativeIntensity,1/16);
@@ -80,8 +122,8 @@ test('missing coefficients never masquerade as a complete structure or harmonic 
   const result=I.calculateSpots([peak()],m,.5,4);
   assert.equal(result.spots[0].intensity,null);assert.equal(result.unavailableSpots,1);
   assert.equal(result.missingElements.join(','),'Og');assert.equal(result.spots[0].relativeIntensity,0);
-  // s > 2 Å^-1 is beyond the shared X-ray factor parameterization.
-  const short=peak(2,.1,.5), xray=I.calculateSpots([peak(),short],model('xray'),.05,4);
+  // s > 25 Å^-1 is beyond both X-ray form factor tables.
+  const short=peak(2,.01,.5), xray=I.calculateSpots([peak(),short],model('xray'),.005,4);
   assert.equal(xray.spots[0].intensity,null);
   assert.equal(model('neutron',[{...carbon,element:'D'}]).reflectionIntensity(peak()).missingElements.length,0);
 });
@@ -169,10 +211,10 @@ function uiFixture() {
   for(const [id,value] of Object.entries({a:5,b:5,c:5,alpha:90,beta:90,gamma:90,spacegroup:'P1'}))el('laue-'+id).value=String(value);
   el('laue-intensity-source').value='neutron';el('laue-wavelength-min').value='.5';el('laue-wavelength-max').value='4';
   el('laue-minimum-peak-opacity').value='10';el('laue-xray-spectrum').value='flat';el('laue-neutron-spectrum').value='flat';
-  el('laue-tube-voltage').value='40';el('laue-cu-line-width').value='3';el('laue-neutron-temperature').value='300';
+  el('laue-tube-voltage').value='40';el('laue-neutron-temperature').value='300';
   const s={...context,document:{getElementById:el},spaceGroupFieldsLink:null,intensityModelCache:null,
     state:{crystalStructure:{atoms:[],symmetryOperations:[],spaceGroupSetting:'',assumedP1:false},crystalMeta:{},
-      expectedIntensity:{},predictedPeaks:[peak(),peak(-1,1)],intensitySpots:[],instrument:{beamRadius:30},observedPeaks:[],view:{},mode:'',displayData:{width:500,height:500},display:{},corrections:{}},
+      expectedIntensity:{},predictedPeaks:[peak(),peak(-1,1)],intensitySpots:[],instrument:{beamRadius:30,qMin:0,qMax:2*Math.PI,detDistance:150},observedPeaks:[],view:{},mode:'',displayData:{width:500,height:500},display:{},corrections:{}},
     overlayCanvas:{},canvasViewport:{clientWidth:500,clientHeight:500},draws:[],
     viewTotalScale:()=>1,beamCenterPosition:()=>({x:0,y:0}),imageToViewport:(x,y)=>({x,y}),syncOverlayCanvas(){},
     setOverlayStroke(ctx,color,alpha){ctx.strokeStyle=color;ctx.globalAlpha=alpha;},setOverlayFill(ctx,color,alpha){ctx.fillStyle=color;ctx.globalAlpha=alpha;},
@@ -185,6 +227,7 @@ function uiFixture() {
   s.overlayCtx={clearRect(){},beginPath(){},arc(x,y,r){s.draws.push({x,y,r});},fill(){Object.assign(s.draws.at(-1),{filled:true,alpha:this.globalAlpha});},stroke(){s.draws.at(-1).stroked=true;}};
   s.updatePredictions=()=>{s.state.crystal=s.readCrystal();s.updateExpectedIntensities();};
   vm.createContext(s);
+  vm.runInContext(text.slice(text.indexOf('  const INTENSITY_DEFAULTS'), text.indexOf('  const canvas')), s);
   for(const name of ['readCrystal','setCrystalMeta','clearCrystalPresetMeta','num','readIntensitySettings','writeIntensitySettings',
     'updateExpectedIntensities','saveConfigToObject','loadConfigFromObject','applyCifData','redrawOverlays','allowedPredicateForCrystal'])vm.runInContext(source(name),s);
   return {s,el};
@@ -196,7 +239,7 @@ test('UI enables only with CIF atoms, varies opacity at a fixed radius and retur
   el('laue-show-expected-intensity').checked=true;s.updateExpectedIntensities();s.redrawOverlays();
   assert.equal(s.draws.length,2);assert.ok(s.draws.every(d=>d.filled&&!d.stroked));
   assert.ok(s.draws.every(d=>d.r===8));
-  close(s.draws[0].alpha,.8);close(s.draws[1].alpha,.1+(.8-.1)/16);
+  close(s.draws[0].alpha,.8);close(s.draws[1].alpha,.1+(.8-.1)/17);
   assert.equal(el('laue-pred-alpha-label').textContent,'Max opacity (%)');
   assert.equal(el('laue-intensity-source').disabled,false);
   el('laue-show-expected-intensity').checked=false;s.updateExpectedIntensities();s.draws=[];s.redrawOverlays();
@@ -232,7 +275,7 @@ test('beam circle spots use small dots and resizing the circle rescales the othe
   s.draws = [];
   s.redrawOverlays();
   assert.deepEqual(s.draws.map(({r}) => r), [8, 8]);
-  close(s.draws[1].alpha, .1 + (.8 - .1) / 16);
+  close(s.draws[1].alpha, .1 + (.8 - .1) / 17);
 
   s.state.instrument.beamRadius = 150;
   s.draws = [];
@@ -275,8 +318,8 @@ test('each harmonic receives incident flux before the spot sum and no-flux refle
   const spectrum={density:lambda=>lambda===1?4:1};
   const spot=I.calculateSpots([p,harmonic],m,.5,4,spectrum).spots[0];
   close(spot.intensity,m.reflectionIntensity(p).intensity+m.reflectionIntensity(harmonic).intensity*4);
-  const cu=context.LaueSpectrum.create({sourceType:'xray',xraySpectrum:'cu-continuum',tubeVoltageKv:10});
-  const filtered=I.calculateSpots([p,harmonic],m,.5,4,cu);
+  const tungsten=context.LaueSpectrum.create({sourceType:'xray',xraySpectrum:'w-continuum',tubeVoltageKv:10});
+  const filtered=I.calculateSpots([p,harmonic],m,.5,4,tungsten);
   assert.equal(filtered.spots.length,1);assert.equal(filtered.spots[0].reflections.length,1);assert.equal(filtered.spots[0].h,1);
   for(const bad of [-1,NaN,Infinity]) assert.throws(()=>I.calculateSpots([p],m,.5,4,{density:()=>bad}),/spectral flux/);
 });
@@ -290,7 +333,7 @@ test('opacity interpolates linearly within its bounds and never creates extinct 
   for(const value of [-1,NaN,Infinity])assert.throws(()=>I.markerOpacity(value,.1,.8),/Peak opacities/);
   const {s,el}=uiFixture();s.applyCifData({...cell,atoms:[carbon]});
   el('laue-show-expected-intensity').checked=true;s.updateExpectedIntensities();s.redrawOverlays();
-  close((s.draws[1].alpha-.1)/(s.draws[0].alpha-.1),1/16);assert.ok(s.draws.every(d=>d.r===8));
+  close((s.draws[1].alpha-.1)/(s.draws[0].alpha-.1),1/17);assert.ok(s.draws.every(d=>d.r===8));
   s.state.intensitySpots[0].intensity=0;s.draws=[];s.redrawOverlays();assert.equal(s.draws.length,1);
   el('laue-minimum-peak-opacity').value='90';s.updateExpectedIntensities();assert.equal(s.state.intensitySpots.length,0);
   assert.match(el('laue-expected-intensity-status').textContent,/Peak opacities/);
@@ -300,17 +343,28 @@ test('spectrum and opacity settings persist while legacy radius configs migrate 
   const {s,el}=uiFixture();s.applyCifData({...cell,atoms:[carbon]});
   el('laue-show-expected-intensity').checked=true;el('laue-minimum-peak-opacity').value='15';
   el('laue-neutron-spectrum').value='maxwell';el('laue-neutron-temperature').value='45';
-  el('laue-xray-spectrum').value='cu-lines';el('laue-tube-voltage').value='35';el('laue-cu-line-width').value='5';
+  el('laue-xray-spectrum').value='w-lines';el('laue-tube-voltage').value='35';
+  el('laue-xray-attenuation').checked=false;el('laue-xray-dispersion').checked=true;
+  el('laue-incident-air').value='12';el('laue-be-window').value='.25';el('laue-detector-film').value='40';
   s.updateExpectedIntensities();const saved=JSON.parse(JSON.stringify(s.saveConfigToObject()));
   const restored=uiFixture();restored.s.loadConfigFromObject(saved);
   assert.equal(restored.el('laue-minimum-peak-opacity').value,15);
   assert.equal(restored.el('laue-neutron-temperature').value,45);assert.equal(restored.el('laue-tube-voltage').value,35);
-  assert.equal(restored.el('laue-xray-spectrum').value,'cu-lines');
+  assert.equal(restored.el('laue-xray-spectrum').value,'w-lines');
+  assert.equal(restored.el('laue-xray-attenuation').checked,false);
+  assert.equal(restored.el('laue-xray-dispersion').checked,true);
+  assert.equal(restored.el('laue-xray-correction-fields').hidden,true);
+  assert.equal(restored.el('laue-incident-air').value,12);
+  assert.equal(restored.el('laue-be-window').value,.25);
+  assert.equal(restored.el('laue-detector-film').value,40);
   assert.equal(restored.el('laue-xray-spectrum-fields').hidden,true);
   assert.equal(restored.el('laue-neutron-temperature-field').hidden,false);
   restored.s.loadConfigFromObject({crystal:cell});assert.equal(restored.el('laue-minimum-peak-opacity').value,10);
-  restored.s.loadConfigFromObject({crystal:cell,expectedIntensity:{enabled:true,minimumPeakRadius:100},overlay:{predRadius:6,predAlpha:.04}});
+  restored.s.loadConfigFromObject({crystal:cell,expectedIntensity:{enabled:true,minimumPeakRadius:100,xraySpectrum:'cu-lines'},overlay:{predRadius:6,predAlpha:.04}});
   assert.equal(restored.el('laue-minimum-peak-opacity').value,4);
+  assert.equal(restored.el('laue-xray-spectrum').value,'w-lines');
+  assert.equal(restored.el('laue-xray-attenuation').checked,true);
+  assert.equal(restored.el('laue-xray-dispersion').checked,true);
   assert.equal(restored.s.state.overlay.predRadius,6);assert.equal(restored.s.state.overlay.predAlpha,.04);
   assert.equal(restored.s.readIntensitySettings().minimumPeakRadius,undefined);
 });

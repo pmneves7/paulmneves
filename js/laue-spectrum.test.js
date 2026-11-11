@@ -7,7 +7,7 @@ const context = {}; context.window = context;
 vm.runInNewContext(fs.readFileSync(path.join(__dirname,'laue-spectrum.js'),'utf8'),context);
 const S=context.LaueSpectrum;
 function close(a,b,tolerance=1e-9) {assert.ok(Math.abs(a-b)<=tolerance*Math.max(1,Math.abs(b)),`${a} differs from ${b}`);}
-const xray=(kind='cu-continuum',voltage=40,width=3)=>S.create({sourceType:'xray',xraySpectrum:kind,tubeVoltageKv:voltage,cuLineWidthEv:width});
+const xray=(kind='w-continuum',voltage=40)=>S.create({sourceType:'xray',xraySpectrum:kind,tubeVoltageKv:voltage});
 const neutron=(kind='thermal',temperature=300)=>S.create({sourceType:'neutron',neutronSpectrum:kind,neutronTemperatureK:temperature});
 
 test('flat models preserve per-Angstrom photon and neutron flux',()=>{
@@ -16,42 +16,23 @@ test('flat models preserve per-Angstrom photon and neutron flux',()=>{
   }
 });
 
-test('Cu photon spectrum has correct voltage cutoff, wavelength Jacobian and continuum maximum',()=>{
-  const s=xray(), cutoff=S.HC_KEV_ANGSTROM/40;
-  close(s.density(cutoff*.9),0);close(s.density(cutoff),0);assert.ok(s.density(cutoff*1.1)>0);
-  const l1=.6,l2=1.2;
-  close(s.density(l1)/s.density(l2),((l1/cutoff-1)/l1**2)/((l2/cutoff-1)/l2**2));
-  const maximum=s.density(2*cutoff);
-  assert.ok(maximum>s.density(1.8*cutoff));assert.ok(maximum>s.density(2.2*cutoff));
-  assert.equal(xray('cu-continuum',10).density(1),0);assert.ok(xray('cu-continuum',20).density(1)>0);
-});
-
-test('Cu characteristic lines follow K-shell threshold, radiative rates and effective width',()=>{
-  const hc=S.HC_KEV_ANGSTROM, e1=8.0478,e2=8.0279;
-  const noLines=xray('cu-lines',8), continuum=xray('cu-continuum',8);
-  close(noLines.density(2),continuum.density(2));
-  const s=xray('cu-lines'), c=xray();
-  assert.ok(s.density(hc/e1)>c.density(hc/e1)*10);
-  assert.ok(s.density(hc/e1)>s.density(hc/e2));
-  assert.ok(s.density(hc/e1)>xray('cu-lines',40,30).density(hc/e1));
-  assert.equal(s.density(hc/41),0);
-  // Integrate the line contribution in ENERGY, undoing the dE/dλ Jacobian.
-  // Widening a Lorentzian changes its height but preserves integrated yield.
-  const integrate=width=>{
-    const line=xray('cu-lines',40,width);let sum=0;const lo=7,hi=10,n=30000,step=(hi-lo)/n;
-    for(let i=0;i<n;i++){const e=lo+(i+.5)*step,l=hc/e;sum+=(line.density(l)-c.density(l))*l*l/hc*step;}
-    return sum;
-  };
-  close(integrate(3),integrate(6),1e-5);
-});
-
 test('W continuum has the tungsten Z factor, voltage cutoff and photon-wavelength shape',()=>{
-  const w=xray('w-continuum'),cu=xray(),cutoff=S.HC_KEV_ANGSTROM/40;
+  const w=xray(),hc=S.HC_KEV_ANGSTROM,cutoff=hc/40;
   close(w.density(cutoff*.9),0);close(w.density(cutoff),0);
-  for(const l of [.4,.7,1,2,4]) close(w.density(l)/cu.density(l),74/29);
-  close(w.density(.6)/w.density(1.2),cu.density(.6)/cu.density(1.2));
+  for(const l of [.4,.7,1,2,4]) close(w.density(l),2e-6*74*(l/cutoff-1)*hc/l**2);
   assert.ok(w.density(2*cutoff)>w.density(1.9*cutoff));
   assert.match(w.description,/W tube, 40 kV/);assert.match(w.description,/Characteristic lines are omitted/);
+});
+
+test('automatic wavelength defaults follow the tube voltage and moderator mode',()=>{
+  const s10=xray('w-continuum',10);
+  close(S.wavelengthBand({sourceType:'xray'},s10).min,S.HC_KEV_ANGSTROM/10);
+  close(S.wavelengthBand({sourceType:'xray',wavelengthMin:.5},s10).min,S.HC_KEV_ANGSTROM/10);
+  close(S.wavelengthBand({sourceType:'xray',wavelengthMin:2},s10).min,2);
+  close(S.wavelengthBand({sourceType:'xray'},s10).max,6.2);
+  assert.throws(()=>S.wavelengthBand({sourceType:'xray',wavelengthMax:1},s10),/voltage is too low/);
+  const band=S.wavelengthBand({sourceType:'neutron'},neutron());
+  close(band.min,.5);close(band.max,8);
 });
 
 test('W K emission requires the K edge, not just enough voltage to emit a K-alpha-energy photon',()=>{
@@ -68,13 +49,12 @@ test('W K emission requires the K edge, not just enough voltage to emit a K-alph
   assert.match(line.description,/natural widths/);assert.match(line.description,/W L emission is omitted/);
 });
 
-test('W uses its own intrinsic K-line widths and does not inherit Cu width settings',()=>{
-  const hc=S.HC_KEV_ANGSTROM,s=xray('w-lines',80,0),other=xray('w-lines',80,300),continuum=xray('w-continuum',80);
+test('W uses its intrinsic K-line widths and integrated yields',()=>{
+  const hc=S.HC_KEV_ANGSTROM,s=xray('w-lines',80),continuum=xray('w-continuum',80);
   const excess=e=>{const l=hc/e;return (s.density(l)-continuum.density(l))*l*l/hc;};
   const center=59.3182,halfWidth=.04491/2;
   close(excess(center+halfWidth)/excess(center),.5,1e-4);
   close(excess(center-halfWidth)/excess(center),.5,1e-4);
-  close(s.density(hc/center),other.density(hc/center));
   // xraylib rates: W Kα2/Kα1 = 0.289170/0.502430.
   // Integrated yields, unlike peak heights, do not depend on line width.
   const expectedYield=4*Math.PI*1.2e-5*69.525**1.67*Math.exp(-.077*74)*(80/69.525-1);
@@ -111,11 +91,11 @@ test('polyethylene moderator spectrum reproduces the published thermal and epith
 });
 
 test('invalid source models and physical inputs fail explicitly',()=>{
-  assert.throws(()=>xray('cu-continuum',0),/voltage/);assert.throws(()=>xray('cu-lines',40,0),/FWHM/);
+  assert.throws(()=>xray('w-continuum',0),/voltage/);assert.throws(()=>xray('cu-lines'),/Unknown X-ray spectrum/);
   assert.throws(()=>neutron('maxwell',-1),/temperature/);assert.throws(()=>neutron('unknown'),/moderator/);
   assert.throws(()=>xray('unknown'),/X-ray spectrum/);
   assert.throws(()=>S.create({sourceType:'electron'}),/Choose X-ray or neutron/);
   for(const l of [0,-1,NaN,Infinity])assert.throws(()=>neutron().density(l),/Wavelength/);
   // Hidden, inactive parameters do not invalidate a flat spectrum.
-  close(xray('flat',0,0).density(1),1);close(neutron('flat',0).density(1),1);
+  close(xray('flat',0).density(1),1);close(neutron('flat',0).density(1),1);
 });
